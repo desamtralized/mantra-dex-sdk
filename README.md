@@ -84,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let simulation = client.simulate_swap(
         "pool123",
         Coin {
-            denom: "umantra".to_string(),
+            denom: "uom".to_string(),
             amount: Uint128::from(1000000u128),
         },
         "uusdt"
@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = client.swap(
         "pool123",
         Coin {
-            denom: "umantra".to_string(),
+            denom: "uom".to_string(),
             amount: Uint128::from(1000000u128),
         },
         "uusdt",
@@ -118,11 +118,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Provide liquidity
     let assets = vec![
         Coin {
-            denom: "umantra".to_string(),
+            denom: "uom".to_string(),
             amount: Uint128::from(1000000u128),
         },
         Coin {
-            denom: "uusdt".to_string(),
+            denom: "uusdc".to_string(),
             amount: Uint128::from(1000000u128),
         },
     ];
@@ -144,13 +144,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Execute multi-hop swap
     let operations = vec![
         SwapOperation {
-            pool_id: "pool123".to_string(),
-            denom_in: "umantra".to_string(),
-            denom_out: "uusdt".to_string(),
+            pool_id: "o.uom.uusdc".to_string(), 
+            denom_in: "uom".to_string(),
+            denom_out: "uusdc".to_string(),
         },
         SwapOperation {
             pool_id: "pool456".to_string(),
-            denom_in: "uusdt".to_string(),
+            denom_in: "uusdc".to_string(),
             denom_out: "uatom".to_string(),
         },
     ];
