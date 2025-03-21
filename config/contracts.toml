@@ -1,0 +1,29 @@
+# Mantra Testnet (mantra-dukong-1)
+# Last updated: 2024-11-14T15:26:36+0000
+# Chain ID: mantra-dukong-1
+# Deployer: mantra1x5nk33zpglp4ge6q9a8xx3zceqf4g8nvaggjmc
+# Block height: 923089
+
+[mantra-dukong]
+chain_id = "mantra-dukong-1"
+deployer = "mantra1x5nk33zpglp4ge6q9a8xx3zceqf4g8nvaggjmc"
+
+[mantra-dukong.epoch_manager]
+code_id = 90
+version = "1.0.0"
+address = "mantra128evmx0gxlam8jlmjq6f39z04dugl9wqxuayqmuctq56p4p8ruksn30429"
+
+[mantra-dukong.farm_manager]
+code_id = 109
+version = "1.0.0"
+address = "mantra1n8eczspq08pphp0xsfusecherwha570qpzt5cfzkgym45efchj2s8jrqf4"
+
+[mantra-dukong.fee_collector]
+code_id = 54
+version = "1.0.0"
+address = "mantra1mfp8jd8p9jyrt5pgkzn6jpf4ng0stc68jmpw3t35lqtgkkrv2fhs569tlr"
+
+[mantra-dukong.pool_manager]
+code_id = 532
+version = "1.2.0"
+address = "mantra1us7rryvauhpe82fff0t6gjthdraqmtm5gw8c808f6eqzuxmulacqzkzdal" 

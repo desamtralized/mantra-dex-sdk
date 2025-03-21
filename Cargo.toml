@@ -1,0 +1,35 @@
+[package]
+name = "mantra-dex-sdk"
+version = "0.1.0"
+edition = "2021"
+description = "A Rust SDK for interacting with the Mantra DEX on the Mantra Dukong Network"
+license = "MIT"
+
+[dependencies]
+mantra-dex-std = "2.1.4"
+cosmrs = { version = "0.21.1", features = ["rpc", "bip32", "cosmwasm"] }
+cosmwasm-std = "2.2.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+anyhow = "1.0"
+tokio = { version = "1.32", features = ["full"] }
+bip32 = "0.5"
+bip39 = "2.0"
+clap = { version = "4.4", features = ["derive"] }
+dotenv = "0.15"
+reqwest = { version = "0.11", features = ["json"] }
+futures = "0.3"
+hex = "0.4"
+toml = "0.8"
+dirs = "5.0"
+base64 = "0.21"
+rand = "0.8"
+config = "0.15.11"
+prost = "0.13.5"
+prost-types = "0.13.5"
+cosmos-sdk-proto = "0.26.1"
+serde_bytes = "0.11.17"
+
+[dev-dependencies]
+tokio-test = "0.4" 

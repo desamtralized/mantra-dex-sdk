@@ -1,0 +1,18 @@
+[test]
+# Test network to use (matches a section in network.toml)
+network = "mantra-dukong"
+
+[wallets]
+# Test wallets with pre-loaded funds for testing
+# Primary wallet used for most tests
+primary = ""
+# Secondary wallet for transfer/recipient tests
+secondary = ""
+
+[tokens]
+# Test tokens that should exist on the network
+# Native token
+uom = { name = "OM", symbol = "OM", decimals = 6, denom = "uom" }
+uusdc = { name = "USDC", symbol = "USDC", decimals = 6, denom = "factory/mantra1qwm8p82w0ygaz3duf0y56gjf8pwh5ykmgnqmtm/uUSDC" }
+uusdy = { name = "USDY", symbol = "USDY", decimals = 6, denom = "factory/mantra1qwm8p82w0ygaz3duf0y56gjf8pwh5ykmgnqmtm/uUSDY" }
+ausdy = { name = "aUSDY", symbol = "aUSDY", decimals = 6, denom ="factory/mantra1x5nk33zpglp4ge6q9a8xx3zceqf4g8nvaggjmc/aUSDY" }
