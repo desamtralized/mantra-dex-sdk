@@ -1,8 +1,9 @@
 mod utils;
 
 use cosmwasm_std::{Coin, Decimal, Uint128};
-use mantra_dex_sdk::MantraDexClient;
-use utils::{create_test_client, get_om_usdc_pool_id, init_test_env, load_test_config};
+use utils::test_utils::{
+    create_test_client, get_om_usdc_pool_id, init_test_env, load_test_config,
+};
 
 /// This test will only execute actual swaps if the EXECUTE_WRITES env var is set to true
 fn should_execute_writes() -> bool {
@@ -56,10 +57,22 @@ async fn test_swap_operation() {
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
     println!("Found pool ID: {}", pool_id);
-    
+
     println!("Getting token denoms...");
-    let uom_denom = test_config.tokens.get("uom").unwrap().denom.clone().unwrap();
-    let uusdc_denom = test_config.tokens.get("uusdc").unwrap().denom.clone().unwrap();
+    let uom_denom = test_config
+        .tokens
+        .get("uom")
+        .unwrap()
+        .denom
+        .clone()
+        .unwrap();
+    let uusdc_denom = test_config
+        .tokens
+        .get("uusdc")
+        .unwrap()
+        .denom
+        .clone()
+        .unwrap();
     println!("Token denoms: {} and {}", uom_denom, uusdc_denom);
 
     // Create offer asset (a small amount for testing)
@@ -67,7 +80,10 @@ async fn test_swap_operation() {
         denom: uom_denom.clone(),
         amount: Uint128::new(100_000), // 0.1 OM
     };
-    println!("Created offer asset: {} {}", offer_asset.amount, offer_asset.denom);
+    println!(
+        "Created offer asset: {} {}",
+        offer_asset.amount, offer_asset.denom
+    );
 
     println!("About to execute swap...");
     // Execute swap with timeout
@@ -78,8 +94,10 @@ async fn test_swap_operation() {
             offer_asset,
             &uusdc_denom, // The denom of the ask asset, should match one in the pool
             Some(Decimal::percent(1)), // 1% max spread
-        )
-    ).await {
+        ),
+    )
+    .await
+    {
         Ok(Ok(tx_response)) => {
             println!("Swap successful with txhash: {}", tx_response.txhash);
             assert_eq!(

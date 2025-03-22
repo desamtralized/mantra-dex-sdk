@@ -1,7 +1,9 @@
 mod utils;
 
 use mantra_dex_sdk::config::{MantraNetworkConfig, NetworkConstants};
-use utils::{create_test_network_config, init_test_env, load_contract_addresses, load_test_config};
+use utils::test_utils::{
+    create_test_network_config, init_test_env, load_contract_addresses, load_test_config,
+};
 
 #[test]
 fn test_network_config_loading() {

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine};
 use cosmos_sdk_proto::{
+    cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest, QueryAccountResponse},
     cosmos::bank::v1beta1::{QueryAllBalancesRequest, QueryAllBalancesResponse},
-    cosmos::auth::v1beta1::{QueryAccountRequest, QueryAccountResponse, BaseAccount},
     cosmwasm::wasm::v1::QuerySmartContractStateResponse,
 };
 use cosmrs::{
@@ -13,7 +13,7 @@ use cosmrs::{
         cosmwasm::wasm::v1::{MsgExecuteContract, QuerySmartContractStateRequest},
     },
     rpc::{Client as RpcClient, HttpClient},
-    tendermint::{block::Height, chain::Id, Hash},
+    tendermint::{chain::Id, Hash},
     tx::{Body, MessageExt, SignDoc, SignerInfo},
     Any,
 };
@@ -194,7 +194,8 @@ impl MantraDexClient {
         self.broadcast_tx(vec![Any {
             type_url: "/cosmwasm.wasm.v1.MsgExecuteContract".to_string(),
             value: execute_msg.to_bytes().unwrap(),
-        }]).await
+        }])
+        .await
     }
 
     /// Broadcast a transaction to the network
@@ -211,15 +212,13 @@ impl MantraDexClient {
         // Get account info for signing
         println!("Getting account info for {}", wallet.address().unwrap());
         let addr = wallet.address().unwrap().to_string();
-        
+
         // Create request using the proper protobuf type
-        let request = QueryAccountRequest {
-            address: addr,
-        };
-        
+        let request = QueryAccountRequest { address: addr };
+
         // Encode the request to protobuf
         let encoded_request = request.encode_to_vec();
-        
+
         let account_info = rpc_client
             .abci_query(
                 Some("/cosmos.auth.v1beta1.Query/Account".to_string()),
@@ -229,25 +228,28 @@ impl MantraDexClient {
             )
             .await
             .map_err(|e| Error::Rpc(format!("Failed to get account info: {}", e)))?;
-        
+
         println!("Account info: {:?}", account_info);
-        
+
         if !account_info.code.is_ok() {
-            return Err(Error::Rpc(format!("Account query failed: {}", account_info.log)));
+            return Err(Error::Rpc(format!(
+                "Account query failed: {}",
+                account_info.log
+            )));
         }
-        
+
         // Decode the response using the correct protobuf type
         let account_response = QueryAccountResponse::decode(account_info.value.as_slice())
             .map_err(|e| Error::Rpc(format!("Failed to decode account response: {}", e)))?;
-            
+
         // Extract the account data - account.value contains a serialized BaseAccount
         let account_any = account_response.account.unwrap();
         println!("Account type_url: {}", account_any.type_url);
-        
+
         // Decode the BaseAccount from the Any object's value
         let base_account = BaseAccount::decode(account_any.value.as_slice())
             .map_err(|e| Error::Rpc(format!("Failed to decode BaseAccount: {}", e)))?;
-        
+
         println!("Base account: {:?}", base_account);
 
         let account_number = base_account.account_number;

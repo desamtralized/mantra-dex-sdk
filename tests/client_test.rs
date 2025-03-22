@@ -2,7 +2,10 @@ mod utils;
 
 use cosmwasm_std::{Coin, Uint128};
 use mantra_dex_sdk::{MantraDexClient, MantraWallet};
-use utils::{create_test_client, create_test_network_config, get_om_usdc_pool_id, init_test_env, load_test_config};
+use utils::test_utils::{
+    create_test_client, create_test_network_config, get_om_usdc_pool_id, init_test_env,
+    load_test_config,
+};
 
 #[tokio::test]
 async fn test_client_creation() {
@@ -143,8 +146,20 @@ async fn test_client_simulate_swap() {
     let pool_id = get_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
-    let uom_denom = test_config.tokens.get("uom").unwrap().denom.clone().unwrap();
-    let uusdc_denom = test_config.tokens.get("uusdc").unwrap().denom.clone().unwrap();
+    let uom_denom = test_config
+        .tokens
+        .get("uom")
+        .unwrap()
+        .denom
+        .clone()
+        .unwrap();
+    let uusdc_denom = test_config
+        .tokens
+        .get("uusdc")
+        .unwrap()
+        .denom
+        .clone()
+        .unwrap();
 
     // Create offer asset
     let offer_asset = Coin {
@@ -154,11 +169,7 @@ async fn test_client_simulate_swap() {
 
     // Simulate swap
     let simulation_result = client
-        .simulate_swap(
-            &pool_id,
-            offer_asset,
-            &uusdc_denom,
-        )
+        .simulate_swap(&pool_id, offer_asset, &uusdc_denom)
         .await;
 
     // This should succeed if the pool exists and the RPC works
