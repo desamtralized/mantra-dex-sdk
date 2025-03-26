@@ -31,27 +31,7 @@ mantra-dex-sdk = "0.1.0"
 use mantra_dex_sdk::{MantraDexClient, MantraNetworkConfig};
 
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Option 1: Use predefined network configurations
-    let config = MantraNetworkConfig::default_mainnet(); // or MantraNetworkConfig::default_testnet()
-    
-    // Option 2: Create custom network configuration
-    let custom_config = MantraNetworkConfig::with_default_contracts(
-        "custom-network".to_string(),
-        "custom-network-1".to_string(),
-        "https://rpc.custom-network.example.com/".to_string(),
-        0.025, // gas price
-        1.3,   // gas adjustment
-        "udenom".to_string(), // native token denom
-    );
-    
-    // Option 3: Set contract addresses
-    let config_with_contracts = MantraNetworkConfig::default_mainnet()
-        .with_pool_manager("contract_address_here".to_string())
-        .with_farm_manager(Some("farm_manager_address".to_string()));
-    
-    // Create client with any of the configurations
-    let client = MantraDexClient::new(config).await?;
-    
+    /// placeholder
     Ok(())
 }
 ```

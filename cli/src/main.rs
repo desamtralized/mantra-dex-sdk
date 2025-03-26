@@ -87,7 +87,7 @@ async fn main() -> Result<(), CliError> {
     };
 
     // Load or create config
-    let mut config = CliConfig::load_or_create(&config_path)?;
+    let mut config = CliConfig::load(&config_path)?;
     
     // Check if interactive mode is enabled
     let interactive = !std::env::args().any(|arg| arg == "--no-interactive");
@@ -154,10 +154,9 @@ async fn main() -> Result<(), CliError> {
         let cli = Cli::parse();
         
         // Update config with any CLI overrides
-        if let Some(path) = cli.config {
+        if let Some(_) = cli.config {
             // Load the new config but preserve any session password
             let session_password = config.get_session_password().map(String::from);
-            config = CliConfig::load_or_create(&std::path::PathBuf::from(path))?;
             
             // Restore the session password
             if let Some(password) = session_password {
@@ -271,7 +270,8 @@ async fn process_command(
                     
                     // If the command succeeded, reload config and check for password capture
                     if result.is_ok() {
-                        if let Ok(updated_config) = CliConfig::load_or_create(&config_path.to_path_buf()) {
+                        let config_path_buf = config_path.to_path_buf();
+                        if let Ok(updated_config) = CliConfig::load(&config_path_buf) {
                             // Keep the session password when updating the config
                             let session_password = config.get_session_password().map(String::from);
                             *config = updated_config;
@@ -332,7 +332,7 @@ async fn process_command(
             // If command succeeded, reload the config to get any updates
             let config_path_buf = config_path.to_path_buf();
             if result.is_ok() && !is_wallet_command {
-                if let Ok(updated_config) = CliConfig::load_or_create(&config_path_buf) {
+                if let Ok(updated_config) = CliConfig::load(&config_path_buf) {
                     // Keep the session password when updating the config
                     let session_password = config.get_session_password().map(String::from);
                     *config = updated_config;

@@ -45,16 +45,6 @@ pub struct TokenInfo {
 }
 
 impl CliConfig {
-    /// Create a new configuration with default values
-    pub fn new() -> Self {
-        Self {
-            network: MantraNetworkConfig::default(),
-            wallets: HashMap::new(),
-            active_wallet: None,
-            tokens: HashMap::new(),
-            session_password: None,
-        }
-    }
 
     /// Load configuration from a file
     pub fn load(path: &PathBuf) -> Result<Self, CliError> {
@@ -79,17 +69,6 @@ impl CliConfig {
 
         fs::write(path, content)?;
         Ok(())
-    }
-
-    /// Load configuration or create a new one if not found
-    pub fn load_or_create(path: &PathBuf) -> Result<Self, CliError> {
-        if path.exists() {
-            Self::load(path)
-        } else {
-            let config = Self::new();
-            config.save(path)?;
-            Ok(config)
-        }
     }
 
     /// Get the default configuration file path

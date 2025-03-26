@@ -123,26 +123,6 @@ impl MantraNetworkConfig {
         }
     }
 
-    /// Create a network config with default contract addresses
-    pub fn with_default_contracts(
-        network_name: String,
-        network_id: String,
-        rpc_url: String,
-        gas_price: f64,
-        gas_adjustment: f64,
-        native_denom: String,
-    ) -> Self {
-        Self::new(
-            network_name,
-            network_id,
-            rpc_url,
-            gas_price,
-            gas_adjustment,
-            native_denom,
-            ContractAddresses::default(),
-        )
-    }
-
     /// Create a new network config from network constants
     pub fn from_constants(constants: &NetworkConstants) -> Self {
         Self {
@@ -187,20 +167,6 @@ impl MantraNetworkConfig {
     }
 }
 
-impl Default for MantraNetworkConfig {
-    fn default() -> Self {
-        // Create defaults directly instead of trying to load from file first
-        Self::with_default_contracts(
-            "mantra-dukong".to_string(),
-            "mantra-dukong-1".to_string(),
-            "https://rpc.dukong.mantrachain.io/".to_string(),
-            0.025,
-            1.3,
-            "uom".to_string(),
-        )
-    }
-}
-
 /// Complete configuration with wallet info
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -226,14 +192,6 @@ pub struct TokenInfo {
 }
 
 impl Config {
-    /// Create a new configuration with default values
-    pub fn new() -> Self {
-        Self {
-            network: MantraNetworkConfig::default(),
-            mnemonic: None,
-            tokens: HashMap::new(),
-        }
-    }
 
     /// Create a new configuration with the specified network
     pub fn with_network(network: MantraNetworkConfig) -> Self {
