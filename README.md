@@ -31,7 +31,16 @@ mantra-dex-sdk = "0.1.0"
 use mantra_dex_sdk::{MantraDexClient, MantraNetworkConfig};
 
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// placeholder
+    // Initialize client with direct network parameters
+    let client = MantraDexClient::new_with_params(
+        "mantra-dukong",
+        "mantra-dukong-1",
+        "https://rpc.dukong.mantrachain.io/",
+        0.025,
+        1.3,
+        "uom",
+        "mantra1us7rryvauhpe82fff0t6gjthdraqmtm5gw8c808f6eqzuxmulacqzkzdal"
+    ).await?;
     Ok(())
 }
 ```
