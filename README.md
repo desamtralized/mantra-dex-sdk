@@ -12,6 +12,8 @@ This SDK provides a comprehensive set of tools for developers to easily interact
 - Manage wallets and sign transactions
 - Query balances and account information
 
+The SDK is designed to be used without requiring configuration files - all network parameters can be passed directly when initializing the client. This makes it easy to integrate into CLI applications, web services, or other tools without managing external configuration.
+
 ## Installation
 
 Add to your `Cargo.toml`:
@@ -29,10 +31,25 @@ mantra-dex-sdk = "0.1.0"
 use mantra_dex_sdk::{MantraDexClient, MantraNetworkConfig};
 
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create network configuration
-    let config = MantraNetworkConfig::default_testnet(); // or MantraNetworkConfig::default_mainnet()
+    // Option 1: Use predefined network configurations
+    let config = MantraNetworkConfig::default_mainnet(); // or MantraNetworkConfig::default_testnet()
     
-    // Create client
+    // Option 2: Create custom network configuration
+    let custom_config = MantraNetworkConfig::with_default_contracts(
+        "custom-network".to_string(),
+        "custom-network-1".to_string(),
+        "https://rpc.custom-network.example.com/".to_string(),
+        0.025, // gas price
+        1.3,   // gas adjustment
+        "udenom".to_string(), // native token denom
+    );
+    
+    // Option 3: Set contract addresses
+    let config_with_contracts = MantraNetworkConfig::default_mainnet()
+        .with_pool_manager("contract_address_here".to_string())
+        .with_farm_manager(Some("farm_manager_address".to_string()));
+    
+    // Create client with any of the configurations
     let client = MantraDexClient::new(config).await?;
     
     Ok(())

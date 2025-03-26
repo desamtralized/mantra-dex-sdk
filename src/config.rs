@@ -25,7 +25,26 @@ pub struct NetworkConstants {
 }
 
 impl NetworkConstants {
-    /// Load network constants from the configuration file
+    /// Create a new NetworkConstants with specified values
+    pub fn new(
+        network_name: String,
+        network_id: String,
+        default_rpc: String,
+        default_gas_price: f64,
+        default_gas_adjustment: f64,
+        native_denom: String,
+    ) -> Self {
+        Self {
+            network_name,
+            network_id,
+            default_rpc,
+            default_gas_price,
+            default_gas_adjustment,
+            native_denom,
+        }
+    }
+
+    /// Load network constants from the configuration file (legacy method)
     pub fn load(network: &str) -> Result<Self, ConfigError> {
         let config_dir = env::var("MANTRA_CONFIG_DIR").unwrap_or_else(|_| "config".to_string());
 
@@ -36,11 +55,6 @@ impl NetworkConstants {
 
         // Extract the network section
         settings.get::<NetworkConstants>(network)
-    }
-
-    /// Get the default Mantra Dukong network constants
-    pub fn default_dukong() -> Result<Self, ConfigError> {
-        Self::load("mantra-dukong")
     }
 }
 
@@ -88,6 +102,47 @@ pub struct MantraNetworkConfig {
 }
 
 impl MantraNetworkConfig {
+    /// Create a new network config with specified values
+    pub fn new(
+        network_name: String,
+        network_id: String,
+        rpc_url: String,
+        gas_price: f64,
+        gas_adjustment: f64,
+        native_denom: String,
+        contracts: ContractAddresses,
+    ) -> Self {
+        Self {
+            network_name,
+            network_id,
+            rpc_url,
+            gas_price,
+            gas_adjustment,
+            native_denom,
+            contracts,
+        }
+    }
+
+    /// Create a network config with default contract addresses
+    pub fn with_default_contracts(
+        network_name: String,
+        network_id: String,
+        rpc_url: String,
+        gas_price: f64,
+        gas_adjustment: f64,
+        native_denom: String,
+    ) -> Self {
+        Self::new(
+            network_name,
+            network_id,
+            rpc_url,
+            gas_price,
+            gas_adjustment,
+            native_denom,
+            ContractAddresses::default(),
+        )
+    }
+
     /// Create a new network config from network constants
     pub fn from_constants(constants: &NetworkConstants) -> Self {
         Self {
@@ -100,22 +155,73 @@ impl MantraNetworkConfig {
             contracts: ContractAddresses::default(),
         }
     }
+
+    /// Create a default configuration for Mantra Dukong Mainnet
+    pub fn default_mainnet() -> Self {
+        Self::with_default_contracts(
+            "mantra-dukong".to_string(),
+            "mantra-dukong-1".to_string(),
+            "https://rpc.dukong.mantrachain.io/".to_string(),
+            0.025,
+            1.3,
+            "uom".to_string(),
+        )
+    }
+
+    /// Create a default configuration for Mantra Testnet
+    pub fn default_testnet() -> Self {
+        Self::with_default_contracts(
+            "mantra-testnet".to_string(),
+            "mantra-testnet-1".to_string(),
+            "https://rpc.testnet.mantrachain.io/".to_string(),
+            0.025,
+            1.3,
+            "uom".to_string(),
+        )
+    }
+
+    /// Update contract addresses
+    pub fn with_contracts(mut self, contract_addresses: ContractAddresses) -> Self {
+        self.contracts = contract_addresses;
+        self
+    }
+
+    /// Set the pool manager contract address
+    pub fn with_pool_manager(mut self, pool_manager: String) -> Self {
+        self.contracts.pool_manager = pool_manager;
+        self
+    }
+
+    /// Set the farm manager contract address
+    pub fn with_farm_manager(mut self, farm_manager: Option<String>) -> Self {
+        self.contracts.farm_manager = farm_manager;
+        self
+    }
+
+    /// Set the fee collector contract address
+    pub fn with_fee_collector(mut self, fee_collector: Option<String>) -> Self {
+        self.contracts.fee_collector = fee_collector;
+        self
+    }
+
+    /// Set the epoch manager contract address
+    pub fn with_epoch_manager(mut self, epoch_manager: Option<String>) -> Self {
+        self.contracts.epoch_manager = epoch_manager;
+        self
+    }
 }
 
 impl Default for MantraNetworkConfig {
     fn default() -> Self {
-        match NetworkConstants::default_dukong() {
-            Ok(constants) => Self::from_constants(&constants),
-            Err(_) => Self {
-                network_name: "mantra-dukong".to_string(),
-                network_id: "mantra-dukong-1".to_string(),
-                rpc_url: "https://rpc.dukong.mantrachain.io/".to_string(),
-                gas_price: 0.025,
-                gas_adjustment: 1.3,
-                native_denom: "uom".to_string(),
-                contracts: ContractAddresses::default(),
-            },
-        }
+        // Create defaults directly instead of trying to load from file first
+        Self::with_default_contracts(
+            "mantra-dukong".to_string(),
+            "mantra-dukong-1".to_string(),
+            "https://rpc.dukong.mantrachain.io/".to_string(),
+            0.025,
+            1.3,
+            "uom".to_string(),
+        )
     }
 }
 
@@ -153,6 +259,24 @@ impl Config {
         }
     }
 
+    /// Create a new configuration with the specified network
+    pub fn with_network(network: MantraNetworkConfig) -> Self {
+        Self {
+            network,
+            mnemonic: None,
+            tokens: HashMap::new(),
+        }
+    }
+
+    /// Create a new configuration with a wallet
+    pub fn with_wallet(network: MantraNetworkConfig, mnemonic: String) -> Self {
+        Self {
+            network,
+            mnemonic: Some(mnemonic),
+            tokens: HashMap::new(),
+        }
+    }
+
     /// Load configuration from a file
     pub fn load(path: &PathBuf) -> Result<Self, Error> {
         let content = fs::read_to_string(path)?;
@@ -181,5 +305,10 @@ impl Config {
         path.push("mantra-dex");
         path.push("config.toml");
         path
+    }
+
+    /// Add token information
+    pub fn add_token(&mut self, denom: String, token_info: TokenInfo) {
+        self.tokens.insert(denom, token_info);
     }
 }

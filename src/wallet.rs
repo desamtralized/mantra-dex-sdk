@@ -9,7 +9,7 @@ use cosmrs::{
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-use crate::error::Error;
+use crate::{error::Error, NetworkConstants};
 
 /// HD Path prefix for Cosmos chains (BIP-44)
 const HD_PATH_PREFIX: &str = "m/44'/118'/0'/0/";
@@ -20,6 +20,8 @@ pub struct MantraWallet {
     signing_account: cosmrs::crypto::secp256k1::SigningKey,
     /// The account prefix (mantra)
     account_prefix: String,
+    /// The network constants
+    network_constants: NetworkConstants,
 }
 
 /// Wallet info that can be serialized safely
@@ -33,7 +35,7 @@ pub struct WalletInfo {
 
 impl MantraWallet {
     /// Create a new wallet from a mnemonic
-    pub fn from_mnemonic(mnemonic: &str, account_index: u32) -> Result<Self, Error> {
+    pub fn from_mnemonic(mnemonic: &str, account_index: u32, network_constants: &NetworkConstants) -> Result<Self, Error> {
         let mnemonic = Mnemonic::from_str(mnemonic)
             .map_err(|e| Error::Wallet(format!("Invalid mnemonic: {}", e)))?;
 
@@ -54,11 +56,12 @@ impl MantraWallet {
         Ok(Self {
             signing_account,
             account_prefix: "mantra".to_string(),
+            network_constants: network_constants.clone(),
         })
     }
 
     /// Generate a new random wallet
-    pub fn generate() -> Result<(Self, String), Error> {
+    pub fn generate(network_constants: &NetworkConstants) -> Result<(Self, String), Error> {
         use rand::{thread_rng, RngCore};
 
         // Generate 16 bytes (128 bits) of entropy for a 12-word mnemonic
@@ -69,7 +72,7 @@ impl MantraWallet {
             .map_err(|e| Error::Wallet(format!("Failed to generate mnemonic: {}", e)))?;
 
         let phrase = mnemonic.to_string();
-        let wallet = Self::from_mnemonic(&phrase, 0)?;
+        let wallet = Self::from_mnemonic(&phrase, 0, &network_constants)?;
 
         Ok((wallet, phrase))
     }
@@ -175,20 +178,11 @@ impl MantraWallet {
     pub fn create_default_fee(&self, gas_limit: u64) -> Result<Fee, Error> {
         let gas_price = self.compute_gas_price()?;
         let amount = (gas_limit as f64 * gas_price) as u64;
-
-        // Load network constants
-        let constants = crate::config::NetworkConstants::default_dukong()
-            .map_err(|e| Error::Config(format!("Failed to load network constants: {}", e)))?;
-
-        self.create_fee(amount, gas_limit, &constants.native_denom)
+        self.create_fee(amount, gas_limit, &self.network_constants.native_denom)
     }
 
     /// Calculate gas price with adjustment
     fn compute_gas_price(&self) -> Result<f64, Error> {
-        // Load network constants
-        let constants = crate::config::NetworkConstants::default_dukong()
-            .map_err(|e| Error::Config(format!("Failed to load network constants: {}", e)))?;
-
-        Ok(constants.default_gas_price * constants.default_gas_adjustment)
+        Ok(self.network_constants.default_gas_price * self.network_constants.default_gas_adjustment)
     }
 }
