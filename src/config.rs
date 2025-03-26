@@ -156,30 +156,6 @@ impl MantraNetworkConfig {
         }
     }
 
-    /// Create a default configuration for Mantra Dukong Mainnet
-    pub fn default_mainnet() -> Self {
-        Self::with_default_contracts(
-            "mantra-dukong".to_string(),
-            "mantra-dukong-1".to_string(),
-            "https://rpc.dukong.mantrachain.io/".to_string(),
-            0.025,
-            1.3,
-            "uom".to_string(),
-        )
-    }
-
-    /// Create a default configuration for Mantra Testnet
-    pub fn default_testnet() -> Self {
-        Self::with_default_contracts(
-            "mantra-testnet".to_string(),
-            "mantra-testnet-1".to_string(),
-            "https://rpc.testnet.mantrachain.io/".to_string(),
-            0.025,
-            1.3,
-            "uom".to_string(),
-        )
-    }
-
     /// Update contract addresses
     pub fn with_contracts(mut self, contract_addresses: ContractAddresses) -> Self {
         self.contracts = contract_addresses;
