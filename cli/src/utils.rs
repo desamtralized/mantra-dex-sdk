@@ -1,6 +1,6 @@
 use colored::Colorize;
 use mantra_dex_sdk::{MantraDexClient, MantraWallet};
-use prettytable::{Table, Row, Cell};
+use prettytable::{Cell, Row, Table};
 use std::str::FromStr;
 
 use crate::commands::wallet::load_network_constants;
@@ -15,23 +15,17 @@ pub fn print_success(message: &str) {
 /// Print a table with data
 pub fn print_table(headers: Vec<&str>, rows: Vec<Vec<String>>) {
     let mut table = Table::new();
-    
+
     // Add headers
     table.set_titles(Row::new(
-        headers.iter()
-            .map(|h| Cell::new(h.as_ref()))
-            .collect()
+        headers.iter().map(|h| Cell::new(h.as_ref())).collect(),
     ));
-    
+
     // Add data rows
     for row_data in rows {
-        table.add_row(Row::new(
-            row_data.iter()
-                .map(|c| Cell::new(&c))
-                .collect()
-        ));
+        table.add_row(Row::new(row_data.iter().map(|c| Cell::new(&c)).collect()));
     }
-    
+
     table.printstd();
 }
 
@@ -44,14 +38,14 @@ pub fn parse_coin(coin_str: &str) -> Result<mantra_dex_sdk::Coin, CliError> {
             coin_str
         )));
     }
-    
+
     let amount_str = parts[0].trim();
     let denom = parts[1].trim();
-    
+
     // Parse amount
     let amount = mantra_dex_sdk::Uint128::from_str(amount_str)
         .map_err(|_| CliError::Parse(format!("Invalid amount: {}", amount_str)))?;
-        
+
     Ok(mantra_dex_sdk::Coin {
         denom: denom.to_string(),
         amount,
@@ -69,13 +63,13 @@ pub async fn create_client(config: &CliConfig) -> Result<MantraDexClient, CliErr
     let client = MantraDexClient::new(config.network.clone())
         .await
         .map_err(CliError::Sdk)?;
-    
+
     // Skip wallet loading for read-only operations
     if config.session_password.is_none() {
         // If we don't have a session password, this is likely a read-only operation
         return Ok(client);
     }
-    
+
     // If an active wallet is set, load it
     if let Some(active_wallet) = &config.active_wallet {
         if config.wallets.contains_key(active_wallet) {
@@ -87,41 +81,45 @@ pub async fn create_client(config: &CliConfig) -> Result<MantraDexClient, CliErr
                 } else {
                     // Session password doesn't work for this wallet, prompt for a new one
                     let new_pwd = dialoguer::Password::new()
-                        .with_prompt(&format!("Enter password to unlock wallet '{}'", active_wallet))
+                        .with_prompt(&format!(
+                            "Enter password to unlock wallet '{}'",
+                            active_wallet
+                        ))
                         .interact()
                         .map_err(|e| CliError::Command(format!("Password input error: {}", e)))?;
-                    
+
                     new_pwd
                 }
             } else {
                 // Prompt for password
                 let new_pwd = dialoguer::Password::new()
-                    .with_prompt(&format!("Enter password to unlock wallet '{}'", active_wallet))
+                    .with_prompt(&format!(
+                        "Enter password to unlock wallet '{}'",
+                        active_wallet
+                    ))
                     .interact()
                     .map_err(|e| CliError::Command(format!("Password input error: {}", e)))?;
-                
+
                 new_pwd
             };
-                
+
             // Get the mnemonic
             let mnemonic = config.get_wallet_mnemonic(active_wallet, &password)?;
             let network_constants = load_network_constants(&config)?;
             let wallet = MantraWallet::from_mnemonic(&mnemonic, 0, &network_constants)
                 .map_err(CliError::Sdk)?;
-                
+
             return Ok(client.with_wallet(wallet));
         }
     }
-    
+
     Ok(client)
 }
 
 /// Format an amount with token decimals for display
 pub fn format_amount(amount: mantra_dex_sdk::Uint128, denom: &str, config: &CliConfig) -> String {
-    let decimals = config.tokens.get(denom)
-        .map(|t| t.decimals)
-        .unwrap_or(6); // Default to 6 decimals if not found
-        
+    let decimals = config.tokens.get(denom).map(|t| t.decimals).unwrap_or(6); // Default to 6 decimals if not found
+
     let amount_f64 = amount.u128() as f64 / 10_f64.powi(decimals as i32);
     format!("{:.6} {}", amount_f64, denom)
 }
@@ -137,13 +135,16 @@ pub fn ensure_session_password(config: &mut CliConfig) -> Result<(), CliError> {
                     return Ok(());
                 }
             }
-            
+
             // We need to get a new password
             let password = dialoguer::Password::new()
-                .with_prompt(&format!("Enter password to unlock wallet '{}'", active_wallet))
+                .with_prompt(&format!(
+                    "Enter password to unlock wallet '{}'",
+                    active_wallet
+                ))
                 .interact()
                 .map_err(|e| CliError::Command(format!("Password input error: {}", e)))?;
-            
+
             // Verify it works
             if config.verify_wallet_password(active_wallet, &password)? {
                 // Store it in the session
@@ -154,14 +155,12 @@ pub fn ensure_session_password(config: &mut CliConfig) -> Result<(), CliError> {
             }
         }
     }
-    
+
     Ok(())
 }
 
 pub mod encryption {
-    use argon2::{
-        password_hash::SaltString, Argon2, PasswordHasher,
-    };
+    use argon2::{password_hash::SaltString, Argon2, PasswordHasher};
     use base64::{engine::general_purpose, Engine as _};
     use chacha20poly1305::{
         aead::{Aead, KeyInit, OsRng},
@@ -193,9 +192,8 @@ pub mod encryption {
         // Generate a random salt for Argon2
         let mut salt_bytes = [0u8; SALT_LEN];
         OsRng.fill_bytes(&mut salt_bytes);
-        let salt = SaltString::encode_b64(&salt_bytes).map_err(|e| {
-            CliError::Command(format!("Failed to encode salt: {}", e))
-        })?;
+        let salt = SaltString::encode_b64(&salt_bytes)
+            .map_err(|e| CliError::Command(format!("Failed to encode salt: {}", e)))?;
 
         // Generate a random nonce for ChaCha20Poly1305
         let mut nonce_bytes = [0u8; NONCE_LEN];
@@ -243,9 +241,8 @@ pub mod encryption {
 
         // Derive key from password using Argon2
         let argon2 = Argon2::default();
-        let parsed_salt = SaltString::from_b64(salt).map_err(|e| {
-            CliError::Command(format!("Failed to parse salt: {}", e))
-        })?;
+        let parsed_salt = SaltString::from_b64(salt)
+            .map_err(|e| CliError::Command(format!("Failed to parse salt: {}", e)))?;
 
         let key = argon2
             .hash_password(password.as_bytes(), &parsed_salt)
@@ -266,4 +263,4 @@ pub mod encryption {
         String::from_utf8(plaintext)
             .map_err(|e| CliError::Command(format!("Failed to decode plaintext: {}", e)))
     }
-} 
+}

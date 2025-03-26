@@ -1,9 +1,7 @@
 mod utils;
 
 use cosmwasm_std::{Coin, Decimal, Uint128};
-use utils::test_utils::{
-    create_test_client, get_om_usdc_pool_id, init_test_env, load_test_config,
-};
+use utils::test_utils::{create_test_client, get_om_usdc_pool_id, init_test_env, load_test_config};
 
 /// This test will only execute actual swaps if the EXECUTE_WRITES env var is set to true
 fn should_execute_writes() -> bool {

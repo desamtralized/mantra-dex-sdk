@@ -61,6 +61,82 @@ enum LiquidityCommands {
     Withdraw(WithdrawLiquidityCommand),
 }
 
+/// Execute a command with proper config handling and session password management
+async fn execute_command(
+    command: Commands,
+    config: &mut CliConfig,
+    config_path: &std::path::PathBuf,
+    is_wallet_command: bool,
+) -> Result<(), CliError> {
+    // Check if this is a read-only command that doesn't need wallet access
+    let is_read_only = match &command {
+        Commands::Pool(cmd) => matches!(
+            cmd.command,
+            commands::pool::PoolCommands::List { .. } | commands::pool::PoolCommands::Info { .. }
+        ),
+        _ => false,
+    };
+
+    // If it's not a wallet command or read-only command, make sure we have a password
+    if !is_wallet_command && !is_read_only {
+        ensure_session_password(config)?;
+    }
+
+    // Create a config clone with preserved session password for command execution
+    let mut cmd_config = config.clone();
+    if let Some(pwd) = config.get_session_password() {
+        cmd_config.store_session_password(pwd);
+    }
+
+    // Execute the command with config
+    let result = match command {
+        Commands::Wallet(cmd) => {
+            let result = cmd.execute(cmd_config).await;
+
+            // If the command succeeded, reload config
+            if result.is_ok() {
+                if let Ok(updated_config) = CliConfig::load(config_path) {
+                    // Keep the session password when updating the config
+                    let session_password = config.get_session_password().map(String::from);
+                    *config = updated_config;
+
+                    // Restore the session password
+                    if let Some(password) = session_password {
+                        config.store_session_password(&password);
+                    }
+                }
+            }
+
+            result
+        }
+        Commands::Pool(cmd) => cmd.execute(cmd_config).await,
+        Commands::Swap(cmd) => cmd.execute(cmd_config).await,
+        Commands::Liquidity(LiquidityCommands::Provide(provide_cmd)) => {
+            provide_cmd.execute(cmd_config).await
+        }
+        Commands::Liquidity(LiquidityCommands::Withdraw(withdraw_cmd)) => {
+            withdraw_cmd.execute(cmd_config).await
+        }
+        Commands::Balance(cmd) => cmd.execute(cmd_config).await,
+    };
+
+    // If command succeeded and it wasn't a wallet command, reload the config to get any updates
+    if result.is_ok() && !is_wallet_command {
+        if let Ok(updated_config) = CliConfig::load(config_path) {
+            // Keep the session password when updating the config
+            let session_password = config.get_session_password().map(String::from);
+            *config = updated_config;
+
+            // Restore the session password
+            if let Some(password) = session_password {
+                config.store_session_password(&password);
+            }
+        }
+    }
+
+    result
+}
+
 #[tokio::main]
 async fn main() -> Result<(), CliError> {
     // Setup logging
@@ -88,17 +164,17 @@ async fn main() -> Result<(), CliError> {
 
     // Load or create config
     let mut config = CliConfig::load(&config_path)?;
-    
+
     // Check if interactive mode is enabled
     let interactive = !std::env::args().any(|arg| arg == "--no-interactive");
-    
+
     if interactive && std::env::args().len() == 1 {
         // Interactive mode - keep CLI running until exit command
         println!("Mantra DEX CLI - Interactive Mode (wallet session maintained)");
         println!("Type 'exit' or 'quit' to exit, 'help' for available commands");
-        
-        use rustyline::Editor;
+
         use rustyline::history::DefaultHistory;
+        use rustyline::Editor;
         let mut rl = Editor::<(), DefaultHistory>::new().expect("Failed to create line editor");
 
         loop {
@@ -109,32 +185,31 @@ async fn main() -> Result<(), CliError> {
                     if let Err(e) = result {
                         eprintln!("Error adding history entry: {}", e);
                     }
-                    
+
                     let input = line.trim();
                     if input.is_empty() {
                         continue;
                     }
-                    
+
                     if input == "exit" || input == "quit" {
                         break;
                     }
-                    
+
                     if input == "help" {
                         print_help();
                         continue;
                     }
-                    
+
                     // Split input into args
-                    let args: Vec<String> = shell_words::split(input)
-                        .unwrap_or_else(|e| {
-                            eprintln!("Error parsing command: {}", e);
-                            vec![]
-                        });
-                    
+                    let args: Vec<String> = shell_words::split(input).unwrap_or_else(|e| {
+                        eprintln!("Error parsing command: {}", e);
+                        vec![]
+                    });
+
                     if args.is_empty() {
                         continue;
                     }
-                    
+
                     // Process the command, preserving the session password
                     let result = process_command(args, &mut config, &config_path).await;
                     if let Err(e) = result {
@@ -146,18 +221,18 @@ async fn main() -> Result<(), CliError> {
                 }
             }
         }
-        
+
         println!("Goodbye!");
         Ok(())
     } else {
         // Standard single-command mode
         let cli = Cli::parse();
-        
+
         // Update config with any CLI overrides
         if let Some(_) = cli.config {
             // Load the new config but preserve any session password
             let session_password = config.get_session_password().map(String::from);
-            
+
             // Restore the session password
             if let Some(password) = session_password {
                 config.store_session_password(&password);
@@ -166,189 +241,38 @@ async fn main() -> Result<(), CliError> {
 
         // Check if we need to ensure a password is available
         let is_wallet_command = matches!(cli.command, Commands::Wallet(_));
-        
-        // Check if this is a read-only command that doesn't need wallet access
-        let is_read_only = match &cli.command {
-            Commands::Pool(cmd) => matches!(cmd.command, commands::pool::PoolCommands::List { .. } | commands::pool::PoolCommands::Info { .. }),
-            _ => false,
-        };
-        
-        if !is_wallet_command && !is_read_only {
-            ensure_session_password(&mut config)?;
-        }
 
-        // Execute the command
-        match cli.command {
-            Commands::Wallet(cmd) => cmd.clone().execute(config).await,
-            Commands::Pool(cmd) => {
-                // Clone config but preserve session password
-                let mut cmd_config = config.clone();
-                if let Some(pwd) = config.get_session_password() {
-                    cmd_config.store_session_password(pwd);
-                }
-                cmd.clone().execute(cmd_config).await
-            },
-            Commands::Swap(cmd) => {
-                // Clone config but preserve session password
-                let mut cmd_config = config.clone();
-                if let Some(pwd) = config.get_session_password() {
-                    cmd_config.store_session_password(pwd);
-                }
-                cmd.clone().execute(cmd_config).await
-            },
-            Commands::Liquidity(cmd) => match cmd {
-                LiquidityCommands::Provide(provide_cmd) => {
-                    // Clone config but preserve session password
-                    let mut cmd_config = config.clone();
-                    if let Some(pwd) = config.get_session_password() {
-                        cmd_config.store_session_password(pwd);
-                    }
-                    provide_cmd.clone().execute(cmd_config).await
-                },
-                LiquidityCommands::Withdraw(withdraw_cmd) => {
-                    // Clone config but preserve session password
-                    let mut cmd_config = config.clone();
-                    if let Some(pwd) = config.get_session_password() {
-                        cmd_config.store_session_password(pwd);
-                    }
-                    withdraw_cmd.clone().execute(cmd_config).await
-                },
-            },
-            Commands::Balance(cmd) => {
-                // Clone config but preserve session password
-                let mut cmd_config = config.clone();
-                if let Some(pwd) = config.get_session_password() {
-                    cmd_config.store_session_password(pwd);
-                }
-                cmd.clone().execute(cmd_config).await
-            },
-        }
+        // Execute the command using shared function
+        execute_command(cli.command, &mut config, &config_path, is_wallet_command).await
     }
 }
 
 /// Process a command in the interactive shell
 async fn process_command(
-    args: Vec<String>, 
-    config: &mut CliConfig, 
-    config_path: &std::path::Path
+    args: Vec<String>,
+    config: &mut CliConfig,
+    config_path: &std::path::Path,
 ) -> Result<(), CliError> {
     // Create a custom clap command for interactive mode
     let command = Cli::command();
-    let matches = command.try_get_matches_from(
-        std::iter::once(String::from("mantra-dex")).chain(args)
-    );
-   
+    let matches =
+        command.try_get_matches_from(std::iter::once(String::from("mantra-dex")).chain(args));
+
     match matches {
         Ok(matches) => {
             let cli = Cli::from_arg_matches(&matches)
                 .map_err(|e| CliError::Command(format!("Failed to parse command: {}", e)))?;
-            
+
             // Check command type before executing
             let is_wallet_command = matches!(cli.command, Commands::Wallet(_));
-            
-            // Check if this is a read-only command that doesn't need wallet access
-            let is_read_only = match &cli.command {
-                Commands::Pool(cmd) => matches!(cmd.command, commands::pool::PoolCommands::List { .. } | commands::pool::PoolCommands::Info { .. }),
-                _ => false,
-            };
-            
-            // If it's not a wallet command or read-only command, make sure we have a password
-            if !is_wallet_command && !is_read_only {
-                ensure_session_password(config)?;
-            }
-            
-            // Execute the command with current config
-            let result = match cli.command {
-                Commands::Wallet(cmd) => {
-                    // Clone config but preserve session password
-                    let mut cmd_config = config.clone();
-                    if let Some(pwd) = config.get_session_password() {
-                        cmd_config.store_session_password(pwd);
-                    }
-                    
-                    let result = cmd.execute(cmd_config).await;
-                    
-                    // If the command succeeded, reload config and check for password capture
-                    if result.is_ok() {
-                        let config_path_buf = config_path.to_path_buf();
-                        if let Ok(updated_config) = CliConfig::load(&config_path_buf) {
-                            // Keep the session password when updating the config
-                            let session_password = config.get_session_password().map(String::from);
-                            *config = updated_config;
-                            
-                            // Restore the session password
-                            if let Some(password) = session_password {
-                                config.store_session_password(&password);
-                            }
-                        }
-                    }
-                    
-                    result
-                },
-                Commands::Pool(cmd) => {
-                    // Clone config but preserve session password
-                    let mut cmd_config = config.clone();
-                    if let Some(pwd) = config.get_session_password() {
-                        cmd_config.store_session_password(pwd);
-                    }
-                    cmd.execute(cmd_config).await
-                },
-                Commands::Swap(cmd) => {
-                    // Clone config but preserve session password
-                    let mut cmd_config = config.clone();
-                    if let Some(pwd) = config.get_session_password() {
-                        cmd_config.store_session_password(pwd);
-                    }
-                    cmd.execute(cmd_config).await
-                },
-                Commands::Liquidity(cmd) => match cmd {
-                    LiquidityCommands::Provide(provide_cmd) => {
-                        // Clone config but preserve session password
-                        let mut cmd_config = config.clone();
-                        if let Some(pwd) = config.get_session_password() {
-                            cmd_config.store_session_password(pwd);
-                        }
-                        provide_cmd.execute(cmd_config).await
-                    },
-                    LiquidityCommands::Withdraw(withdraw_cmd) => {
-                        // Clone config but preserve session password
-                        let mut cmd_config = config.clone();
-                        if let Some(pwd) = config.get_session_password() {
-                            cmd_config.store_session_password(pwd);
-                        }
-                        withdraw_cmd.execute(cmd_config).await
-                    },
-                },
-                Commands::Balance(cmd) => {
-                    // Clone config but preserve session password
-                    let mut cmd_config = config.clone();
-                    if let Some(pwd) = config.get_session_password() {
-                        cmd_config.store_session_password(pwd);
-                    }
-                    cmd.clone().execute(cmd_config).await
-                },
-            };
-            
-            // If command succeeded, reload the config to get any updates
+
+            // Convert Path to PathBuf for the execute_command function
             let config_path_buf = config_path.to_path_buf();
-            if result.is_ok() && !is_wallet_command {
-                if let Ok(updated_config) = CliConfig::load(&config_path_buf) {
-                    // Keep the session password when updating the config
-                    let session_password = config.get_session_password().map(String::from);
-                    *config = updated_config;
-                    
-                    // Restore the session password
-                    if let Some(password) = session_password {
-                        config.store_session_password(&password);
-                    }
-                }
-            }
-            
-            result
+
+            // Execute the command using shared function
+            execute_command(cli.command, config, &config_path_buf, is_wallet_command).await
         }
-        Err(e) => {
-            Err(CliError::Command(format!("Invalid command: {}", e)))
-        }
+        Err(e) => Err(CliError::Command(format!("Invalid command: {}", e))),
     }
 }
 
@@ -371,4 +295,4 @@ fn print_help() {
     println!("  balance                      Check token balances");
     println!("  help                         Show this help message");
     println!("  exit, quit                   Exit the CLI");
-} 
+}

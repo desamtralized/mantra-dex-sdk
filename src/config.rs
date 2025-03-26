@@ -192,7 +192,6 @@ pub struct TokenInfo {
 }
 
 impl Config {
-
     /// Create a new configuration with the specified network
     pub fn with_network(network: MantraNetworkConfig) -> Self {
         Self {

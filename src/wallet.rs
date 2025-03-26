@@ -35,7 +35,11 @@ pub struct WalletInfo {
 
 impl MantraWallet {
     /// Create a new wallet from a mnemonic
-    pub fn from_mnemonic(mnemonic: &str, account_index: u32, network_constants: &NetworkConstants) -> Result<Self, Error> {
+    pub fn from_mnemonic(
+        mnemonic: &str,
+        account_index: u32,
+        network_constants: &NetworkConstants,
+    ) -> Result<Self, Error> {
         let mnemonic = Mnemonic::from_str(mnemonic)
             .map_err(|e| Error::Wallet(format!("Invalid mnemonic: {}", e)))?;
 
@@ -183,6 +187,9 @@ impl MantraWallet {
 
     /// Calculate gas price with adjustment
     fn compute_gas_price(&self) -> Result<f64, Error> {
-        Ok(self.network_constants.default_gas_price * self.network_constants.default_gas_adjustment)
+        Ok(
+            self.network_constants.default_gas_price
+                * self.network_constants.default_gas_adjustment,
+        )
     }
 }

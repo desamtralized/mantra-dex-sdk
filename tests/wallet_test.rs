@@ -1,9 +1,7 @@
 mod utils;
 
 use mantra_dex_sdk::{Error, MantraWallet};
-use utils::test_utils::{
-    create_test_client, create_test_wallet, init_test_env, load_test_config,
-};
+use utils::test_utils::{create_test_client, create_test_wallet, init_test_env, load_test_config};
 
 #[tokio::test]
 async fn test_wallet_creation_from_mnemonic() {

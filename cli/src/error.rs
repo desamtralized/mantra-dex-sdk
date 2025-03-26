@@ -22,4 +22,4 @@ pub enum CliError {
 
     #[error("Parse Error: {0}")]
     Parse(String),
-} 
+}
