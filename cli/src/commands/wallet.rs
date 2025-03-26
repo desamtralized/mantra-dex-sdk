@@ -95,32 +95,54 @@ fn prompt_for_password(confirm: bool) -> Result<String, CliError> {
 /// Helper function to unlock a wallet with password
 fn unlock_wallet(config: &CliConfig, name: &str) -> Result<(MantraWallet, String), CliError> {
     // Try to use the session password first if available
-    let password = if let Some(session_pwd) = config.get_session_password() {
+    if let Some(session_pwd) = config.get_session_password() {
         // Verify the session password works for this wallet
         if config.verify_wallet_password(name, session_pwd)? {
-            session_pwd.to_string()
-        } else {
-            // Session password doesn't work for this wallet, prompt for a new one
-            Password::new()
-                .with_prompt(&format!("Enter password to unlock wallet '{}'", name))
-                .interact()
-                .map_err(|e| CliError::Command(format!("Input error: {}", e)))?
+            // Use the current session password
+            let mnemonic = config.get_wallet_mnemonic(name, session_pwd)?;
+            let network_constants = load_network_constants(&config)?;
+            let wallet = MantraWallet::from_mnemonic(&mnemonic, 0, &network_constants)
+                .map_err(CliError::Sdk)?;
+            return Ok((wallet, session_pwd.to_string()));
         }
-    } else {
-        // No session password, prompt for one
-        Password::new()
-            .with_prompt(&format!("Enter password to unlock wallet '{}'", name))
-            .interact()
-            .map_err(|e| CliError::Command(format!("Input error: {}", e)))?
-    };
+    }
 
-    // Get the mnemonic - this will validate the password
-    let mnemonic = config.get_wallet_mnemonic(name, &password)?;
-    let network_constants = load_network_constants(&config)?;
-    let wallet =
-        MantraWallet::from_mnemonic(&mnemonic, 0, &network_constants).map_err(CliError::Sdk)?;
+    // Session password doesn't work, start retry loop
+    println!("Unlock wallet '{}' (press Ctrl+C to cancel)", name);
 
-    Ok((wallet, password))
+    loop {
+        let password = match Password::new().with_prompt("Enter password").interact() {
+            Ok(pwd) => pwd,
+            Err(e) => {
+                // Handle user interruption (Ctrl+C)
+                match &e {
+                    dialoguer::Error::IO(io_err)
+                        if io_err.kind() == std::io::ErrorKind::Interrupted =>
+                    {
+                        println!("Operation cancelled");
+                        return Err(CliError::Command("Password entry cancelled".to_string()));
+                    }
+                    _ => return Err(CliError::Command(format!("Password input error: {}", e))),
+                }
+            }
+        };
+
+        // Try to get the mnemonic with this password
+        match config.get_wallet_mnemonic(name, &password) {
+            Ok(mnemonic) => {
+                // Password is correct, create the wallet
+                let network_constants = load_network_constants(&config)?;
+                let wallet = MantraWallet::from_mnemonic(&mnemonic, 0, &network_constants)
+                    .map_err(CliError::Sdk)?;
+                return Ok((wallet, password));
+            }
+            Err(CliError::DecryptionFailed) => {
+                // Password is incorrect, prompt again
+                println!("{}", "Invalid password, please try again".red());
+            }
+            Err(e) => return Err(e), // Pass through other errors
+        }
+    }
 }
 
 impl WalletCommand {
@@ -279,36 +301,63 @@ impl WalletCommand {
                     return Err(CliError::Wallet(format!("Wallet '{}' not found", name)));
                 }
 
-                // Verify wallet password before setting it as active
-                let password = if let Some(session_pwd) = config.get_session_password() {
+                // Try the session password first
+                if let Some(session_pwd) = config.get_session_password() {
                     if config.verify_wallet_password(&name, session_pwd)? {
-                        session_pwd.to_string()
-                    } else {
-                        // Session password doesn't work for this wallet, prompt for new one
-                        prompt_for_password(false)?
+                        // Set the wallet as active with the existing session password
+                        config.set_active_wallet(&name)?;
+                        config.save(&config_path)?;
+                        print_success(&format!("Wallet '{}' set as active", name));
+                        return Ok(());
                     }
-                } else {
-                    // No session password, prompt for one
-                    Password::new()
-                        .with_prompt(&format!("Enter password to unlock wallet '{}'", name))
-                        .interact()
-                        .map_err(|e| CliError::Command(format!("Input error: {}", e)))?
-                };
-
-                // Make sure the password works
-                if !config.verify_wallet_password(&name, &password)? {
-                    return Err(CliError::Wallet("Invalid password".to_string()));
                 }
 
-                // Store the password in the session
-                config.store_session_password(&password);
+                // Session password didn't work or wasn't available, prompt in a loop
+                println!(
+                    "Unlock wallet '{}' to set as active (press Ctrl+C to cancel)",
+                    name
+                );
 
-                // Set the wallet as active
-                config.set_active_wallet(&name)?;
-                config.save(&config_path)?;
+                loop {
+                    let password = match Password::new().with_prompt("Enter password").interact() {
+                        Ok(pwd) => pwd,
+                        Err(e) => {
+                            // Handle user interruption (Ctrl+C)
+                            match &e {
+                                dialoguer::Error::IO(io_err)
+                                    if io_err.kind() == std::io::ErrorKind::Interrupted =>
+                                {
+                                    println!("Operation cancelled");
+                                    return Err(CliError::Command(
+                                        "Password entry cancelled".to_string(),
+                                    ));
+                                }
+                                _ => {
+                                    return Err(CliError::Command(format!(
+                                        "Password input error: {}",
+                                        e
+                                    )))
+                                }
+                            }
+                        }
+                    };
 
-                print_success(&format!("Wallet '{}' set as active", name));
-                Ok(())
+                    // Check if password is valid
+                    if config.verify_wallet_password(&name, &password)? {
+                        // Store the password in the session
+                        config.store_session_password(&password);
+
+                        // Set the wallet as active
+                        config.set_active_wallet(&name)?;
+                        config.save(&config_path)?;
+
+                        print_success(&format!("Wallet '{}' set as active", name));
+                        return Ok(());
+                    } else {
+                        // Password is incorrect, try again
+                        println!("{}", "Invalid password, please try again".red());
+                    }
+                }
             }
 
             WalletCommands::Export { name } => {
@@ -370,48 +419,71 @@ impl WalletCommand {
                     return Ok(());
                 }
 
-                // Verify the password for security
-                let password = if let Some(session_pwd) = config.get_session_password() {
+                // Try session password first
+                if let Some(session_pwd) = config.get_session_password() {
                     if config.verify_wallet_password(&name, session_pwd)? {
-                        session_pwd.to_string()
-                    } else {
-                        // Session password doesn't work for this wallet, prompt for it
-                        Password::new()
-                            .with_prompt(&format!(
-                                "Enter password for wallet '{}' to confirm removal",
-                                name
-                            ))
-                            .interact()
-                            .map_err(|e| CliError::Command(format!("Input error: {}", e)))?
+                        // Password is valid, proceed with removal
+                        config.remove_wallet(&name)?;
+                        config.save(&config_path)?;
+
+                        // If this was the active wallet, clear the session password
+                        if config.active_wallet.is_none() {
+                            config.clear_session_password();
+                        }
+
+                        print_success(&format!("Wallet '{}' removed", name));
+                        return Ok(());
                     }
-                } else {
-                    // No session password, prompt for one
-                    Password::new()
-                        .with_prompt(&format!(
-                            "Enter password for wallet '{}' to confirm removal",
-                            name
-                        ))
-                        .interact()
-                        .map_err(|e| CliError::Command(format!("Input error: {}", e)))?
-                };
-
-                // Verify the password
-                if !config.verify_wallet_password(&name, &password)? {
-                    return Err(CliError::Wallet(
-                        "Invalid password, removal cancelled".to_string(),
-                    ));
                 }
 
-                config.remove_wallet(&name)?;
-                config.save(&config_path)?;
+                // Session password didn't work or wasn't available, prompt in a loop
+                println!(
+                    "Unlock wallet '{}' to confirm removal (press Ctrl+C to cancel)",
+                    name
+                );
 
-                // If this was the active wallet, clear the session password
-                if config.active_wallet.is_none() {
-                    config.clear_session_password();
+                loop {
+                    let password = match Password::new().with_prompt("Enter password").interact() {
+                        Ok(pwd) => pwd,
+                        Err(e) => {
+                            // Handle user interruption (Ctrl+C)
+                            match &e {
+                                dialoguer::Error::IO(io_err)
+                                    if io_err.kind() == std::io::ErrorKind::Interrupted =>
+                                {
+                                    println!("Operation cancelled");
+                                    return Err(CliError::Command(
+                                        "Password entry cancelled".to_string(),
+                                    ));
+                                }
+                                _ => {
+                                    return Err(CliError::Command(format!(
+                                        "Password input error: {}",
+                                        e
+                                    )))
+                                }
+                            }
+                        }
+                    };
+
+                    // Check if password is valid
+                    if config.verify_wallet_password(&name, &password)? {
+                        // Password is valid, proceed with removal
+                        config.remove_wallet(&name)?;
+                        config.save(&config_path)?;
+
+                        // If this was the active wallet, clear the session password
+                        if config.active_wallet.is_none() {
+                            config.clear_session_password();
+                        }
+
+                        print_success(&format!("Wallet '{}' removed", name));
+                        return Ok(());
+                    } else {
+                        // Password is incorrect, try again
+                        println!("{}", "Invalid password, please try again".red());
+                    }
                 }
-
-                print_success(&format!("Wallet '{}' removed", name));
-                Ok(())
             }
         }
     }

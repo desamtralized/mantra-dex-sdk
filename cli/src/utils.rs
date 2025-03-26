@@ -136,22 +136,45 @@ pub fn ensure_session_password(config: &mut CliConfig) -> Result<(), CliError> {
                 }
             }
 
-            // We need to get a new password
-            let password = dialoguer::Password::new()
-                .with_prompt(&format!(
-                    "Enter password to unlock wallet '{}'",
-                    active_wallet
-                ))
-                .interact()
-                .map_err(|e| CliError::Command(format!("Password input error: {}", e)))?;
+            // We need to get a new password - loop until correct or user cancels
+            println!("Unlock wallet '{}' (press Ctrl+C to cancel)", active_wallet);
 
-            // Verify it works
-            if config.verify_wallet_password(active_wallet, &password)? {
-                // Store it in the session
-                config.store_session_password(&password);
-                return Ok(());
-            } else {
-                return Err(CliError::Wallet("Invalid password".to_string()));
+            loop {
+                let password = match dialoguer::Password::new()
+                    .with_prompt("Enter password")
+                    .interact()
+                {
+                    Ok(pwd) => pwd,
+                    Err(e) => {
+                        // Handle user interruption (Ctrl+C)
+                        match &e {
+                            dialoguer::Error::IO(io_err)
+                                if io_err.kind() == std::io::ErrorKind::Interrupted =>
+                            {
+                                println!("Operation cancelled");
+                                return Err(CliError::Command(
+                                    "Password entry cancelled".to_string(),
+                                ));
+                            }
+                            _ => {
+                                return Err(CliError::Command(format!(
+                                    "Password input error: {}",
+                                    e
+                                )))
+                            }
+                        }
+                    }
+                };
+
+                // Verify it works
+                if config.verify_wallet_password(active_wallet, &password)? {
+                    // Store it in the session
+                    config.store_session_password(&password);
+                    return Ok(());
+                } else {
+                    // Password is incorrect, prompt again
+                    println!("{}", "Invalid password, please try again".red());
+                }
             }
         }
     }
@@ -258,7 +281,7 @@ pub mod encryption {
 
         let plaintext = cipher
             .decrypt(nonce, ciphertext.as_ref())
-            .map_err(|e| CliError::Command(format!("Decryption failed: {}", e)))?;
+            .map_err(|_| CliError::DecryptionFailed)?;
 
         String::from_utf8(plaintext)
             .map_err(|e| CliError::Command(format!("Failed to decode plaintext: {}", e)))

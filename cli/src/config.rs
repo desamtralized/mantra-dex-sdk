@@ -144,7 +144,7 @@ impl CliConfig {
     pub fn verify_wallet_password(&self, name: &str, password: &str) -> Result<bool, CliError> {
         match self.get_wallet_mnemonic(name, password) {
             Ok(_) => Ok(true),
-            Err(CliError::Command(msg)) if msg.contains("Decryption failed") => Ok(false),
+            Err(CliError::DecryptionFailed) => Ok(false),
             Err(e) => Err(e),
         }
     }
