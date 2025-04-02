@@ -6,6 +6,7 @@ artifacts/
 **/*.rs.bk
 
 # IDEs
+.cursor/
 .vscode/
 .idea/
 *.iml
@@ -15,3 +16,4 @@ artifacts/
 
 # Auto-gen
 .cargo-ok
+

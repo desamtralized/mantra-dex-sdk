@@ -1,0 +1,10 @@
+[network]
+network_name = "mantra-dukong"
+network_id = "mantra-dukong-1"
+rpc_url = "https://rpc.dukong.mantrachain.io/"
+gas_price = 0.025
+gas_adjustment = 1.3
+native_denom = "uom"
+
+[network.contracts]
+pool_manager = "mantra1us7rryvauhpe82fff0t6gjthdraqmtm5gw8c808f6eqzuxmulacqzkzdal"
