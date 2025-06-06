@@ -1,7 +1,8 @@
 use config::{Config as ConfigLoader, File};
+use cosmwasm_std::{Coin, Decimal, Uint128};
 use mantra_dex_sdk::{
     config::{ContractAddresses, MantraNetworkConfig, NetworkConstants},
-    Decimal, MantraDexClient, MantraWallet, PoolFee, PoolType,
+    MantraDexClient, MantraWallet, PoolFee, PoolType,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -111,6 +112,7 @@ pub mod test_utils {
 
     /// Create a client with the primary test wallet
     #[cfg(test)]
+    #[allow(dead_code)]
     pub async fn create_test_client() -> MantraDexClient {
         let network_config = create_test_network_config();
         let test_config = load_test_config();
@@ -153,6 +155,7 @@ pub mod test_utils {
     }
 
     /// Create a wallet from the test config
+    #[allow(dead_code)]
     pub fn create_test_wallet(wallet_name: &str) -> MantraWallet {
         let test_config = load_test_config();
 
@@ -168,6 +171,21 @@ pub mod test_utils {
 
     /// Get or create the OM/USDC pool for testing
     pub async fn get_or_create_om_usdc_pool_id(client: &MantraDexClient) -> Option<String> {
+        // Try to create or find the test pool
+        match create_test_pool_if_needed(client).await {
+            Ok(pool_id) => Some(pool_id),
+            Err(e) => {
+                println!("Failed to create or find test pool: {:?}", e);
+                None
+            }
+        }
+    }
+
+    /// Create a test pool with OM and USDC if one doesn't exist
+    #[allow(dead_code)]
+    pub async fn create_test_pool_if_needed(
+        client: &MantraDexClient,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let test_config = load_test_config();
         let uom_denom = test_config
             .tokens
@@ -185,99 +203,114 @@ pub mod test_utils {
             .unwrap();
 
         println!(
-            "Looking for pool with denoms: {} and {}",
+            "Looking for pool with assets: {} and {}",
             uom_denom, uusdc_denom
         );
 
-        // First, try to find existing pool
-        if let Ok(pools) = client.get_pools(Some(100)).await {
-            for pool in pools {
-                if pool.pool_info.assets.iter().any(|a| a.denom == uom_denom)
-                    && pool.pool_info.assets.iter().any(|a| a.denom == uusdc_denom)
-                {
-                    println!("Found existing pool: {}", pool.pool_info.pool_identifier);
-                    return Some(pool.pool_info.pool_identifier);
-                }
+        // First, try to find an existing pool
+        let pools = client.get_pools(Some(100)).await?;
+        for pool in pools {
+            if pool.pool_info.assets.iter().any(|a| a.denom == uom_denom)
+                && pool.pool_info.assets.iter().any(|a| a.denom == uusdc_denom)
+            {
+                println!("Found existing pool: {}", pool.pool_info.pool_identifier);
+                return Ok(pool.pool_info.pool_identifier);
             }
         }
 
-        println!("No existing OM/USDC pool found. Creating new pool...");
+        // No pool found, create one by providing initial liquidity
+        println!("No existing pool found, creating new pool...");
 
-        // Create new pool if none exists
-        let pool_fees = PoolFee {
+        // Create a unique pool identifier
+        // Generate a simple, valid pool ID (only alphanumeric, dots, and slashes allowed)
+        let pool_id = "uom.usdc.pool".to_string();
+        println!("Creating pool with ID: {}", pool_id);
+
+        // First create the pool
+        let pool_fees = mantra_dex_std::fee::PoolFee {
             protocol_fee: mantra_dex_std::fee::Fee {
-                share: Decimal::percent(10), // 0.1%
+                share: cosmwasm_std::Decimal::percent(1), // 1% protocol fee
             },
             swap_fee: mantra_dex_std::fee::Fee {
-                share: Decimal::percent(20), // 0.2%
+                share: cosmwasm_std::Decimal::percent(2), // 2% swap fee
             },
             burn_fee: mantra_dex_std::fee::Fee {
-                share: Decimal::zero(),
+                share: cosmwasm_std::Decimal::zero(), // 0% burn fee
             },
-            extra_fees: vec![],
+            extra_fees: vec![], // No extra fees
         };
 
-        let pool_type = PoolType::ConstantProduct;
-        let pool_identifier = Some("uom.uusdc.test".to_string());
+        let pool_type = mantra_dex_std::pool_manager::PoolType::ConstantProduct {};
 
-        match client
+        println!("Creating pool with fees: {:?}", pool_fees);
+
+        let create_result = client
             .create_pool(
                 vec![uom_denom.clone(), uusdc_denom.clone()],
                 vec![6, 6], // Both tokens have 6 decimals
                 pool_fees,
                 pool_type,
-                pool_identifier.clone(),
+                Some(pool_id.clone()),
             )
-            .await
-        {
-            Ok(tx_response) => {
-                println!(
-                    "Pool creation successful with txhash: {}",
-                    tx_response.txhash
-                );
-                if tx_response.code == 0 {
-                    // Pool created successfully, return the identifier
-                    pool_identifier
-                } else {
-                    println!("Pool creation failed: {}", tx_response.raw_log);
-                    None
-                }
-            }
+            .await?;
+
+        println!("Pool created successfully: {:?}", create_result.txhash);
+
+        // The contract adds "o." prefix to custom pool identifiers
+        let actual_pool_id = format!("o.{}", pool_id);
+        println!("Actual pool ID with prefix: {}", actual_pool_id);
+
+        // Now provide initial liquidity to the newly created pool
+        let initial_assets = vec![
+            Coin {
+                denom: uom_denom.clone(),
+                amount: Uint128::new(100_000_000), // 100 OM (6 decimals)
+            },
+            Coin {
+                denom: uusdc_denom.clone(),
+                amount: Uint128::new(100_000_000), // 100 USDC (6 decimals)
+            },
+        ];
+
+        println!(
+            "Providing initial liquidity with assets: {:?}",
+            initial_assets
+        );
+
+        let tx_result = client
+            .provide_liquidity_unchecked(
+                &actual_pool_id,
+                initial_assets,
+                Some(Decimal::percent(5)), // 5% liquidity max slippage
+                Some(Decimal::percent(5)), // 5% swap max slippage
+            )
+            .await?;
+
+        println!(
+            "Pool created successfully! Transaction hash: {}",
+            tx_result.txhash
+        );
+        Ok(actual_pool_id)
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_om_usdc_pool_id(client: &MantraDexClient) -> Option<String> {
+        // Try to create or find the test pool
+        match create_test_pool_if_needed(client).await {
+            Ok(pool_id) => Some(pool_id),
             Err(e) => {
-                println!("Failed to create pool: {:?}", e);
+                println!("Failed to create or find test pool: {:?}", e);
                 None
             }
         }
     }
 
-    pub async fn get_om_usdc_pool_id(client: &MantraDexClient) -> Option<String> {
-        let test_config = load_test_config();
-        let uom_denom = test_config
-            .tokens
-            .get("uom")
-            .unwrap()
-            .denom
-            .clone()
-            .unwrap();
-        let uusdc_denom = test_config
-            .tokens
-            .get("uusdc")
-            .unwrap()
-            .denom
-            .clone()
-            .unwrap();
-        println!("uom_denom: {}", uom_denom);
-        println!("uusdc_denom: {}", uusdc_denom);
-        let pools = client.get_pools(Some(100)).await.unwrap();
-        let mut pool_id: Option<String> = None;
-        for pool in pools {
-            if pool.pool_info.assets.iter().any(|a| a.denom == uom_denom)
-                && pool.pool_info.assets.iter().any(|a| a.denom == uusdc_denom)
-            {
-                pool_id = Some(pool.pool_info.pool_identifier.clone())
-            }
-        }
-        println!("Pool ID: {:?}", pool_id);
-        pool_id
+    /// Check if we should execute write operations (create pools, swaps, etc.)
+    #[allow(dead_code)]
+    pub fn should_execute_writes() -> bool {
+        std::env::var("EXECUTE_WRITES")
+            .unwrap_or_else(|_| "false".to_string())
+            .to_lowercase()
+            == "true"
     }
 }
