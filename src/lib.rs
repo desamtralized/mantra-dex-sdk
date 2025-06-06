@@ -14,5 +14,5 @@ pub use wallet::MantraWallet;
 pub use cosmwasm_std::{Coin, Decimal, Uint128};
 pub use mantra_dex_std::{
     fee::PoolFee,
-    pool_manager::{PoolInfo, PoolType, SwapOperation},
+    pool_manager::{FeatureToggle, PoolInfo, PoolType, SwapOperation},
 };
