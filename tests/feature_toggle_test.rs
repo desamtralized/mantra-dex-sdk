@@ -1,6 +1,6 @@
 mod utils;
 
-use utils::test_utils::{create_test_client, get_om_usdc_pool_id, init_test_env};
+use utils::test_utils::{create_test_client, get_om_usdc_pool_id};
 
 /// Helper function to check if write operations should be executed
 fn should_execute_writes() -> bool {
@@ -12,8 +12,6 @@ fn should_execute_writes() -> bool {
 
 #[tokio::test]
 async fn test_update_pool_features() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -46,8 +44,6 @@ async fn test_update_pool_features() {
 
 #[tokio::test]
 async fn test_enable_pool_withdrawals() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -77,8 +73,6 @@ async fn test_enable_pool_withdrawals() {
 
 #[tokio::test]
 async fn test_disable_pool_withdrawals() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -108,8 +102,6 @@ async fn test_disable_pool_withdrawals() {
 
 #[tokio::test]
 async fn test_enable_pool_deposits() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -139,8 +131,6 @@ async fn test_enable_pool_deposits() {
 
 #[tokio::test]
 async fn test_disable_pool_deposits() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -170,8 +160,6 @@ async fn test_disable_pool_deposits() {
 
 #[tokio::test]
 async fn test_enable_pool_swaps() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -201,8 +189,6 @@ async fn test_enable_pool_swaps() {
 
 #[tokio::test]
 async fn test_disable_pool_swaps() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -232,8 +218,6 @@ async fn test_disable_pool_swaps() {
 
 #[tokio::test]
 async fn test_enable_all_pool_operations() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -263,8 +247,6 @@ async fn test_enable_all_pool_operations() {
 
 #[tokio::test]
 async fn test_disable_all_pool_operations() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -294,8 +276,6 @@ async fn test_disable_all_pool_operations() {
 
 #[tokio::test]
 async fn test_backward_compatibility_global_features() {
-    init_test_env();
-
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -329,8 +309,6 @@ async fn test_backward_compatibility_global_features() {
 
 #[tokio::test]
 async fn test_feature_toggle_method_signatures() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get a test pool

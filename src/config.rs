@@ -143,6 +143,12 @@ pub struct TokenInfo {
     pub logo: Option<String>,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Config {
     /// Create a new configuration with default values
     pub fn new() -> Self {

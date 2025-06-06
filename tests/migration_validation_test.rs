@@ -2,7 +2,6 @@ use cosmwasm_std::{Coin, Decimal, Uint128};
 use mantra_dex_sdk::{Error, MantraDexClient, MantraWallet};
 use std::str::FromStr;
 use std::time::Instant;
-use tokio_test;
 
 mod utils;
 use utils::test_utils::*;
@@ -464,7 +463,7 @@ async fn test_per_pool_feature_toggle_migration() {
 
     // Test global feature toggle (backward compatibility)
     let result = client
-        .update_global_features("test_pool", None, Some(true), None)
+        .update_pool_features("test_pool", None, Some(true), None)
         .await;
 
     match result {

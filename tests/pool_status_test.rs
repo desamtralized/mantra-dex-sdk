@@ -1,13 +1,11 @@
 mod utils;
 
 use mantra_dex_sdk::{client::PoolStatus, Error};
-use utils::test_utils::{create_test_client, get_om_usdc_pool_id, init_test_env};
+use utils::test_utils::{create_test_client, get_om_usdc_pool_id};
 
 /// Test pool status enum functionality
 #[tokio::test]
 async fn test_pool_status_enum() {
-    init_test_env();
-
     // Test Available status
     let available_status = PoolStatus::Available;
     assert!(
@@ -31,8 +29,6 @@ async fn test_pool_status_enum() {
 /// Test pool status extraction from pool info
 #[tokio::test]
 async fn test_get_pool_status() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get a test pool
@@ -65,8 +61,6 @@ async fn test_get_pool_status() {
 /// Test pool status validation before operations
 #[tokio::test]
 async fn test_validate_pool_status() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get a test pool
@@ -99,8 +93,6 @@ async fn test_validate_pool_status() {
 /// Test that swap operations check pool status
 #[tokio::test]
 async fn test_swap_with_pool_status_validation() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get a test pool
@@ -162,8 +154,6 @@ async fn test_swap_with_pool_status_validation() {
 /// Test that provide liquidity operations check pool status
 #[tokio::test]
 async fn test_provide_liquidity_with_pool_status_validation() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get a test pool
@@ -233,8 +223,6 @@ async fn test_provide_liquidity_with_pool_status_validation() {
 /// Test that withdraw liquidity operations check pool status
 #[tokio::test]
 async fn test_withdraw_liquidity_with_pool_status_validation() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get a test pool
@@ -288,8 +276,6 @@ async fn test_withdraw_liquidity_with_pool_status_validation() {
 /// Test pool status validation with non-existent pool
 #[tokio::test]
 async fn test_validate_nonexistent_pool_status() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Test with a non-existent pool ID
@@ -320,8 +306,6 @@ async fn test_validate_nonexistent_pool_status() {
 /// Test pool status functionality with multiple pools
 #[tokio::test]
 async fn test_multiple_pools_status() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get list of pools
@@ -367,8 +351,6 @@ async fn test_multiple_pools_status() {
 /// Test that unchecked operations bypass status validation
 #[tokio::test]
 async fn test_unchecked_operations_bypass_status() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get a test pool

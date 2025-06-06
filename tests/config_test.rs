@@ -1,14 +1,10 @@
 mod utils;
 
 use mantra_dex_sdk::config::{MantraNetworkConfig, NetworkConstants};
-use utils::test_utils::{
-    create_test_network_config, init_test_env, load_contract_addresses, load_test_config,
-};
+use utils::test_utils::{create_test_network_config, load_contract_addresses, load_test_config};
 
 #[test]
 fn test_network_config_loading() {
-    init_test_env();
-
     // Test loading network constants
     let network_result = NetworkConstants::load("mantra-dukong");
     assert!(network_result.is_ok(), "Failed to load network constants");
@@ -39,8 +35,6 @@ fn test_network_config_loading() {
 
 #[test]
 fn test_contract_addresses_loading() {
-    init_test_env();
-
     // Test loading contract addresses
     let contract_addresses = load_contract_addresses("mantra-dukong");
 
@@ -56,8 +50,6 @@ fn test_contract_addresses_loading() {
 
 #[test]
 fn test_test_config_loading() {
-    init_test_env();
-
     // Test loading test configuration
     let test_config = load_test_config();
 
@@ -89,8 +81,6 @@ fn test_test_config_loading() {
 
 #[test]
 fn test_create_network_config() {
-    init_test_env();
-
     // Test creating a network config
     let network_config = create_test_network_config();
 

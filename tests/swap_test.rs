@@ -1,7 +1,7 @@
 mod utils;
 
 use cosmwasm_std::{Coin, Decimal, Uint128};
-use utils::test_utils::{create_test_client, get_om_usdc_pool_id, init_test_env, load_test_config};
+use utils::test_utils::{create_test_client, get_om_usdc_pool_id, load_test_config};
 
 /// This test will only execute actual swaps if the EXECUTE_WRITES env var is set to true
 fn should_execute_writes() -> bool {
@@ -13,7 +13,6 @@ fn should_execute_writes() -> bool {
 
 #[tokio::test]
 async fn test_list_all_pools() {
-    init_test_env();
 
     // This is a read-only test, so it doesn't need the EXECUTE_WRITES flag
     let client = create_test_client().await;
@@ -30,7 +29,7 @@ async fn test_list_all_pools() {
                 for asset in &pool.pool_info.assets {
                     println!("    {} - {}", asset.denom, asset.amount);
                 }
-                println!("");
+                println!();
             }
         }
         Err(e) => {
@@ -43,7 +42,6 @@ async fn test_list_all_pools() {
 #[tokio::test]
 async fn test_swap_operation() {
     println!("Starting swap test...");
-    init_test_env();
     println!("Environment initialized");
 
     // Skip actual swap unless EXECUTE_WRITES is set
@@ -136,7 +134,6 @@ async fn test_swap_operation() {
 
 #[tokio::test]
 async fn test_provide_liquidity() {
-    init_test_env();
 
     // Skip actual liquidity provision unless EXECUTE_WRITES is set
     if !should_execute_writes() {
@@ -196,7 +193,6 @@ async fn test_provide_liquidity() {
 
 #[tokio::test]
 async fn test_withdraw_liquidity() {
-    init_test_env();
 
     // Skip actual liquidity withdrawal unless EXECUTE_WRITES is set
     if !should_execute_writes() {
@@ -240,7 +236,6 @@ async fn test_withdraw_liquidity() {
 
 #[tokio::test]
 async fn test_get_pool() {
-    init_test_env();
 
     // This is a read-only test, so it doesn't need the EXECUTE_WRITES flag
     let client = create_test_client().await;
@@ -273,7 +268,6 @@ async fn test_get_pool() {
 
 #[tokio::test]
 async fn test_simulate_swap() {
-    init_test_env();
 
     // This is a read-only test, so it doesn't need the EXECUTE_WRITES flag
     let client = create_test_client().await;
