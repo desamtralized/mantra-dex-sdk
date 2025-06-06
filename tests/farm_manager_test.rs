@@ -1,12 +1,10 @@
 mod utils;
 
-use utils::test_utils::{create_test_client, init_test_env};
+use utils::test_utils::create_test_client;
 
 /// Test if farm manager functionality is properly accessible
 #[tokio::test]
 async fn test_farm_manager_configuration() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Check if farm manager contract address is configured
@@ -34,8 +32,6 @@ async fn test_farm_manager_configuration() {
 /// Test basic claim functionality (backward compatibility)
 #[tokio::test]
 async fn test_claim_rewards_backward_compatibility() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Only run this test if we should execute writes
@@ -66,8 +62,6 @@ async fn test_claim_rewards_backward_compatibility() {
 /// Test enhanced claim functionality with epoch parameter
 #[tokio::test]
 async fn test_claim_rewards_with_epoch() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Only run this test if we should execute writes
@@ -123,8 +117,6 @@ async fn test_claim_rewards_with_epoch() {
 /// Test query rewards functionality
 #[tokio::test]
 async fn test_query_rewards() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Only run if farm manager is configured
@@ -157,8 +149,6 @@ async fn test_query_rewards() {
 /// Test query rewards with epoch parameter
 #[tokio::test]
 async fn test_query_rewards_with_epoch() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Only run if farm manager and epoch manager are configured
@@ -213,8 +203,6 @@ async fn test_query_rewards_with_epoch() {
 /// Test epoch validation functionality
 #[tokio::test]
 async fn test_epoch_validation() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Only run if epoch manager is configured
@@ -280,8 +268,6 @@ fn should_execute_writes() -> bool {
 /// Test the claim rewards method signature variations
 #[tokio::test]
 async fn test_claim_method_signatures() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Only run if farm manager is configured

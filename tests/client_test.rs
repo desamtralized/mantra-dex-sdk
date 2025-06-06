@@ -2,14 +2,11 @@ mod utils;
 
 use mantra_dex_sdk::{MantraDexClient, MantraWallet};
 use utils::test_utils::{
-    create_test_client, create_test_network_config, get_or_create_om_usdc_pool_id, init_test_env,
-    load_test_config,
+    create_test_client, create_test_network_config, get_or_create_om_usdc_pool_id, load_test_config,
 };
 
 #[tokio::test]
 async fn test_client_creation() {
-    init_test_env();
-
     let network_config = create_test_network_config();
     let client_result = MantraDexClient::new(network_config.clone()).await;
 
@@ -39,8 +36,6 @@ async fn test_client_creation() {
 
 #[tokio::test]
 async fn test_client_with_wallet() {
-    init_test_env();
-
     let network_config = create_test_network_config();
     let client = MantraDexClient::new(network_config.clone())
         .await
@@ -68,8 +63,6 @@ async fn test_client_with_wallet() {
 
 #[tokio::test]
 async fn test_client_without_wallet() {
-    init_test_env();
-
     let network_config = create_test_network_config();
     let client = MantraDexClient::new(network_config)
         .await
@@ -82,8 +75,6 @@ async fn test_client_without_wallet() {
 
 #[tokio::test]
 async fn test_client_query_pool() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get or create pool ID
@@ -111,8 +102,6 @@ async fn test_client_query_pool() {
 
 #[tokio::test]
 async fn test_client_query_pools() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Query all pools
@@ -140,7 +129,7 @@ async fn test_client_query_pools() {
                         // Query pools again to verify
                         let updated_pools = client.get_pools(Some(10)).await.unwrap();
                         assert!(
-                            updated_pools.len() > 0,
+                            !updated_pools.is_empty(),
                             "Should have at least one pool after creation"
                         );
                     }
@@ -166,8 +155,6 @@ async fn test_client_query_pools() {
 
 #[tokio::test]
 async fn test_client_simulate_swap() {
-    init_test_env();
-
     let client = create_test_client().await;
     let test_config = load_test_config();
 
@@ -239,8 +226,6 @@ async fn test_client_simulate_swap() {
 
 #[tokio::test]
 async fn test_client_get_last_block_height() {
-    init_test_env();
-
     let client = create_test_client().await;
     let last_block_height = client.get_last_block_height().await;
     assert!(
@@ -258,8 +243,6 @@ async fn test_client_get_last_block_height() {
 
 #[tokio::test]
 async fn test_client_get_balances() {
-    init_test_env();
-
     let client = create_test_client().await;
     let balances = client.get_balances().await;
     assert!(
@@ -273,8 +256,6 @@ async fn test_client_get_balances() {
 
 #[tokio::test]
 async fn test_pool_creation_if_needed() {
-    init_test_env();
-
     // Only run this test if EXECUTE_WRITES is enabled
     let should_execute = std::env::var("EXECUTE_WRITES")
         .unwrap_or_else(|_| "false".to_string())
@@ -289,7 +270,7 @@ async fn test_pool_creation_if_needed() {
     let client = create_test_client().await;
 
     // Test that we can get or create a pool
-    match get_om_usdc_pool_id(&client).await {
+    match get_or_create_om_usdc_pool_id(&client).await {
         Some(pool_id) => {
             println!("Successfully found/created pool: {}", pool_id);
 

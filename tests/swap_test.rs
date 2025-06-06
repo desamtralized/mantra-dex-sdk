@@ -1,14 +1,10 @@
 mod utils;
 
 use cosmwasm_std::{Coin, Decimal, Uint128};
-use utils::test_utils::{
-    create_test_client, get_or_create_om_usdc_pool_id, init_test_env, load_test_config,
-};
+use utils::test_utils::{create_test_client, get_or_create_om_usdc_pool_id, load_test_config};
 
 #[tokio::test]
 async fn test_list_all_pools() {
-    init_test_env();
-
     // This is a read-only test, so it doesn't need the EXECUTE_WRITES flag
     let client = create_test_client().await;
 
@@ -24,7 +20,7 @@ async fn test_list_all_pools() {
                 for asset in &pool.pool_info.assets {
                     println!("    {} - {}", asset.denom, asset.amount);
                 }
-                println!("");
+                println!();
             }
         }
         Err(e) => {
@@ -35,7 +31,8 @@ async fn test_list_all_pools() {
 
 #[tokio::test]
 async fn test_swap_operation() {
-    init_test_env();
+    println!("Starting swap test...");
+    println!("Environment initialized");
 
     // Skip actual swap unless EXECUTE_WRITES is set
     if !utils::test_utils::should_execute_writes() {
@@ -142,8 +139,6 @@ async fn test_swap_operation() {
 
 #[tokio::test]
 async fn test_provide_liquidity() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get or create pool ID
@@ -228,8 +223,6 @@ async fn test_provide_liquidity() {
 
 #[tokio::test]
 async fn test_withdraw_liquidity() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get or create pool ID
@@ -245,8 +238,6 @@ async fn test_withdraw_liquidity() {
 
 #[tokio::test]
 async fn test_get_pool() {
-    init_test_env();
-
     let client = create_test_client().await;
 
     // Get or create pool ID
@@ -269,8 +260,6 @@ async fn test_get_pool() {
 
 #[tokio::test]
 async fn test_simulate_swap() {
-    init_test_env();
-
     let client = create_test_client().await;
     let test_config = load_test_config();
 

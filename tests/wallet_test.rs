@@ -1,14 +1,10 @@
 mod utils;
 
 use mantra_dex_sdk::{Error, MantraWallet};
-use utils::test_utils::{
-    create_test_client, create_test_wallet, init_test_env, load_test_config,
-};
+use utils::test_utils::{create_test_client, create_test_wallet, load_test_config};
 
 #[tokio::test]
 async fn test_wallet_creation_from_mnemonic() {
-    init_test_env();
-
     let config = load_test_config();
     let mnemonic = config
         .wallets
@@ -33,8 +29,6 @@ async fn test_wallet_creation_from_mnemonic() {
 
 #[tokio::test]
 async fn test_wallet_generate() {
-    init_test_env();
-
     // Generate a new wallet
     let (wallet, mnemonic) = MantraWallet::generate().expect("Failed to generate wallet");
 
@@ -71,8 +65,6 @@ async fn test_wallet_generate() {
 
 #[tokio::test]
 async fn test_wallet_sign_tx() {
-    init_test_env();
-
     let wallet = create_test_wallet("primary");
 
     // Create a simple fee
@@ -99,8 +91,6 @@ async fn test_wallet_sign_tx() {
 
 #[tokio::test]
 async fn test_wallet_info() {
-    init_test_env();
-
     let wallet = create_test_wallet("primary");
     let wallet_info = wallet.info();
 
@@ -126,8 +116,6 @@ async fn test_wallet_info() {
 
 #[tokio::test]
 async fn test_wallet_invalid_mnemonic() {
-    init_test_env();
-
     // Try to create a wallet with an invalid mnemonic
     let result = MantraWallet::from_mnemonic("invalid mnemonic", 0);
     assert!(result.is_err(), "Should fail with invalid mnemonic");
@@ -147,7 +135,6 @@ async fn test_wallet_invalid_mnemonic() {
 ///
 #[tokio::test]
 async fn test_wallet_get_balances() {
-    init_test_env();
     let client = create_test_client().await;
     let balances = client.get_balances().await.unwrap();
     println!("Balances: {:?}", balances);

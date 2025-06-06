@@ -1,7 +1,6 @@
 use cosmwasm_std::{Coin, Decimal, Uint128};
-use mantra_dex_sdk::{Error, MantraDexClient};
+use mantra_dex_sdk::Error;
 use std::str::FromStr;
-use tokio_test;
 
 mod utils;
 use utils::test_utils::*;
@@ -257,7 +256,7 @@ async fn test_comprehensive_pool_operations_flow() {
     let pool_id = "comprehensive_test_pool";
 
     // Step 1: Validate pool status
-    let status_result = client.validate_pool_status(pool_id).await;
+    let _status_result = client.validate_pool_status(pool_id).await;
 
     // Step 2: Simulate swap
     let offer_asset = Coin {

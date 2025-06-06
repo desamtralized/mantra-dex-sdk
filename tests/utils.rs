@@ -6,13 +6,10 @@ use mantra_dex_sdk::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Once;
 
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
-
-    static INIT: Once = Once::new();
 
     /// Test configuration loaded from config/test.toml
     #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,14 +81,6 @@ pub mod test_utils {
             .expect("Failed to deserialize test config")
     }
 
-    /// Initialize test environment
-    pub fn init_test_env() {
-        INIT.call_once(|| {
-            // Initialize environment for tests
-            dotenv::from_path(".env.test").ok();
-        });
-    }
-
     /// Create a network config for testing
     pub fn create_test_network_config() -> MantraNetworkConfig {
         let test_config = load_test_config();
@@ -160,10 +149,10 @@ pub mod test_utils {
         let test_config = load_test_config();
 
         // Get the wallet mnemonic
-        let mnemonic = test_config.wallets.get(wallet_name).expect(&format!(
-            "Wallet '{}' not found in test config",
-            wallet_name
-        ));
+        let mnemonic = test_config
+            .wallets
+            .get(wallet_name)
+            .unwrap_or_else(|| panic!("Wallet '{}' not found in test config", wallet_name));
 
         // Create wallet
         MantraWallet::from_mnemonic(mnemonic, 0).expect("Failed to create wallet from mnemonic")

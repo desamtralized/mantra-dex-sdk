@@ -1,13 +1,12 @@
 mod utils;
 
 use cosmwasm_std::Decimal;
-use mantra_dex_sdk::{Error, MantraDexClient};
-use utils::test_utils::{create_test_client, init_test_env};
+use mantra_dex_sdk::Error;
+use utils::test_utils::create_test_client;
 
 /// Test fee validation with valid fees (under 20% total)
 #[tokio::test]
 async fn test_valid_fee_structure() {
-    init_test_env();
     let client = create_test_client().await;
 
     // Test valid fee structure (total = 5%)
@@ -31,7 +30,6 @@ async fn test_valid_fee_structure() {
 /// Test fee validation with maximum allowed fees (exactly 20%)
 #[tokio::test]
 async fn test_maximum_allowed_fees() {
-    init_test_env();
     let client = create_test_client().await;
 
     // Test maximum allowed fee structure (total = 20%)
@@ -51,7 +49,6 @@ async fn test_maximum_allowed_fees() {
 /// Test fee validation with excessive fees (over 20% total)
 #[tokio::test]
 async fn test_excessive_fee_structure() {
-    init_test_env();
     let client = create_test_client().await;
 
     // Test excessive fee structure (total = 25%)
@@ -88,7 +85,6 @@ async fn test_excessive_fee_structure() {
 /// Test fee validation with multiple extra fees
 #[tokio::test]
 async fn test_multiple_extra_fees() {
-    init_test_env();
     let client = create_test_client().await;
 
     // Test with multiple extra fees that sum to exactly 20% (should pass)
@@ -129,7 +125,6 @@ async fn test_multiple_extra_fees() {
 /// Test fee validation with zero fees
 #[tokio::test]
 async fn test_zero_fees() {
-    init_test_env();
     let client = create_test_client().await;
 
     // Test with all zero fees
@@ -146,7 +141,6 @@ async fn test_zero_fees() {
 /// Test fee validation with no optional fees
 #[tokio::test]
 async fn test_minimal_fee_structure() {
-    init_test_env();
     let client = create_test_client().await;
 
     // Test with only required fees, no optional ones
@@ -167,7 +161,6 @@ async fn test_minimal_fee_structure() {
 /// Test direct fee validation method
 #[tokio::test]
 async fn test_direct_fee_validation() {
-    init_test_env();
     let client = create_test_client().await;
 
     // Create a valid fee structure manually

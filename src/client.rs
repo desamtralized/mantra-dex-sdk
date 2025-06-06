@@ -206,7 +206,7 @@ impl MantraDexClient {
         let resp: QuerySmartContractStateResponse =
             QuerySmartContractStateResponse::decode(result.value.as_slice())
                 .map_err(|e| Error::Rpc(format!("Failed to decode query response: {}", e)))?;
-        serde_json::from_slice::<R>(&resp.data.as_slice()).map_err(Into::into)
+        serde_json::from_slice::<R>(resp.data.as_slice()).map_err(Into::into)
     }
 
     /// Execute a contract message
@@ -1174,7 +1174,7 @@ impl MantraDexClient {
         burn_fee: Option<cosmwasm_std::Decimal>,
         extra_fees: Option<Vec<cosmwasm_std::Decimal>>,
     ) -> Result<mantra_dex_std::fee::PoolFee, Error> {
-        let burn_fee = burn_fee.unwrap_or_else(|| cosmwasm_std::Decimal::zero());
+        let burn_fee = burn_fee.unwrap_or_else(cosmwasm_std::Decimal::zero);
         let extra_fees = extra_fees.unwrap_or_default();
 
         let pool_fees = mantra_dex_std::fee::PoolFee {
