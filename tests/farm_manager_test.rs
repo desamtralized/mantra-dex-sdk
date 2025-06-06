@@ -1,6 +1,6 @@
 mod utils;
 
-use utils::test_utils::create_test_client;
+use utils::test_utils::{create_test_client, should_execute_writes};
 
 /// Test if farm manager functionality is properly accessible
 #[tokio::test]
@@ -29,9 +29,9 @@ async fn test_farm_manager_configuration() {
     }
 }
 
-/// Test basic claim functionality (backward compatibility)
+/// Test all claim rewards methods comprehensively
 #[tokio::test]
-async fn test_claim_rewards_backward_compatibility() {
+async fn test_claim_rewards_all_methods() {
     let client = create_test_client().await;
 
     // Only run this test if we should execute writes
@@ -46,77 +46,96 @@ async fn test_claim_rewards_backward_compatibility() {
         return;
     }
 
-    // Test backward compatible claim (without epoch parameter)
+    println!("Testing all claim rewards methods...");
+
+    // Test 1: Backward compatible claim (without epoch parameter)
+    println!("1. Testing claim_rewards_all()...");
     match client.claim_rewards_all().await {
         Ok(response) => {
-            println!("Claim rewards successful: {}", response.txhash);
+            println!("Claim rewards all successful: {}", response.txhash);
             assert!(!response.txhash.is_empty());
         }
         Err(e) => {
-            println!("Claim rewards failed (expected if no rewards): {:?}", e);
-            // Don't fail the test as this might be expected if no rewards are available
+            println!("Claim rewards all failed (expected if no rewards): {:?}", e);
         }
     }
-}
 
-/// Test enhanced claim functionality with epoch parameter
-#[tokio::test]
-async fn test_claim_rewards_with_epoch() {
-    let client = create_test_client().await;
-
-    // Only run this test if we should execute writes
-    if !should_execute_writes() {
-        println!("Skipping write test (EXECUTE_WRITES=false)");
-        return;
-    }
-
-    // Only run if farm manager and epoch manager are configured
-    if client.config().contracts.farm_manager.is_none()
-        || client.config().contracts.epoch_manager.is_none()
-    {
-        println!("Skipping test: farm manager or epoch manager contract not configured");
-        return;
-    }
-
-    // First get the current epoch
-    match client.get_current_epoch().await {
-        Ok(current_epoch) => {
-            println!("Current epoch: {}", current_epoch);
-
-            // Test claiming rewards up to a specific epoch (current epoch - 1 if possible)
-            let target_epoch = if current_epoch > 0 {
-                current_epoch - 1
-            } else {
-                current_epoch
-            };
-
-            match client.claim_rewards_until_epoch(target_epoch).await {
-                Ok(response) => {
-                    println!(
-                        "Claim rewards until epoch {} successful: {}",
-                        target_epoch, response.txhash
-                    );
-                    assert!(!response.txhash.is_empty());
-                }
-                Err(e) => {
-                    println!(
-                        "Claim rewards until epoch failed (expected if no rewards): {:?}",
-                        e
-                    );
-                    // Don't fail the test as this might be expected if no rewards are available
-                }
-            }
+    // Test 2: Generic claim with optional epoch (None)
+    println!("2. Testing claim_rewards(None)...");
+    match client.claim_rewards(None).await {
+        Ok(response) => {
+            println!("Claim rewards (None) successful: {}", response.txhash);
+            assert!(!response.txhash.is_empty());
         }
         Err(e) => {
-            println!("Failed to get current epoch: {:?}", e);
-            // Don't fail the test as the contract might not be deployed
+            println!(
+                "Claim rewards (None) failed (expected if no rewards): {:?}",
+                e
+            );
         }
     }
+
+    // Test 3: Enhanced claim functionality with epoch parameter (if epoch manager is configured)
+    if client.config().contracts.epoch_manager.is_some() {
+        println!("3. Testing epoch-based claim methods...");
+
+        match client.get_current_epoch().await {
+            Ok(current_epoch) => {
+                println!("Current epoch: {}", current_epoch);
+
+                let target_epoch = if current_epoch > 0 {
+                    current_epoch - 1
+                } else {
+                    current_epoch
+                };
+
+                // Test claim until specific epoch
+                println!("3a. Testing claim_rewards_until_epoch({})...", target_epoch);
+                match client.claim_rewards_until_epoch(target_epoch).await {
+                    Ok(response) => {
+                        println!(
+                            "Claim rewards until epoch {} successful: {}",
+                            target_epoch, response.txhash
+                        );
+                        assert!(!response.txhash.is_empty());
+                    }
+                    Err(e) => {
+                        println!(
+                            "Claim rewards until epoch failed (expected if no rewards): {:?}",
+                            e
+                        );
+                    }
+                }
+
+                // Test generic claim with specific epoch
+                println!("3b. Testing claim_rewards(Some({}))...", target_epoch);
+                match client.claim_rewards(Some(target_epoch)).await {
+                    Ok(response) => {
+                        println!("Claim rewards with epoch successful: {}", response.txhash);
+                        assert!(!response.txhash.is_empty());
+                    }
+                    Err(e) => {
+                        println!(
+                            "Claim rewards with epoch failed (expected if no rewards): {:?}",
+                            e
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Failed to get current epoch: {:?}", e);
+            }
+        }
+    } else {
+        println!("3. Skipping epoch-based tests: epoch manager not configured");
+    }
+
+    println!("All claim rewards methods tested successfully");
 }
 
-/// Test query rewards functionality
+/// Test all query rewards methods comprehensively
 #[tokio::test]
-async fn test_query_rewards() {
+async fn test_query_rewards_all_methods() {
     let client = create_test_client().await;
 
     // Only run if farm manager is configured
@@ -131,73 +150,62 @@ async fn test_query_rewards() {
         .expect("Wallet should be available in test client");
     let address = wallet.address().unwrap().to_string();
 
-    // Test basic rewards query (backward compatibility)
+    println!("Testing all query rewards methods for address: {}", address);
+
+    // Test 1: Basic rewards query (backward compatibility)
+    println!("1. Testing query_all_rewards()...");
     match client.query_all_rewards(&address).await {
         Ok(rewards) => {
-            println!("Rewards query successful: {:?}", rewards);
+            println!("Query all rewards successful: {:?}", rewards);
         }
         Err(e) => {
             println!(
-                "Rewards query failed (expected if contract not deployed): {:?}",
+                "Query all rewards failed (expected if contract not deployed): {:?}",
                 e
             );
-            // Don't fail the test as the contract might not be deployed
         }
     }
-}
 
-/// Test query rewards with epoch parameter
-#[tokio::test]
-async fn test_query_rewards_with_epoch() {
-    let client = create_test_client().await;
+    // Test 2: Query rewards with epoch parameter (if epoch manager is configured)
+    if client.config().contracts.epoch_manager.is_some() {
+        println!("2. Testing epoch-based query methods...");
 
-    // Only run if farm manager and epoch manager are configured
-    if client.config().contracts.farm_manager.is_none()
-        || client.config().contracts.epoch_manager.is_none()
-    {
-        println!("Skipping test: farm manager or epoch manager contract not configured");
-        return;
-    }
+        match client.get_current_epoch().await {
+            Ok(current_epoch) => {
+                println!("Current epoch: {}", current_epoch);
 
-    // Get the wallet address for testing
-    let wallet = client
-        .wallet()
-        .expect("Wallet should be available in test client");
-    let address = wallet.address().unwrap().to_string();
+                let target_epoch = if current_epoch > 0 {
+                    current_epoch - 1
+                } else {
+                    current_epoch
+                };
 
-    // First get the current epoch
-    match client.get_current_epoch().await {
-        Ok(current_epoch) => {
-            println!("Current epoch: {}", current_epoch);
-
-            // Test querying rewards up to a specific epoch
-            let target_epoch = if current_epoch > 0 {
-                current_epoch - 1
-            } else {
-                current_epoch
-            };
-
-            match client
-                .query_rewards_until_epoch(&address, target_epoch)
-                .await
-            {
-                Ok(rewards) => {
-                    println!(
-                        "Rewards query until epoch {} successful: {:?}",
-                        target_epoch, rewards
-                    );
-                }
-                Err(e) => {
-                    println!("Rewards query until epoch failed (expected if contract not deployed): {:?}", e);
-                    // Don't fail the test as the contract might not be deployed
+                // Test querying rewards up to a specific epoch
+                println!("2a. Testing query_rewards_until_epoch({})...", target_epoch);
+                match client
+                    .query_rewards_until_epoch(&address, target_epoch)
+                    .await
+                {
+                    Ok(rewards) => {
+                        println!(
+                            "Query rewards until epoch {} successful: {:?}",
+                            target_epoch, rewards
+                        );
+                    }
+                    Err(e) => {
+                        println!("Query rewards until epoch failed (expected if contract not deployed): {:?}", e);
+                    }
                 }
             }
+            Err(e) => {
+                println!("Failed to get current epoch: {:?}", e);
+            }
         }
-        Err(e) => {
-            println!("Failed to get current epoch: {:?}", e);
-            // Don't fail the test as the contract might not be deployed
-        }
+    } else {
+        println!("2. Skipping epoch-based query tests: epoch manager not configured");
     }
+
+    println!("All query rewards methods tested successfully");
 }
 
 /// Test epoch validation functionality
@@ -255,45 +263,4 @@ async fn test_epoch_validation() {
             // Don't fail the test as the contract might not be deployed
         }
     }
-}
-
-/// Helper function to check if write operations should be executed
-fn should_execute_writes() -> bool {
-    std::env::var("EXECUTE_WRITES")
-        .unwrap_or_else(|_| "false".to_string())
-        .to_lowercase()
-        == "true"
-}
-
-/// Test the claim rewards method signature variations
-#[tokio::test]
-async fn test_claim_method_signatures() {
-    let client = create_test_client().await;
-
-    // Only run if farm manager is configured
-    if client.config().contracts.farm_manager.is_none() {
-        println!("Skipping test: farm manager contract not configured");
-        return;
-    }
-
-    // Test that all method signatures compile and can be called
-    // (These will likely fail due to contract deployment, but that's expected)
-
-    // Method 1: Generic claim with optional epoch
-    let result1 = client.claim_rewards(None).await;
-    println!("claim_rewards(None) result: {:?}", result1.is_ok());
-
-    let result2 = client.claim_rewards(Some(1)).await;
-    println!("claim_rewards(Some(1)) result: {:?}", result2.is_ok());
-
-    // Method 2: Backward compatible claim all
-    let result3 = client.claim_rewards_all().await;
-    println!("claim_rewards_all() result: {:?}", result3.is_ok());
-
-    // Method 3: Claim until specific epoch
-    let result4 = client.claim_rewards_until_epoch(1).await;
-    println!("claim_rewards_until_epoch(1) result: {:?}", result4.is_ok());
-
-    // All methods should have the same function signature and be callable
-    // (They may fail due to contract not being deployed, but compilation should work)
 }

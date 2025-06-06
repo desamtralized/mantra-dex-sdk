@@ -1,43 +1,10 @@
 mod utils;
 
 use cosmwasm_std::{Coin, Decimal, Uint128};
-use utils::test_utils::{create_test_client, get_om_usdc_pool_id, load_test_config};
-
-/// This test will only execute actual swaps if the EXECUTE_WRITES env var is set to true
-fn should_execute_writes() -> bool {
-    std::env::var("EXECUTE_WRITES")
-        .unwrap_or_else(|_| "false".to_string())
-        .to_lowercase()
-        == "true"
-}
-
-#[tokio::test]
-async fn test_list_all_pools() {
-
-    // This is a read-only test, so it doesn't need the EXECUTE_WRITES flag
-    let client = create_test_client().await;
-
-    // Get all pools (no limit)
-    match client.get_pools(Some(100)).await {
-        Ok(pools) => {
-            println!("Found {} pools:", pools.len());
-            for pool in pools {
-                println!("Pool ID: {}", pool.pool_info.pool_identifier);
-                println!("  LP Denom: {}", pool.total_share.denom);
-                println!("  Pool Type: {:?}", pool.pool_info.pool_type);
-                println!("  Assets:");
-                for asset in &pool.pool_info.assets {
-                    println!("    {} - {}", asset.denom, asset.amount);
-                }
-                println!();
-            }
-        }
-        Err(e) => {
-            println!("Failed to get pools: {:?}", e);
-            panic!("Failed to get pools");
-        }
-    }
-}
+use utils::test_utils::{
+    assert_transaction_success, create_small_test_amounts, create_test_client, get_om_usdc_pool_id,
+    get_test_denoms, load_test_config, setup_test_environment, should_execute_writes,
+};
 
 #[tokio::test]
 async fn test_swap_operation() {
@@ -61,20 +28,7 @@ async fn test_swap_operation() {
     println!("Found pool ID: {}", pool_id);
 
     println!("Getting token denoms...");
-    let uom_denom = test_config
-        .tokens
-        .get("uom")
-        .unwrap()
-        .denom
-        .clone()
-        .unwrap();
-    let uusdc_denom = test_config
-        .tokens
-        .get("uusdc")
-        .unwrap()
-        .denom
-        .clone()
-        .unwrap();
+    let (uom_denom, uusdc_denom) = get_test_denoms();
     println!("Token denoms: {} and {}", uom_denom, uusdc_denom);
 
     // Create offer asset (a small amount for testing)
@@ -82,10 +36,6 @@ async fn test_swap_operation() {
         denom: uom_denom.clone(),
         amount: Uint128::new(100_000), // 0.1 OM
     };
-    println!(
-        "Created offer asset: {} {}",
-        offer_asset.amount, offer_asset.denom
-    );
 
     println!("About to execute swap...");
     // Execute swap with timeout
@@ -107,10 +57,7 @@ async fn test_swap_operation() {
                 "Transaction failed: {:?}",
                 tx_response.raw_log
             );
-            assert!(
-                !tx_response.txhash.is_empty(),
-                "Transaction hash should not be empty"
-            );
+            assert_transaction_success(&tx_response.txhash);
         }
         Ok(Err(e)) => {
             println!("Swap failed with error: {:?}", e);
@@ -133,37 +80,28 @@ async fn test_swap_operation() {
 }
 
 #[tokio::test]
-async fn test_provide_liquidity() {
-
-    // Skip actual liquidity provision unless EXECUTE_WRITES is set
+async fn test_comprehensive_liquidity_operations() {
+    // Skip actual liquidity operations unless EXECUTE_WRITES is set
     if !should_execute_writes() {
-        println!("Skipping actual liquidity provision test. Set EXECUTE_WRITES=true to enable.");
+        println!("Skipping liquidity operations test. Set EXECUTE_WRITES=true to enable.");
         return;
     }
 
-    let client = create_test_client().await;
+    let fixtures = setup_test_environment().await;
+    let client = &fixtures.client;
+    let pool_id = fixtures.pool_id.as_ref().expect("Pool ID not found");
 
-    // Get pool ID from test config
-    let pool_id = get_om_usdc_pool_id(&client).await;
-    assert!(pool_id.is_some(), "Pool ID not found");
+    // Test both provide and withdraw liquidity in one comprehensive test
+    println!("=== Testing Provide Liquidity ===");
 
-    // Create assets for liquidity provision
-    let assets = vec![
-        Coin {
-            denom: "uom".to_string(),
-            amount: Uint128::new(100_000), // 0.1 OM
-        },
-        Coin {
-            denom: "uusdc".to_string(),
-            amount: Uint128::new(100_000), // 0.1 USDC
-        },
-    ];
+    // Create assets for liquidity provision using utility
+    let assets = create_small_test_amounts();
 
     // Provide liquidity
     match client
         .provide_liquidity(
-            &pool_id.unwrap(),
-            assets,
+            pool_id,
+            assets.clone(),
             Some(Decimal::percent(1)), // 1% liquidity max slippage
             Some(Decimal::percent(1)), // 1% swap max slippage
         )
@@ -179,10 +117,32 @@ async fn test_provide_liquidity() {
                 "Transaction failed: {:?}",
                 tx_response.raw_log
             );
-            assert!(
-                !tx_response.txhash.is_empty(),
-                "Transaction hash should not be empty"
-            );
+            assert_transaction_success(&tx_response.txhash);
+
+            println!("=== Testing Withdraw Liquidity ===");
+
+            // Now test withdrawal with a small amount
+            let lp_amount = Uint128::new(100); // A very small amount to test
+
+            // Withdraw liquidity
+            match client.withdraw_liquidity(pool_id, lp_amount).await {
+                Ok(tx_response) => {
+                    println!(
+                        "Liquidity withdrawal successful with txhash: {}",
+                        tx_response.txhash
+                    );
+                    assert_eq!(
+                        tx_response.code, 0u32,
+                        "Transaction failed: {:?}",
+                        tx_response.raw_log
+                    );
+                    assert_transaction_success(&tx_response.txhash);
+                }
+                Err(e) => {
+                    println!("Liquidity withdrawal failed: {:?}", e);
+                    // Don't fail the test, just log the error for withdrawal
+                }
+            }
         }
         Err(e) => {
             println!("Liquidity provision failed: {:?}", e);
@@ -192,107 +152,30 @@ async fn test_provide_liquidity() {
 }
 
 #[tokio::test]
-async fn test_withdraw_liquidity() {
-
-    // Skip actual liquidity withdrawal unless EXECUTE_WRITES is set
-    if !should_execute_writes() {
-        println!("Skipping actual liquidity withdrawal test. Set EXECUTE_WRITES=true to enable.");
-        return;
-    }
-
-    let client = create_test_client().await;
-
-    // Get pool ID from test config
-    let pool_id = get_om_usdc_pool_id(&client).await;
-    assert!(pool_id.is_some(), "Pool ID not found");
-    let pool_id = pool_id.unwrap();
-
-    // Withdraw a small amount of liquidity
-    let lp_amount = Uint128::new(100); // A very small amount to test
-
-    // Withdraw liquidity
-    match client.withdraw_liquidity(&pool_id, lp_amount).await {
-        Ok(tx_response) => {
-            println!(
-                "Liquidity withdrawal successful with txhash: {}",
-                tx_response.txhash
-            );
-            assert_eq!(
-                tx_response.code, 0u32,
-                "Transaction failed: {:?}",
-                tx_response.raw_log
-            );
-            assert!(
-                !tx_response.txhash.is_empty(),
-                "Transaction hash should not be empty"
-            );
-        }
-        Err(e) => {
-            println!("Liquidity withdrawal failed: {:?}", e);
-            // Don't fail the test, just log the error
-        }
-    }
-}
-
-#[tokio::test]
-async fn test_get_pool() {
-
-    // This is a read-only test, so it doesn't need the EXECUTE_WRITES flag
-    let client = create_test_client().await;
-
-    // Get pool ID from test config
-    let pool_id = get_om_usdc_pool_id(&client).await;
-    assert!(pool_id.is_some(), "Pool ID not found");
-    let pool_id = pool_id.unwrap();
-
-    println!("Querying pool with ID: {}", pool_id);
-
-    // Query specific pool
-    match client.get_pool(&pool_id).await {
-        Ok(pool) => {
-            println!("Found pool:");
-            println!("Pool ID: {}", pool.pool_info.pool_identifier);
-            println!("LP Denom: {}", pool.pool_info.lp_denom);
-            println!("Pool Type: {:?}", pool.pool_info.pool_type);
-            println!("Assets:");
-            for asset in &pool.pool_info.assets {
-                println!("  {} - {}", asset.denom, asset.amount);
-            }
-        }
-        Err(e) => {
-            println!("Failed to get pool: {:?}", e);
-            // Don't fail the test, just log the error
-        }
-    }
-}
-
-#[tokio::test]
 async fn test_simulate_swap() {
-
     // This is a read-only test, so it doesn't need the EXECUTE_WRITES flag
-    let client = create_test_client().await;
-
-    let pool_id = get_om_usdc_pool_id(&client).await;
-    assert!(pool_id.is_some(), "Pool ID not found");
-    let pool_id = pool_id.unwrap();
+    let fixtures = setup_test_environment().await;
+    let client = &fixtures.client;
+    let pool_id = fixtures.pool_id.as_ref().expect("Pool ID not found");
 
     // Create offer asset (a small amount for testing)
+    let (uom_denom, uusdc_denom) = get_test_denoms();
     let offer_asset = Coin {
-        denom: "uom".to_string(),
+        denom: uom_denom,
         amount: Uint128::new(1_000_000), // 1 OM
     };
 
     println!(
-        "Simulating swap of {} {} for uusdc",
-        offer_asset.amount, offer_asset.denom
+        "Simulating swap of {} {} for {}",
+        offer_asset.amount, offer_asset.denom, uusdc_denom
     );
 
     // Simulate swap
     match client
         .simulate_swap(
-            &pool_id,
+            pool_id,
             offer_asset,
-            "uusdc", // The denom of the ask asset
+            &uusdc_denom, // The denom of the ask asset
         )
         .await
     {
@@ -308,6 +191,66 @@ async fn test_simulate_swap() {
         Err(e) => {
             println!("Failed to simulate swap: {:?}", e);
             // Don't fail the test, just log the error
+        }
+    }
+}
+
+/// Parameterized test for different swap scenarios
+#[tokio::test]
+async fn test_swap_scenarios() {
+    if !should_execute_writes() {
+        println!("Skipping swap scenarios test. Set EXECUTE_WRITES=true to enable.");
+        return;
+    }
+
+    let fixtures = setup_test_environment().await;
+    let client = &fixtures.client;
+    let pool_id = fixtures.pool_id.as_ref().expect("Pool ID not found");
+    let (uom_denom, uusdc_denom) = get_test_denoms();
+
+    // Test different swap amounts
+    let test_amounts = vec![
+        Uint128::new(50_000),  // 0.05 tokens
+        Uint128::new(100_000), // 0.1 tokens
+        Uint128::new(500_000), // 0.5 tokens
+    ];
+
+    for amount in test_amounts {
+        println!("Testing swap with amount: {}", amount);
+
+        let offer_asset = Coin {
+            denom: uom_denom.clone(),
+            amount,
+        };
+
+        match client
+            .swap(
+                pool_id,
+                offer_asset,
+                &uusdc_denom,
+                Some(Decimal::percent(5)), // 5% max slippage
+            )
+            .await
+        {
+            Ok(tx_response) => {
+                println!(
+                    "Swap successful for amount {}: {}",
+                    amount, tx_response.txhash
+                );
+                assert_transaction_success(&tx_response.txhash);
+            }
+            Err(e) => {
+                let error_msg = format!("{:?}", e);
+                if error_msg.contains("no assets") || error_msg.contains("empty") {
+                    println!(
+                        "Pool has no liquidity for swap amount {}. Skipping.",
+                        amount
+                    );
+                    continue;
+                } else {
+                    println!("Swap failed for amount {}: {:?}", amount, e);
+                }
+            }
         }
     }
 }

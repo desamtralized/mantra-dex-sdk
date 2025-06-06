@@ -247,92 +247,12 @@ async fn test_performance_regression() {
         query_time
     );
 
-    // Test fee validation performance
-    let start = Instant::now();
-    let protocol_fee = Decimal::from_str("0.01").unwrap();
-    let swap_fee = Decimal::from_str("0.01").unwrap();
-    let burn_fee = Some(Decimal::from_str("0.01").unwrap());
-
-    for _ in 0..1000 {
-        let _result = client.create_validated_pool_fees(protocol_fee, swap_fee, burn_fee, None);
-    }
-    let validation_time = start.elapsed();
-
-    println!(
-        "Fee validation time (1000 iterations): {:?}",
-        validation_time
-    );
-
-    // Fee validation should be very fast (under 1 second for 1000 iterations)
-    assert!(
-        validation_time.as_millis() < 1000,
-        "Fee validation too slow: {:?}",
-        validation_time
-    );
+    // Test performance of various operations (removed fee validation - now in fee_validation_test.rs)
 
     println!("✓ Performance regression tests passed");
 }
 
-/// Test enhanced fee structure validation and parsing
-#[tokio::test]
-async fn test_enhanced_fee_structure_migration() {
-    let client = create_test_client().await;
-
-    // Test fee structure with nested Fee objects
-    let protocol_fee = Decimal::from_str("0.005").unwrap(); // 0.5%
-    let swap_fee = Decimal::from_str("0.003").unwrap(); // 0.3%
-    let burn_fee = Some(Decimal::from_str("0.001").unwrap()); // 0.1%
-    let extra_fees = Some(vec![
-        Decimal::from_str("0.001").unwrap(), // 0.1%
-        Decimal::from_str("0.002").unwrap(), // 0.2%
-    ]);
-
-    // Test fee validation with new structure
-    let result = client.create_validated_pool_fees(protocol_fee, swap_fee, burn_fee, extra_fees);
-
-    match result {
-        Ok(fees) => {
-            println!("✓ Enhanced fee structure validation successful");
-            println!("  - Protocol fee: {}", fees.protocol_fee.share);
-            println!("  - Swap fee: {}", fees.swap_fee.share);
-            println!("  - Burn fee: {}", fees.burn_fee.share);
-            println!("  - Extra fees count: {}", fees.extra_fees.len());
-        }
-        Err(e) => {
-            panic!("Enhanced fee structure validation failed: {:?}", e);
-        }
-    }
-
-    // Test fee validation with excessive fees (should fail)
-    let excessive_protocol_fee = Decimal::from_str("0.15").unwrap(); // 15%
-    let excessive_swap_fee = Decimal::from_str("0.10").unwrap(); // 10%
-    let excessive_burn_fee = Some(Decimal::from_str("0.05").unwrap()); // 5%
-                                                                       // Total: 30% > 20% limit
-
-    let result = client.create_validated_pool_fees(
-        excessive_protocol_fee,
-        excessive_swap_fee,
-        excessive_burn_fee,
-        None,
-    );
-
-    assert!(
-        result.is_err(),
-        "Fee validation should fail for excessive fees"
-    );
-
-    match result {
-        Err(Error::FeeValidation(msg)) => {
-            println!("✓ Fee validation correctly rejects excessive fees: {}", msg);
-        }
-        Err(e) => {
-            panic!("Expected fee validation error, got: {:?}", e);
-        }
-        Ok(_) => {
-            panic!("Fee validation should have failed for excessive fees");
-        }
-    }
-}
+// Enhanced fee structure validation moved to fee_validation_test.rs
 
 /// Test pool status handling migration
 #[tokio::test]

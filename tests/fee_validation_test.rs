@@ -2,6 +2,8 @@ mod utils;
 
 use cosmwasm_std::Decimal;
 use mantra_dex_sdk::Error;
+use std::str::FromStr;
+use std::time::Instant;
 use utils::test_utils::create_test_client;
 
 /// Test fee validation with valid fees (under 20% total)
@@ -202,5 +204,97 @@ async fn test_direct_fee_validation() {
     assert!(
         result.is_err(),
         "Invalid fees should fail direct validation"
+    );
+}
+
+/// Test enhanced fee structure validation and parsing (moved from migration tests)
+#[tokio::test]
+async fn test_enhanced_fee_structure() {
+    let client = create_test_client().await;
+
+    // Test fee structure with nested Fee objects
+    let protocol_fee = Decimal::from_str("0.005").unwrap(); // 0.5%
+    let swap_fee = Decimal::from_str("0.003").unwrap(); // 0.3%
+    let burn_fee = Some(Decimal::from_str("0.001").unwrap()); // 0.1%
+    let extra_fees = Some(vec![
+        Decimal::from_str("0.001").unwrap(), // 0.1%
+        Decimal::from_str("0.002").unwrap(), // 0.2%
+    ]);
+
+    // Test fee validation with new structure
+    let result = client.create_validated_pool_fees(protocol_fee, swap_fee, burn_fee, extra_fees);
+
+    match result {
+        Ok(fees) => {
+            assert_eq!(fees.protocol_fee.share, Decimal::from_str("0.005").unwrap());
+            assert_eq!(fees.swap_fee.share, Decimal::from_str("0.003").unwrap());
+            assert_eq!(fees.burn_fee.share, Decimal::from_str("0.001").unwrap());
+            assert_eq!(fees.extra_fees.len(), 2);
+            assert_eq!(
+                fees.extra_fees[0].share,
+                Decimal::from_str("0.001").unwrap()
+            );
+            assert_eq!(
+                fees.extra_fees[1].share,
+                Decimal::from_str("0.002").unwrap()
+            );
+        }
+        Err(e) => {
+            panic!("Enhanced fee structure validation failed: {:?}", e);
+        }
+    }
+
+    // Test fee validation with excessive fees (should fail)
+    let excessive_protocol_fee = Decimal::from_str("0.15").unwrap(); // 15%
+    let excessive_swap_fee = Decimal::from_str("0.10").unwrap(); // 10%
+    let excessive_burn_fee = Some(Decimal::from_str("0.05").unwrap()); // 5%
+                                                                       // Total: 30% > 20% limit
+
+    let result = client.create_validated_pool_fees(
+        excessive_protocol_fee,
+        excessive_swap_fee,
+        excessive_burn_fee,
+        None,
+    );
+
+    assert!(
+        result.is_err(),
+        "Fee validation should fail for excessive fees"
+    );
+
+    match result {
+        Err(Error::FeeValidation(msg)) => {
+            assert!(msg.contains("exceed maximum allowed"));
+        }
+        Err(e) => {
+            panic!("Expected fee validation error, got: {:?}", e);
+        }
+        Ok(_) => {
+            panic!("Fee validation should have failed for excessive fees");
+        }
+    }
+}
+
+/// Test fee validation performance (moved from migration tests)
+#[tokio::test]
+async fn test_fee_validation_performance() {
+    let client = create_test_client().await;
+
+    // Test fee validation performance
+    let start = Instant::now();
+    let protocol_fee = Decimal::from_str("0.01").unwrap();
+    let swap_fee = Decimal::from_str("0.01").unwrap();
+    let burn_fee = Some(Decimal::from_str("0.01").unwrap());
+
+    for _ in 0..1000 {
+        let _result = client.create_validated_pool_fees(protocol_fee, swap_fee, burn_fee, None);
+    }
+    let validation_time = start.elapsed();
+
+    // Fee validation should be very fast (under 1 second for 1000 iterations)
+    assert!(
+        validation_time.as_millis() < 1000,
+        "Fee validation too slow: {:?}",
+        validation_time
     );
 }

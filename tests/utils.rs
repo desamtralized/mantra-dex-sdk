@@ -281,4 +281,164 @@ pub mod test_utils {
             }
         }
     }
+
+    /// Check if we should execute write operations (creates, swaps, etc.)
+    /// This helps prevent accidental writes during read-only testing
+    pub fn should_execute_writes() -> bool {
+        std::env::var("EXECUTE_WRITES").unwrap_or_else(|_| "false".to_string()) == "true"
+    }
+
+    /// Test fixtures containing commonly needed test objects
+    pub struct TestFixtures {
+        pub client: MantraDexClient,
+        pub pool_id: Option<String>,
+        pub test_assets: Vec<Coin>,
+        pub wallet: MantraWallet,
+    }
+
+    impl TestFixtures {
+        /// Create a new TestFixtures instance with a test client and pool
+        pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
+            let client = create_test_client().await;
+            let wallet = create_test_wallet("primary");
+            let pool_id = get_om_usdc_pool_id(&client).await;
+            let test_assets = create_test_assets();
+
+            Ok(TestFixtures {
+                client,
+                pool_id,
+                test_assets,
+                wallet,
+            })
+        }
+    }
+
+    /// Setup test environment with all common fixtures
+    pub async fn setup_test_environment() -> TestFixtures {
+        TestFixtures::new()
+            .await
+            .expect("Failed to setup test environment")
+    }
+
+    /// Create standard test assets (OM and USDC)
+    pub fn create_test_assets() -> Vec<Coin> {
+        let test_config = load_test_config();
+        let uom_denom = test_config
+            .tokens
+            .get("uom")
+            .unwrap()
+            .denom
+            .clone()
+            .unwrap();
+        let uusdc_denom = test_config
+            .tokens
+            .get("uusdc")
+            .unwrap()
+            .denom
+            .clone()
+            .unwrap();
+
+        vec![
+            Coin {
+                denom: uom_denom,
+                amount: Uint128::new(10_000_000), // 10 OM
+            },
+            Coin {
+                denom: uusdc_denom,
+                amount: Uint128::new(10_000_000), // 10 USDC
+            },
+        ]
+    }
+
+    /// Create small test amounts for basic testing
+    pub fn create_small_test_amounts() -> Vec<Coin> {
+        let test_config = load_test_config();
+        let uom_denom = test_config
+            .tokens
+            .get("uom")
+            .unwrap()
+            .denom
+            .clone()
+            .unwrap();
+        let uusdc_denom = test_config
+            .tokens
+            .get("uusdc")
+            .unwrap()
+            .denom
+            .clone()
+            .unwrap();
+
+        vec![
+            Coin {
+                denom: uom_denom,
+                amount: Uint128::new(1_000_000), // 1 OM
+            },
+            Coin {
+                denom: uusdc_denom,
+                amount: Uint128::new(1_000_000), // 1 USDC
+            },
+        ]
+    }
+
+    /// Get test token denominations
+    pub fn get_test_denoms() -> (String, String) {
+        let test_config = load_test_config();
+        let uom_denom = test_config
+            .tokens
+            .get("uom")
+            .unwrap()
+            .denom
+            .clone()
+            .unwrap();
+        let uusdc_denom = test_config
+            .tokens
+            .get("uusdc")
+            .unwrap()
+            .denom
+            .clone()
+            .unwrap();
+        (uom_denom, uusdc_denom)
+    }
+
+    /// Handle expected contract errors and return true if error contains expected message
+    pub fn handle_expected_contract_error<T>(
+        result: Result<T, Box<dyn std::error::Error>>,
+        expected_msg: &str,
+    ) -> bool {
+        match result {
+            Err(error) => {
+                let error_msg = error.to_string();
+                error_msg.contains(expected_msg)
+            }
+            Ok(_) => false,
+        }
+    }
+
+    /// Assert that a transaction was successful
+    pub fn assert_transaction_success(txhash: &str) {
+        assert!(!txhash.is_empty(), "Transaction hash should not be empty");
+        assert!(txhash.len() > 10, "Transaction hash should be meaningful");
+    }
+
+    /// Expect contract error containing specific substring
+    pub fn expect_contract_error_containing<T>(
+        result: Result<T, Box<dyn std::error::Error>>,
+        substring: &str,
+    ) {
+        match result {
+            Err(error) => {
+                let error_msg = error.to_string();
+                assert!(
+                    error_msg.contains(substring),
+                    "Expected error to contain '{}', but got: {}",
+                    substring,
+                    error_msg
+                );
+            }
+            Ok(_) => panic!(
+                "Expected an error containing '{}', but operation succeeded",
+                substring
+            ),
+        }
+    }
 }
