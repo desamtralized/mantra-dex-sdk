@@ -1,14 +1,6 @@
 mod utils;
 
-use utils::test_utils::{create_test_client, get_om_usdc_pool_id};
-
-/// Helper function to check if write operations should be executed
-fn should_execute_writes() -> bool {
-    std::env::var("EXECUTE_WRITES")
-        .unwrap_or_else(|_| "false".to_string())
-        .to_lowercase()
-        == "true"
-}
+use utils::test_utils::{create_test_client, get_om_usdc_pool_id, should_execute_writes};
 
 #[tokio::test]
 async fn test_update_pool_features() {

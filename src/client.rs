@@ -1157,16 +1157,7 @@ impl MantraDexClient {
     /// * Returns `FeeValidation` error if total fees exceed 20%
     /// * Returns `FeeValidation` error if any individual fee is negative
     ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let pool_fees = client.create_validated_pool_fees(
-    ///     Decimal::percent(1),  // 1% protocol fee
-    ///     Decimal::percent(3),  // 3% swap fee  
-    ///     Some(Decimal::percent(1)), // 1% burn fee
-    ///     None, // no extra fees
-    /// )?;
-    /// ```
+
     pub fn create_validated_pool_fees(
         &self,
         protocol_fee: cosmwasm_std::Decimal,

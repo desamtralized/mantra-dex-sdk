@@ -2,7 +2,7 @@ use config::{Config as ConfigLoader, File};
 use cosmwasm_std::{Coin, Decimal, Uint128};
 use mantra_dex_sdk::{
     config::{ContractAddresses, MantraNetworkConfig, NetworkConstants},
-    MantraDexClient, MantraWallet, PoolFee, PoolType,
+    MantraDexClient, MantraWallet,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -159,6 +159,7 @@ pub mod test_utils {
     }
 
     /// Get or create the OM/USDC pool for testing
+    #[allow(dead_code)]
     pub async fn get_or_create_om_usdc_pool_id(client: &MantraDexClient) -> Option<String> {
         // Try to create or find the test pool
         match create_test_pool_if_needed(client).await {
