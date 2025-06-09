@@ -11,19 +11,19 @@ deployer = "mantra1x5nk33zpglp4ge6q9a8xx3zceqf4g8nvaggjmc"
 [mantra-dukong.epoch_manager]
 code_id = 90
 version = "1.0.0"
-address = "mantra128evmx0gxlam8jlmjq6f39z04dugl9wqxuayqmuctq56p4p8ruksn30429"
+address = "mantra1kz0gcs8n0qa9rje5zdrlwqccxlwu8zttzmdtxhdq0jpk3efjs37qr4s2sv"
 
 [mantra-dukong.farm_manager]
 code_id = 109
 version = "1.0.0"
-address = "mantra1n8eczspq08pphp0xsfusecherwha570qpzt5cfzkgym45efchj2s8jrqf4"
+address = "mantra1h3ypj6fhpn4tegj0flhx42j5c4jejq45dypyjy7wdpr268amh5ssa4nnzf"
 
 [mantra-dukong.fee_collector]
 code_id = 54
 version = "1.0.0"
-address = "mantra1mfp8jd8p9jyrt5pgkzn6jpf4ng0stc68jmpw3t35lqtgkkrv2fhs569tlr"
+address = "mantra1ze9rccntuvd37gs5fv8ddtjtaytaj4944zn3mksdnne8zyntjmgsg9syav"
 
 [mantra-dukong.pool_manager]
 code_id = 532
 version = "1.2.0"
-address = "mantra1us7rryvauhpe82fff0t6gjthdraqmtm5gw8c808f6eqzuxmulacqzkzdal" 
+address = "mantra1vwj600jud78djej7ttq44dktu4wr3t2yrrsjgmld8v3jq8mud68q5w7455"

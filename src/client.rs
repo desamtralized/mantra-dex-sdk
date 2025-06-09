@@ -29,6 +29,12 @@ use crate::config::MantraNetworkConfig;
 use crate::error::Error;
 use crate::wallet::MantraWallet;
 
+// Re-export types from mantra-dex-std for convenience
+pub use mantra_dex_std::{
+    fee::PoolFee,
+    pool_manager::{PoolInfo, PoolType},
+};
+
 /// Mantra DEX client for interacting with the network
 pub struct MantraDexClient {
     /// RPC client for the Mantra network
@@ -481,5 +487,32 @@ impl MantraDexClient {
             }],
         )
         .await
+    }
+
+    /// Create a new pool with the specified parameters
+    pub async fn create_pool(
+        &self,
+        asset_denoms: Vec<String>,
+        asset_decimals: Vec<u8>,
+        pool_fees: PoolFee,
+        pool_type: PoolType,
+        pool_identifier: Option<String>,
+    ) -> Result<TxResponse, Error> {
+        let msg = pool_manager::ExecuteMsg::CreatePool {
+            asset_denoms,
+            asset_decimals,
+            pool_fees,
+            pool_type,
+            pool_identifier,
+        };
+
+        println!("Create pool message: {:?}", msg);
+
+        let pool_manager_address = self.config.contracts.pool_manager.clone();
+
+        // Pool creation requires paying the pool creation fee
+        let funds = vec![];
+
+        self.execute(&pool_manager_address, &msg, funds).await
     }
 }

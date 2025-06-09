@@ -1,7 +1,7 @@
 use config::{Config as ConfigLoader, File};
 use mantra_dex_sdk::{
     config::{ContractAddresses, MantraNetworkConfig, NetworkConstants},
-    MantraDexClient, MantraWallet,
+    Decimal, MantraDexClient, MantraWallet, PoolFee, PoolType,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -164,6 +164,90 @@ pub mod test_utils {
 
         // Create wallet
         MantraWallet::from_mnemonic(mnemonic, 0).expect("Failed to create wallet from mnemonic")
+    }
+
+    /// Get or create the OM/USDC pool for testing
+    pub async fn get_or_create_om_usdc_pool_id(client: &MantraDexClient) -> Option<String> {
+        let test_config = load_test_config();
+        let uom_denom = test_config
+            .tokens
+            .get("uom")
+            .unwrap()
+            .denom
+            .clone()
+            .unwrap();
+        let uusdc_denom = test_config
+            .tokens
+            .get("uusdc")
+            .unwrap()
+            .denom
+            .clone()
+            .unwrap();
+
+        println!(
+            "Looking for pool with denoms: {} and {}",
+            uom_denom, uusdc_denom
+        );
+
+        // First, try to find existing pool
+        if let Ok(pools) = client.get_pools(Some(100)).await {
+            for pool in pools {
+                if pool.pool_info.assets.iter().any(|a| a.denom == uom_denom)
+                    && pool.pool_info.assets.iter().any(|a| a.denom == uusdc_denom)
+                {
+                    println!("Found existing pool: {}", pool.pool_info.pool_identifier);
+                    return Some(pool.pool_info.pool_identifier);
+                }
+            }
+        }
+
+        println!("No existing OM/USDC pool found. Creating new pool...");
+
+        // Create new pool if none exists
+        let pool_fees = PoolFee {
+            protocol_fee: mantra_dex_std::fee::Fee {
+                share: Decimal::percent(10), // 0.1%
+            },
+            swap_fee: mantra_dex_std::fee::Fee {
+                share: Decimal::percent(20), // 0.2%
+            },
+            burn_fee: mantra_dex_std::fee::Fee {
+                share: Decimal::zero(),
+            },
+            extra_fees: vec![],
+        };
+
+        let pool_type = PoolType::ConstantProduct;
+        let pool_identifier = Some("uom.uusdc.test".to_string());
+
+        match client
+            .create_pool(
+                vec![uom_denom.clone(), uusdc_denom.clone()],
+                vec![6, 6], // Both tokens have 6 decimals
+                pool_fees,
+                pool_type,
+                pool_identifier.clone(),
+            )
+            .await
+        {
+            Ok(tx_response) => {
+                println!(
+                    "Pool creation successful with txhash: {}",
+                    tx_response.txhash
+                );
+                if tx_response.code == 0 {
+                    // Pool created successfully, return the identifier
+                    pool_identifier
+                } else {
+                    println!("Pool creation failed: {}", tx_response.raw_log);
+                    None
+                }
+            }
+            Err(e) => {
+                println!("Failed to create pool: {:?}", e);
+                None
+            }
+        }
     }
 
     pub async fn get_om_usdc_pool_id(client: &MantraDexClient) -> Option<String> {
