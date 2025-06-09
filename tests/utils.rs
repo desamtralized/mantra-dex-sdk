@@ -283,18 +283,6 @@ pub mod test_utils {
         Ok(actual_pool_id)
     }
 
-    #[allow(dead_code)]
-    pub async fn get_om_usdc_pool_id(client: &MantraDexClient) -> Option<String> {
-        // Try to create or find the test pool
-        match create_test_pool_if_needed(client).await {
-            Ok(pool_id) => Some(pool_id),
-            Err(e) => {
-                println!("Failed to create or find test pool: {:?}", e);
-                None
-            }
-        }
-    }
-
     /// Check if we should execute write operations (create pools, swaps, etc.)
     #[allow(dead_code)]
     pub fn should_execute_writes() -> bool {

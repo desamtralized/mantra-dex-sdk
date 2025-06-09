@@ -1,6 +1,6 @@
 mod utils;
 
-use utils::test_utils::{create_test_client, get_om_usdc_pool_id, should_execute_writes};
+use utils::test_utils::{create_test_client, get_or_create_om_usdc_pool_id, should_execute_writes};
 
 #[tokio::test]
 async fn test_update_pool_features() {
@@ -13,7 +13,7 @@ async fn test_update_pool_features() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -45,7 +45,7 @@ async fn test_enable_pool_withdrawals() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -74,7 +74,7 @@ async fn test_disable_pool_withdrawals() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -103,7 +103,7 @@ async fn test_enable_pool_deposits() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -132,7 +132,7 @@ async fn test_disable_pool_deposits() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -161,7 +161,7 @@ async fn test_enable_pool_swaps() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -190,7 +190,7 @@ async fn test_disable_pool_swaps() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -219,7 +219,7 @@ async fn test_enable_all_pool_operations() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -248,7 +248,7 @@ async fn test_disable_all_pool_operations() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -277,7 +277,7 @@ async fn test_backward_compatibility_global_features() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -304,7 +304,7 @@ async fn test_feature_toggle_method_signatures() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 

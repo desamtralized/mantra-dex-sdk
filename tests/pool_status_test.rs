@@ -1,7 +1,7 @@
 mod utils;
 
 use mantra_dex_sdk::{client::PoolStatus, Error};
-use utils::test_utils::{create_test_client, get_om_usdc_pool_id};
+use utils::test_utils::{create_test_client, get_or_create_om_usdc_pool_id};
 
 /// Test pool status enum functionality
 #[tokio::test]
@@ -32,7 +32,7 @@ async fn test_get_pool_status() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -64,7 +64,7 @@ async fn test_validate_pool_status() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -96,7 +96,7 @@ async fn test_swap_with_pool_status_validation() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -157,7 +157,7 @@ async fn test_provide_liquidity_with_pool_status_validation() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -226,7 +226,7 @@ async fn test_withdraw_liquidity_with_pool_status_validation() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
@@ -354,7 +354,7 @@ async fn test_unchecked_operations_bypass_status() {
     let client = create_test_client().await;
 
     // Get a test pool
-    let pool_id = get_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
     assert!(pool_id.is_some(), "Pool ID not found");
     let pool_id = pool_id.unwrap();
 
