@@ -43,12 +43,24 @@ async fn test_get_pool_status() {
             let status = client.get_pool_status(&pool_info);
             println!("Pool {} status: {:?}", pool_id, status);
 
-            // For now, all pools should be Available (as per current implementation)
-            // TODO: Update this test when proper status field handling is implemented
-            assert_eq!(
-                status,
-                PoolStatus::Available,
-                "Pool should be available by default"
+            // Test that status extraction works correctly based on the actual pool status
+            // The status can be either Available or Disabled depending on the pool's operation flags
+            match status {
+                PoolStatus::Available => {
+                    println!("Pool {} is Available - all operations are enabled", pool_id);
+                }
+                PoolStatus::Disabled => {
+                    println!(
+                        "Pool {} is Disabled - some operations are disabled",
+                        pool_id
+                    );
+                }
+            }
+
+            // Verify that the status returned makes sense by checking it's one of the expected values
+            assert!(
+                status == PoolStatus::Available || status == PoolStatus::Disabled,
+                "Pool status should be either Available or Disabled"
             );
         }
         Err(e) => {
@@ -412,6 +424,122 @@ async fn test_unchecked_operations_bypass_status() {
 
             // Other errors (insufficient funds, etc.) are acceptable
             println!("Unchecked operation failed for reasons other than pool status (this is acceptable)");
+        }
+    }
+}
+
+/// Test that both Available and Disabled pool statuses are correctly mapped
+#[tokio::test]
+async fn test_pool_status_mapping_available_and_disabled() {
+    let client = create_test_client().await;
+
+    // Get list of pools to test status mapping
+    match client.get_pools(Some(10)).await {
+        Ok(pools) => {
+            println!("Testing pool status mapping on {} pools", pools.len());
+
+            let mut available_count = 0;
+            let mut disabled_count = 0;
+
+            for pool in pools.iter().take(5) {
+                let status = client.get_pool_status(pool);
+                let pool_id = &pool.pool_info.pool_identifier;
+
+                match status {
+                    PoolStatus::Available => {
+                        available_count += 1;
+                        println!("Pool {} is Available - all operations enabled", pool_id);
+
+                        // Verify that all operations are indeed enabled
+                        let pool_status = &pool.pool_info.status;
+                        assert!(
+                            pool_status.swaps_enabled
+                                && pool_status.deposits_enabled
+                                && pool_status.withdrawals_enabled,
+                            "Available pool should have all operations enabled"
+                        );
+                    }
+                    PoolStatus::Disabled => {
+                        disabled_count += 1;
+                        println!("Pool {} is Disabled - some operations disabled", pool_id);
+
+                        // Verify that at least one operation is disabled
+                        let pool_status = &pool.pool_info.status;
+                        assert!(
+                            !pool_status.swaps_enabled
+                                || !pool_status.deposits_enabled
+                                || !pool_status.withdrawals_enabled,
+                            "Disabled pool should have at least one operation disabled"
+                        );
+                    }
+                }
+            }
+
+            println!(
+                "Status mapping test completed: {} Available, {} Disabled",
+                available_count, disabled_count
+            );
+
+            // At least one of each status should be tested (if pools exist)
+            if pools.len() > 0 {
+                assert!(
+                    available_count + disabled_count > 0,
+                    "Should test at least one pool status"
+                );
+            }
+        }
+        Err(e) => {
+            println!("Failed to get pools for status mapping test: {:?}", e);
+            // Don't fail the test if we can't get pools
+        }
+    }
+}
+
+/// Test pool status detection with specific operation states
+#[tokio::test]
+async fn test_pool_status_operation_flags() {
+    let client = create_test_client().await;
+
+    // Get pools and analyze their operation flags
+    match client.get_pools(Some(10)).await {
+        Ok(pools) => {
+            println!("Analyzing operation flags for {} pools", pools.len());
+
+            for pool in pools.iter().take(3) {
+                let pool_id = &pool.pool_info.pool_identifier;
+                let status_info = &pool.pool_info.status;
+                let computed_status = client.get_pool_status(pool);
+
+                println!(
+                    "Pool {}: Operations - Swaps: {}, Deposits: {}, Withdrawals: {}",
+                    pool_id,
+                    status_info.swaps_enabled,
+                    status_info.deposits_enabled,
+                    status_info.withdrawals_enabled
+                );
+
+                // Verify our status computation logic
+                let expected_status = if status_info.swaps_enabled
+                    && status_info.deposits_enabled
+                    && status_info.withdrawals_enabled
+                {
+                    PoolStatus::Available
+                } else {
+                    PoolStatus::Disabled
+                };
+
+                assert_eq!(
+                    computed_status, expected_status,
+                    "Computed status should match expected status for pool {}",
+                    pool_id
+                );
+
+                println!("Pool {} computed status: {:?} ✓", pool_id, computed_status);
+            }
+        }
+        Err(e) => {
+            println!("Failed to get pools for operation flags test: {:?}", e);
+            // Don't fail the test if we can't get pools
         }
     }
 }

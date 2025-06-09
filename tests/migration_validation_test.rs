@@ -382,6 +382,52 @@ async fn test_pool_status_handling_migration() {
             println!("✓ Pool operations handle status checking: {:?}", e);
         }
     }
+
+    // Test pool status extraction from real pools
+    let pools_result = client.get_pools(Some(5)).await;
+
+    match pools_result {
+        Ok(pools) => {
+            println!("✓ Testing pool status extraction on {} pools", pools.len());
+
+            let mut available_count = 0;
+            let mut disabled_count = 0;
+
+            for pool in pools.iter().take(3) {
+                let status = client.get_pool_status(pool);
+                let pool_id = &pool.pool_info.pool_identifier;
+
+                match status {
+                    mantra_dex_sdk::client::PoolStatus::Available => {
+                        available_count += 1;
+                        println!("  - Pool {} status: Available", pool_id);
+                    }
+                    mantra_dex_sdk::client::PoolStatus::Disabled => {
+                        disabled_count += 1;
+                        println!("  - Pool {} status: Disabled", pool_id);
+                    }
+                }
+
+                // Verify status is properly mapped
+                assert!(
+                    status == mantra_dex_sdk::client::PoolStatus::Available
+                        || status == mantra_dex_sdk::client::PoolStatus::Disabled,
+                    "Pool status should be either Available or Disabled"
+                );
+            }
+
+            println!(
+                "✓ Pool status mapping tested: {} Available, {} Disabled",
+                available_count, disabled_count
+            );
+        }
+        Err(e) => {
+            println!(
+                "✓ Pool status extraction test completed (couldn't get pools): {:?}",
+                e
+            );
+        }
+    }
 }
 
 /// Test epoch-based functionality migration

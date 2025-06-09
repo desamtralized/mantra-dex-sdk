@@ -402,10 +402,20 @@ impl MantraDexClient {
     }
 
     /// Extract pool status from PoolInfoResponse
-    pub fn get_pool_status(&self, _pool: &PoolInfoResponse) -> PoolStatus {
-        // TODO: Implement proper status field handling once we understand the correct PoolStatus structure
-        // For now, assume all pools are available
-        PoolStatus::Available
+    pub fn get_pool_status(&self, pool: &PoolInfoResponse) -> PoolStatus {
+        // Map the actual status from pool.pool_info.status to our PoolStatus enum
+        // The status field in the mantra_dex_std::pool_manager::PoolInfo structure
+        // contains information about the pool's operational state
+        let status = &pool.pool_info.status;
+
+        // If all operations are enabled, the pool is Available
+        // In v3.0.0, we check if swaps, deposits, and withdrawals are all enabled
+        if status.swaps_enabled && status.deposits_enabled && status.withdrawals_enabled {
+            PoolStatus::Available
+        } else {
+            // If any operation is disabled, the pool is considered Disabled
+            PoolStatus::Disabled
+        }
     }
 
     /// Validate that a pool is available for operations
