@@ -6,7 +6,8 @@ description = "A Rust SDK for interacting with the Mantra DEX on the Mantra Duko
 license = "MIT"
 
 [dependencies]
-mantra-dex-std = "2.1.4"
+mantra-dex-std = "3.0.0"
+mantrachain-std = "0.2.0"
 cosmrs = { version = "0.21.1", features = ["rpc", "bip32", "cosmwasm"] }
 cosmwasm-std = "2.2.2"
 serde = { version = "1.0", features = ["derive"] }
@@ -32,4 +33,4 @@ cosmos-sdk-proto = "0.26.1"
 serde_bytes = "0.11.17"
 
 [dev-dependencies]
-tokio-test = "0.4" 
+tokio-test = "0.4"

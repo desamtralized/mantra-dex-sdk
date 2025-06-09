@@ -1,50 +1,62 @@
 use cosmrs::rpc::endpoint::broadcast::tx_sync::Response as SyncTxResponse;
 use thiserror::Error;
 
-/// SDK Error type
+/// SDK Error type for MANTRA DEX SDK v3.0.0
+///
+/// This enum represents all possible errors that can occur when using the SDK.
+/// v3.0.0 introduces new error types for enhanced fee validation and pool status checking.
 #[derive(Error, Debug)]
 pub enum Error {
     /// Error when interacting with CosmRS
     #[error("CosmRS error: {0}")]
     CosmRs(#[from] cosmrs::Error),
 
-    /// RPC client error
+    /// RPC client error - occurs when communication with the blockchain fails
     #[error("RPC error: {0}")]
     Rpc(String),
 
-    /// Transaction broadcast error with response
+    /// Transaction broadcast error with response - occurs when transaction submission fails
     #[error("Transaction broadcast error: {0:?}")]
     TxBroadcast(SyncTxResponse),
 
-    /// Transaction simulation error
+    /// Transaction simulation error - occurs when transaction simulation fails
     #[error("Transaction simulation error: {0}")]
     TxSimulation(String),
 
-    /// Wallet error
+    /// Wallet error - occurs when wallet operations fail or wallet is not configured
     #[error("Wallet error: {0}")]
     Wallet(String),
 
-    /// Configuration error
+    /// Configuration error - occurs when network or contract configuration is invalid
     #[error("Configuration error: {0}")]
     Config(String),
 
-    /// Contract interaction error
+    /// Contract interaction error - occurs when smart contract calls fail
     #[error("Contract error: {0}")]
     Contract(String),
 
-    /// Serialization/Deserialization error
+    /// Serialization/Deserialization error - occurs when JSON parsing fails
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
-    /// IO error
+    /// IO error - occurs when file system operations fail
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// Other errors
+    /// Fee validation error - **v3.0.0 New**: occurs when pool fees exceed 20% total limit
+    ///
+    /// This error is thrown when:
+    /// - Total pool fees (protocol_fee + swap_fee + burn_fee + extra_fees) exceed 20%
+    /// - Individual fees are negative
+    /// - Fee structure validation fails
+    #[error("Fee validation error: {0}")]
+    FeeValidation(String),
+
+    /// Other errors - generic error type for miscellaneous failures
     #[error("{0}")]
     Other(String),
 
-    /// Transaction error
+    /// Transaction error - occurs when transaction execution fails
     #[error("Transaction error: {0}")]
     Tx(String),
 }

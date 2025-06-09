@@ -1,29 +1,29 @@
 # Mantra Testnet (mantra-dukong-1)
-# Last updated: 2024-11-14T15:26:36+0000
+# Last updated: 2025-06-06T14:50:58+0000
 # Chain ID: mantra-dukong-1
-# Deployer: mantra1x5nk33zpglp4ge6q9a8xx3zceqf4g8nvaggjmc
-# Block height: 923089
+# Deployer: mantra1cc0jfcd3rv3d36g6m575mdk8p2nmdjgnaf7ngq
+# Block height: 6032195
 
 [mantra-dukong]
 chain_id = "mantra-dukong-1"
-deployer = "mantra1x5nk33zpglp4ge6q9a8xx3zceqf4g8nvaggjmc"
+deployer = "mantra1cc0jfcd3rv3d36g6m575mdk8p2nmdjgnaf7ngq"
 
 [mantra-dukong.epoch_manager]
-code_id = 90
+code_id = 822
 version = "1.0.0"
-address = "mantra1kz0gcs8n0qa9rje5zdrlwqccxlwu8zttzmdtxhdq0jpk3efjs37qr4s2sv"
+address = "mantra1238s30sew7wvkl6e3dprdrs3vyplhs2ak3kkaswczgmqt6zdrmfquy5l2f"
 
 [mantra-dukong.farm_manager]
-code_id = 109
+code_id = 823
 version = "1.0.0"
-address = "mantra1h3ypj6fhpn4tegj0flhx42j5c4jejq45dypyjy7wdpr268amh5ssa4nnzf"
+address = "mantra1l8ys5rucps866l4ljk4a8nplpmlk4u69cuxlf5nd767tkeafes8sqldjef"
 
 [mantra-dukong.fee_collector]
-code_id = 54
+code_id = 824
 version = "1.0.0"
-address = "mantra1ze9rccntuvd37gs5fv8ddtjtaytaj4944zn3mksdnne8zyntjmgsg9syav"
+address = "mantra1wsq3l3rtg35m0s8pl6496zcyrqq3kgpq7h0sp8rgy5ja32wsaxcshex9ln"
 
 [mantra-dukong.pool_manager]
-code_id = 532
-version = "1.2.0"
-address = "mantra1vwj600jud78djej7ttq44dktu4wr3t2yrrsjgmld8v3jq8mud68q5w7455"
+code_id = 825
+version = "1.3.0"
+address = "mantra1c6j7wq7rqltufdzcuke2mxmtln4hajg9mflzgs20at78f5a6xlfqp8fns0"
