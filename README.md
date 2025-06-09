@@ -1,10 +1,10 @@
-# Mantra DEX SDK
+# MANTRA DEX SDK
 
-A Rust SDK for interacting with the Mantra DEX on the Mantra Dukong Network.
+A Rust SDK for interacting with the DEX on the MANTRA Network.
 
 ## Overview
 
-This SDK provides a comprehensive set of tools for developers to easily interact with the Mantra DEX, allowing for operations such as:
+This SDK provides a comprehensive set of tools for developers to easily interact with the MANTRA DEX, allowing for operations such as:
 
 - Query pool information and liquidity
 - Execute swaps and multi-hop swaps
@@ -169,7 +169,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### MantraDexClient
 
-The main client interface for interacting with the Mantra DEX:
+The main client interface for interacting with the MANTRA DEX:
 
 - `new(config: MantraNetworkConfig) -> Result<Self, Error>` - Create a new client
 - `with_wallet(wallet: MantraWallet) -> Self` - Add a wallet to the client
@@ -183,7 +183,7 @@ The main client interface for interacting with the Mantra DEX:
 
 ### MantraWallet
 
-Wallet management for Mantra DEX:
+Wallet management for MANTRA DEX:
 
 - `from_mnemonic(mnemonic: &str, account_index: u32) -> Result<Self, Error>` - Create wallet from mnemonic
 - `address() -> Result<cosmrs::AccountId, Error>` - Get wallet address
