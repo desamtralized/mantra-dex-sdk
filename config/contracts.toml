@@ -9,21 +9,17 @@ chain_id = "mantra-dukong-1"
 deployer = "mantra1x5nk33zpglp4ge6q9a8xx3zceqf4g8nvaggjmc"
 
 [mantra-dukong.epoch_manager]
-code_id = 90
-version = "1.0.0"
+code_id = 822
 address = "mantra1kz0gcs8n0qa9rje5zdrlwqccxlwu8zttzmdtxhdq0jpk3efjs37qr4s2sv"
 
 [mantra-dukong.farm_manager]
-code_id = 109
-version = "1.0.0"
+code_id = 823
 address = "mantra1h3ypj6fhpn4tegj0flhx42j5c4jejq45dypyjy7wdpr268amh5ssa4nnzf"
 
 [mantra-dukong.fee_collector]
-code_id = 54
-version = "1.0.0"
+code_id = 824
 address = "mantra1ze9rccntuvd37gs5fv8ddtjtaytaj4944zn3mksdnne8zyntjmgsg9syav"
 
 [mantra-dukong.pool_manager]
-code_id = 532
-version = "1.2.0"
+code_id = 825
 address = "mantra1vwj600jud78djej7ttq44dktu4wr3t2yrrsjgmld8v3jq8mud68q5w7455"

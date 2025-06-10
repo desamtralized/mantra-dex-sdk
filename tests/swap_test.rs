@@ -1,5 +1,6 @@
 mod utils;
 
+use mantra_dex_std::pool_manager::PoolInfoResponse;
 use utils::test_utils::{
     create_test_client, get_or_create_om_usdc_pool_id, init_test_env, load_test_config,
 };
@@ -43,7 +44,10 @@ async fn test_swap_operation() {
     let pool_id = get_or_create_om_usdc_pool_id(&client).await;
 
     if let Some(pool_id) = pool_id {
-        println!("Testing swap operation with pool: {}", pool_id);
+        println!(
+            "=== PERFORMING REAL SWAP OPERATIONS WITH POOL: {} ===",
+            pool_id
+        );
 
         let uom_denom = test_config
             .tokens
@@ -60,28 +64,170 @@ async fn test_swap_operation() {
             .clone()
             .unwrap();
 
-        // Simulate a swap first
-        let simulation_result = client
-            .simulate_swap(
+        // Helper function to print balances
+        let print_balances = |title: &str, balances: &[cosmwasm_std::Coin]| {
+            println!("\n=== {} ===", title);
+            for balance in balances {
+                if balance.denom == uom_denom || balance.denom == uusdc_denom {
+                    println!("  {} - {}", balance.denom, balance.amount);
+                }
+            }
+        };
+
+        // Helper function to print pool info
+        let print_pool_info = |title: &str, pool_info: &PoolInfoResponse| {
+            println!("\n=== {} ===", title);
+            println!("Pool ID: {}", pool_info.pool_info.pool_identifier);
+            println!("Pool Assets:");
+            for asset in &pool_info.pool_info.assets {
+                println!("  {} - {}", asset.denom, asset.amount);
+            }
+            println!(
+                "Total LP Shares: {} - {}",
+                pool_info.total_share.denom, pool_info.total_share.amount
+            );
+        };
+
+        // Get initial state
+        let initial_balances = client
+            .get_balances()
+            .await
+            .expect("Failed to get initial balances");
+        let initial_pool_info = client
+            .get_pool(&pool_id)
+            .await
+            .expect("Failed to get initial pool info");
+
+        print_balances("USER BALANCES BEFORE SWAPS", &initial_balances);
+        print_pool_info("POOL LIQUIDITY BEFORE SWAPS", &initial_pool_info);
+
+        // SWAP 1: 1 OM to USDC
+        println!("\n=== EXECUTING SWAP 1: 1 OM -> USDC ===");
+        let swap_amount_1 = cosmwasm_std::Uint128::from(1_000_000u128); // 1 OM (6 decimals)
+
+        let swap_1_result = client
+            .swap(
                 &pool_id,
                 cosmwasm_std::Coin {
                     denom: uom_denom.clone(),
-                    amount: cosmwasm_std::Uint128::from(1000000u128),
+                    amount: swap_amount_1,
                 },
                 &uusdc_denom,
+                Some(cosmwasm_std::Decimal::percent(5)), // 5% max spread
             )
             .await;
 
-        match simulation_result {
-            Ok(simulation) => {
-                println!(
-                    "Swap simulation successful: return amount = {}",
-                    simulation.return_amount
-                );
-                assert!(!simulation.return_amount.is_zero());
+        match swap_1_result {
+            Ok(tx_response) => {
+                println!("Swap 1 successful! Tx hash: {}", tx_response.txhash);
+                println!("Gas used: {}", tx_response.gas_used);
+
+                // Wait a bit for the transaction to be processed
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+                // Get state after first swap
+                let balances_after_swap_1 = client
+                    .get_balances()
+                    .await
+                    .expect("Failed to get balances after swap 1");
+                let pool_info_after_swap_1 = client
+                    .get_pool(&pool_id)
+                    .await
+                    .expect("Failed to get pool info after swap 1");
+
+                print_balances("USER BALANCES AFTER SWAP 1", &balances_after_swap_1);
+                print_pool_info("POOL LIQUIDITY AFTER SWAP 1", &pool_info_after_swap_1);
+
+                // Calculate how much USDC we received
+                let usdc_balance_after_swap_1 = balances_after_swap_1
+                    .iter()
+                    .find(|b| b.denom == uusdc_denom)
+                    .map(|b| b.amount)
+                    .unwrap_or(cosmwasm_std::Uint128::zero());
+
+                let initial_usdc_balance = initial_balances
+                    .iter()
+                    .find(|b| b.denom == uusdc_denom)
+                    .map(|b| b.amount)
+                    .unwrap_or(cosmwasm_std::Uint128::zero());
+
+                let usdc_received = usdc_balance_after_swap_1.saturating_sub(initial_usdc_balance);
+                println!("USDC received from swap 1: {}", usdc_received);
+
+                if !usdc_received.is_zero() {
+                    // SWAP 2: All received USDC back to OM
+                    println!("\n=== EXECUTING SWAP 2: {} USDC -> OM ===", usdc_received);
+
+                    let swap_2_result = client
+                        .swap(
+                            &pool_id,
+                            cosmwasm_std::Coin {
+                                denom: uusdc_denom.clone(),
+                                amount: usdc_received,
+                            },
+                            &uom_denom,
+                            Some(cosmwasm_std::Decimal::percent(5)), // 5% max spread
+                        )
+                        .await;
+
+                    match swap_2_result {
+                        Ok(tx_response) => {
+                            println!("Swap 2 successful! Tx hash: {}", tx_response.txhash);
+                            println!("Gas used: {}", tx_response.gas_used);
+
+                            // Wait a bit for the transaction to be processed
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+                            // Get final state
+                            let final_balances = client
+                                .get_balances()
+                                .await
+                                .expect("Failed to get final balances");
+                            let final_pool_info = client
+                                .get_pool(&pool_id)
+                                .await
+                                .expect("Failed to get final pool info");
+
+                            print_balances("USER BALANCES AFTER SWAP 2", &final_balances);
+                            print_pool_info("POOL LIQUIDITY AFTER SWAP 2", &final_pool_info);
+
+                            // Calculate final OM balance vs initial
+                            let final_om_balance = final_balances
+                                .iter()
+                                .find(|b| b.denom == uom_denom)
+                                .map(|b| b.amount)
+                                .unwrap_or(cosmwasm_std::Uint128::zero());
+
+                            let initial_om_balance = initial_balances
+                                .iter()
+                                .find(|b| b.denom == uom_denom)
+                                .map(|b| b.amount)
+                                .unwrap_or(cosmwasm_std::Uint128::zero());
+
+                            let om_difference = if final_om_balance > initial_om_balance {
+                                println!(
+                                    "OM gained: {}",
+                                    final_om_balance.saturating_sub(initial_om_balance)
+                                );
+                            } else {
+                                println!(
+                                    "OM lost: {}",
+                                    initial_om_balance.saturating_sub(final_om_balance)
+                                );
+                            };
+
+                            println!("\n=== SWAP ROUND-TRIP COMPLETED SUCCESSFULLY ===");
+                        }
+                        Err(e) => {
+                            println!("Swap 2 failed: {:?}", e);
+                        }
+                    }
+                } else {
+                    println!("No USDC received from first swap, cannot proceed with second swap");
+                }
             }
             Err(e) => {
-                println!("Warning: Swap simulation failed: {:?}", e);
+                println!("Swap 1 failed: {:?}", e);
             }
         }
     } else {

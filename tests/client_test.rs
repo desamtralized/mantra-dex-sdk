@@ -121,8 +121,54 @@ async fn test_client_query_pools() {
     match pools_result {
         Ok(pools) => {
             println!("Successfully queried {} pools", pools.len());
-            for pool in pools {
-                println!("Pool ID: {}", pool.pool_info.pool_identifier);
+
+            if !pools.is_empty() {
+                // Print table header
+                println!("\n{:<30} {:<15} {:<15}", "Pool ID", "Type", "Asset Count");
+                println!("{}", "-".repeat(60));
+
+                // Print pool details in table format
+                for pool in pools {
+                    let pool_type = format!("{:?}", pool.pool_info.pool_type);
+                    let asset_count = pool.pool_info.assets.len();
+
+                    println!(
+                        "{:<30} {:<15} {:<15}",
+                        pool.pool_info.pool_identifier, pool_type, asset_count
+                    );
+
+                    // Print assets on separate lines with proper formatting
+                    println!("Assets:");
+                    for asset in &pool.pool_info.assets {
+                        // Shorten denom for better readability, but show full amount
+                        let denom_display = if asset.denom.len() > 50 {
+                            format!(
+                                "{}...{}",
+                                &asset.denom[..25],
+                                &asset.denom[asset.denom.len() - 20..]
+                            )
+                        } else {
+                            asset.denom.clone()
+                        };
+                        println!("    {:<55} {:>20}", denom_display, asset.amount);
+                    }
+
+                    // Show LP token info
+                    let lp_display = if pool.total_share.denom.len() > 50 {
+                        format!(
+                            "{}...{}",
+                            &pool.total_share.denom[..25],
+                            &pool.total_share.denom[pool.total_share.denom.len() - 20..]
+                        )
+                    } else {
+                        pool.total_share.denom.clone()
+                    };
+                    println!(
+                        "LP Token: {:<55} {:>20}",
+                        lp_display, pool.total_share.amount
+                    );
+                    println!(); // Add a blank line between pools
+                }
             }
         }
         Err(e) => {
