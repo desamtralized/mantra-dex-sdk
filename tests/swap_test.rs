@@ -236,7 +236,7 @@ async fn test_swap_operation() {
 }
 
 #[tokio::test]
-async fn test_provide_liquidity() {
+async fn test_provide_and_withdraw_liquidity() {
     init_test_env();
 
     let client = create_test_client().await;
@@ -246,7 +246,10 @@ async fn test_provide_liquidity() {
     let pool_id = get_or_create_om_usdc_pool_id(&client).await;
 
     if let Some(pool_id) = pool_id {
-        println!("Testing liquidity provision with pool: {}", pool_id);
+        println!(
+            "=== PERFORMING COMPLETE LIQUIDITY CYCLE WITH POOL: {} ===",
+            pool_id
+        );
 
         let uom_denom = test_config
             .tokens
@@ -263,31 +266,251 @@ async fn test_provide_liquidity() {
             .clone()
             .unwrap();
 
-        // Test provide_liquidity method exists and can be called
-        println!(
-            "Would provide liquidity with denoms: {} and {}",
-            uom_denom, uusdc_denom
+        // Helper function to print balances
+        let print_balances = |title: &str, balances: &[cosmwasm_std::Coin]| {
+            println!("\n=== {} ===", title);
+            for balance in balances {
+                if balance.denom == uom_denom
+                    || balance.denom == uusdc_denom
+                    || balance.denom.contains(".LP")
+                {
+                    println!("  {} - {}", balance.denom, balance.amount);
+                }
+            }
+        };
+
+        // Helper function to print pool info
+        let print_pool_info = |title: &str, pool_info: &PoolInfoResponse| {
+            println!("\n=== {} ===", title);
+            println!("Pool ID: {}", pool_info.pool_info.pool_identifier);
+            println!("Pool Assets:");
+            for asset in &pool_info.pool_info.assets {
+                println!("  {} - {}", asset.denom, asset.amount);
+            }
+            println!(
+                "Total LP Shares: {} - {}",
+                pool_info.total_share.denom, pool_info.total_share.amount
+            );
+        };
+
+        // === PHASE 1: GET INITIAL STATE ===
+        let initial_balances = client
+            .get_balances()
+            .await
+            .expect("Failed to get initial balances");
+        let initial_pool_info = client
+            .get_pool(&pool_id)
+            .await
+            .expect("Failed to get initial pool info");
+
+        print_balances("INITIAL USER BALANCES", &initial_balances);
+        print_pool_info("INITIAL POOL STATE", &initial_pool_info);
+
+        // === PHASE 2: PROVIDE LIQUIDITY ===
+        println!("\n🚀 PHASE 1: PROVIDING LIQUIDITY");
+
+        // Calculate 10% of user balances for each token
+        let uom_balance = initial_balances
+            .iter()
+            .find(|b| b.denom == uom_denom)
+            .map(|b| b.amount)
+            .unwrap_or(cosmwasm_std::Uint128::zero());
+
+        let uusdc_balance = initial_balances
+            .iter()
+            .find(|b| b.denom == uusdc_denom)
+            .map(|b| b.amount)
+            .unwrap_or(cosmwasm_std::Uint128::zero());
+
+        // Use 10% of each balance, but ensure minimum amounts
+        let uom_to_provide = std::cmp::max(
+            uom_balance / cosmwasm_std::Uint128::from(10u128),
+            cosmwasm_std::Uint128::from(100_000u128), // minimum 0.1 OM
         );
-        // Note: We're not actually providing liquidity in this test as it requires real tokens
+        let uusdc_to_provide = std::cmp::max(
+            uusdc_balance / cosmwasm_std::Uint128::from(10u128),
+            cosmwasm_std::Uint128::from(100_000u128), // minimum 0.1 USDC
+        );
+
+        if uom_balance.is_zero() || uusdc_balance.is_zero() {
+            println!("Insufficient balances for liquidity provision test");
+            println!(
+                "OM balance: {}, USDC balance: {}",
+                uom_balance, uusdc_balance
+            );
+            return;
+        }
+
+        println!("OM to provide: {} (10% of {})", uom_to_provide, uom_balance);
+        println!(
+            "USDC to provide: {} (10% of {})",
+            uusdc_to_provide, uusdc_balance
+        );
+
+        // Provide liquidity - sort coins alphabetically by denomination as required by blockchain
+        let mut assets_to_provide = vec![
+            cosmwasm_std::Coin {
+                denom: uom_denom.clone(),
+                amount: uom_to_provide,
+            },
+            cosmwasm_std::Coin {
+                denom: uusdc_denom.clone(),
+                amount: uusdc_to_provide,
+            },
+        ];
+        assets_to_provide.sort_by(|a, b| a.denom.cmp(&b.denom));
+
+        let provide_result = client
+            .provide_liquidity(&pool_id, assets_to_provide, None)
+            .await;
+
+        match provide_result {
+            Ok(tx_response) => {
+                println!(
+                    "✅ Liquidity provision successful! Tx hash: {}",
+                    tx_response.txhash
+                );
+                println!("Gas used: {}", tx_response.gas_used);
+
+                // Wait for transaction processing
+                tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+                // Get state after liquidity provision
+                let balances_after_provide = client
+                    .get_balances()
+                    .await
+                    .expect("Failed to get balances after liquidity provision");
+                let pool_after_provide = client
+                    .get_pool(&pool_id)
+                    .await
+                    .expect("Failed to get pool info after liquidity provision");
+
+                print_balances("USER BALANCES AFTER PROVISION", &balances_after_provide);
+                print_pool_info("POOL STATE AFTER PROVISION", &pool_after_provide);
+
+                // Calculate LP tokens received
+                let lp_denom = format!("factory/mantra1vwj600jud78djej7ttq44dktu4wr3t2yrrsjgmld8v3jq8mud68q5w7455/{}.LP", pool_id);
+                let initial_lp_balance = initial_balances
+                    .iter()
+                    .find(|b| b.denom == lp_denom)
+                    .map(|b| b.amount)
+                    .unwrap_or(cosmwasm_std::Uint128::zero());
+
+                let lp_balance_after_provide = balances_after_provide
+                    .iter()
+                    .find(|b| b.denom == lp_denom)
+                    .map(|b| b.amount)
+                    .unwrap_or(cosmwasm_std::Uint128::zero());
+
+                let lp_tokens_received =
+                    lp_balance_after_provide.saturating_sub(initial_lp_balance);
+                println!("💰 LP tokens received: {}", lp_tokens_received);
+
+                // === PHASE 3: WITHDRAW RECEIVED LIQUIDITY ===
+                println!("\n🔄 PHASE 2: WITHDRAWING RECEIVED LIQUIDITY");
+
+                if lp_tokens_received.is_zero() {
+                    println!("❌ No LP tokens were received to withdraw!");
+                    return;
+                }
+
+                println!(
+                    "LP tokens to withdraw: {} (exact amount received)",
+                    lp_tokens_received
+                );
+
+                let withdraw_result = client
+                    .withdraw_liquidity(&pool_id, lp_tokens_received)
+                    .await;
+
+                match withdraw_result {
+                    Ok(tx_response) => {
+                        println!(
+                            "✅ Liquidity withdrawal successful! Tx hash: {}",
+                            tx_response.txhash
+                        );
+                        println!("Gas used: {}", tx_response.gas_used);
+
+                        // Wait for transaction processing
+                        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+                        // Get final state
+                        let final_balances = client
+                            .get_balances()
+                            .await
+                            .expect("Failed to get final balances");
+                        let final_pool_info = client
+                            .get_pool(&pool_id)
+                            .await
+                            .expect("Failed to get final pool info");
+
+                        print_balances("FINAL USER BALANCES", &final_balances);
+                        print_pool_info("FINAL POOL STATE", &final_pool_info);
+
+                        // === PHASE 4: CALCULATE NET RESULTS ===
+                        println!("\n📊 LIQUIDITY CYCLE RESULTS:");
+
+                        let final_uom_balance = final_balances
+                            .iter()
+                            .find(|b| b.denom == uom_denom)
+                            .map(|b| b.amount)
+                            .unwrap_or(cosmwasm_std::Uint128::zero());
+
+                        let final_uusdc_balance = final_balances
+                            .iter()
+                            .find(|b| b.denom == uusdc_denom)
+                            .map(|b| b.amount)
+                            .unwrap_or(cosmwasm_std::Uint128::zero());
+
+                        let final_lp_balance = final_balances
+                            .iter()
+                            .find(|b| b.denom == lp_denom)
+                            .map(|b| b.amount)
+                            .unwrap_or(cosmwasm_std::Uint128::zero());
+
+                        let net_uom_change = final_uom_balance.saturating_sub(uom_balance);
+                        let net_uusdc_change = final_uusdc_balance.saturating_sub(uusdc_balance);
+
+                        if final_uom_balance >= uom_balance {
+                            println!("🟢 OM net gain: {}", net_uom_change);
+                        } else {
+                            println!(
+                                "🔴 OM net loss: {}",
+                                uom_balance.saturating_sub(final_uom_balance)
+                            );
+                        }
+
+                        if final_uusdc_balance >= uusdc_balance {
+                            println!("🟢 USDC net gain: {}", net_uusdc_change);
+                        } else {
+                            println!(
+                                "🔴 USDC net loss: {}",
+                                uusdc_balance.saturating_sub(final_uusdc_balance)
+                            );
+                        }
+
+                        println!("💎 Remaining LP tokens: {}", final_lp_balance);
+
+                        // Calculate how much was actually withdrawn
+                        let lp_tokens_burned = initial_lp_balance
+                            .saturating_add(lp_tokens_received)
+                            .saturating_sub(final_lp_balance);
+                        println!("🔥 LP tokens burned in withdrawal: {}", lp_tokens_burned);
+
+                        println!("\n🎉 COMPLETE LIQUIDITY CYCLE FINISHED SUCCESSFULLY!");
+                        println!("   (Provided liquidity and withdrew exact amount received)");
+                    }
+                    Err(e) => {
+                        println!("❌ Liquidity withdrawal failed: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("❌ Liquidity provision failed: {:?}", e);
+            }
+        }
     } else {
-        println!("Warning: Could not get or create OM/USDC pool for liquidity test");
-    }
-}
-
-#[tokio::test]
-async fn test_withdraw_liquidity() {
-    init_test_env();
-
-    let client = create_test_client().await;
-
-    // Get or create pool ID
-    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
-
-    if let Some(pool_id) = pool_id {
-        println!("Testing liquidity withdrawal with pool: {}", pool_id);
-        // Note: We're not actually withdrawing liquidity in this test as it requires LP tokens
-    } else {
-        println!("Warning: Could not get or create OM/USDC pool for withdrawal test");
+        println!("Warning: Could not get or create OM/USDC pool for liquidity cycle test");
     }
 }
 
