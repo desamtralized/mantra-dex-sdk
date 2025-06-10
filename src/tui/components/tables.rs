@@ -216,7 +216,7 @@ pub fn render_progress_bar(f: &mut Frame, loading_state: &LoadingState, area: Re
         LoadingState::Idle => {
             // Don't render anything when idle
         }
-        LoadingState::Loading(message) => {
+        LoadingState::Loading { message, .. } => {
             let gauge = Gauge::default()
                 .block(
                     Block::default()
@@ -229,7 +229,7 @@ pub fn render_progress_bar(f: &mut Frame, loading_state: &LoadingState, area: Re
                 .label(message.clone());
             f.render_widget(gauge, area);
         }
-        LoadingState::Success(message) => {
+        LoadingState::Success { message, .. } => {
             let gauge = Gauge::default()
                 .block(
                     Block::default()
@@ -242,7 +242,7 @@ pub fn render_progress_bar(f: &mut Frame, loading_state: &LoadingState, area: Re
                 .label(message.clone());
             f.render_widget(gauge, area);
         }
-        LoadingState::Error(message) => {
+        LoadingState::Error { message, .. } => {
             let gauge = Gauge::default()
                 .block(
                     Block::default()

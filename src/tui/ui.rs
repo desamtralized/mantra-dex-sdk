@@ -1,62 +1,103 @@
 //! UI Rendering Logic
 //!
 //! This module coordinates the rendering of all UI components and handles
-//! the main UI layout and screen rendering.
+//! the main UI layout and screen rendering with responsive design capabilities.
 
 #[cfg(feature = "tui")]
 use crate::tui::app::App;
+#[cfg(feature = "tui")]
+use crate::tui::components::modals::render_modal;
 #[cfg(feature = "tui")]
 use crate::tui::screens::dashboard::render_dashboard;
 #[cfg(feature = "tui")]
 use crate::tui::screens::liquidity::render_liquidity;
 #[cfg(feature = "tui")]
+use crate::tui::screens::multihop::render_multihop;
+#[cfg(feature = "tui")]
 use crate::tui::screens::pools::render_pools;
 #[cfg(feature = "tui")]
+use crate::tui::screens::rewards::render_rewards;
+#[cfg(feature = "tui")]
+use crate::tui::screens::settings::render_settings;
+#[cfg(feature = "tui")]
 use crate::tui::screens::swap::render_swap;
+#[cfg(feature = "tui")]
+use crate::tui::utils::responsive::{create_size_warning_popup, LayoutConfig};
 #[cfg(feature = "tui")]
 use crate::Error;
 #[cfg(feature = "tui")]
 use ratatui::{prelude::*, widgets::*};
 
-/// Main UI rendering function
+/// Main UI rendering function with responsive layout support
 pub fn render_ui(frame: &mut Frame, app: &mut App) -> Result<(), Error> {
     let size = frame.area();
+    let layout_config = LayoutConfig::new(size);
 
-    // Create main layout with header, body, and status bar
+    // Check if terminal is too small and show warning
+    if layout_config.is_too_small() {
+        let (popup_area, clear_widget, warning_widget) = create_size_warning_popup(size);
+        frame.render_widget(clear_widget, popup_area);
+        frame.render_widget(warning_widget, popup_area);
+        return Ok(());
+    }
+
+    // Create responsive main layout
+    let constraints = layout_config.main_layout_constraints();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Header
-            Constraint::Min(0),    // Body (main content)
-            Constraint::Length(3), // Status bar
-        ])
+        .constraints(constraints)
         .split(size);
 
-    // Render header
-    render_header(frame, chunks[0], app);
+    // Render header with responsive sizing
+    render_header(frame, chunks[0], app, &layout_config);
 
-    // Render main content based on current screen
-    render_main_content(frame, chunks[1], app)?;
+    // Render main content based on current screen with layout config
+    render_main_content(frame, chunks[1], app, &layout_config)?;
 
-    // Render status bar
-    render_status_bar(frame, chunks[2], app);
+    // Render status bar with responsive sizing
+    render_status_bar(frame, chunks[2], app, &layout_config);
+
+    // Render modal overlay if visible
+    if let Some(ref modal_state) = app.state.modal_state {
+        render_modal(frame, modal_state, size);
+    }
 
     Ok(())
 }
 
-/// Render the header with navigation and basic info
-fn render_header(frame: &mut Frame, area: Rect, app: &App) {
-    let header_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
+/// Render the header with navigation and basic info (responsive)
+fn render_header(frame: &mut Frame, area: Rect, app: &App, layout_config: &LayoutConfig) {
+    // Adjust header layout based on screen size
+    let header_constraints = match layout_config.mode {
+        crate::tui::utils::responsive::LayoutMode::Compact => vec![
+            Constraint::Length(20), // Logo/Title (compact)
+            Constraint::Min(0),     // Navigation tabs
+            Constraint::Length(20), // Wallet/Network info (compact)
+        ],
+        crate::tui::utils::responsive::LayoutMode::Normal => vec![
             Constraint::Length(30), // Logo/Title
             Constraint::Min(0),     // Navigation tabs
             Constraint::Length(25), // Wallet/Network info
-        ])
+        ],
+        crate::tui::utils::responsive::LayoutMode::Expanded => vec![
+            Constraint::Length(35), // Logo/Title (expanded)
+            Constraint::Min(0),     // Navigation tabs
+            Constraint::Length(35), // Wallet/Network info (expanded)
+        ],
+    };
+
+    let header_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(header_constraints)
         .split(area);
 
-    // Title/Logo
-    let title = Paragraph::new("MANTRA DEX SDK")
+    // Title/Logo - responsive text
+    let title_text = match layout_config.mode {
+        crate::tui::utils::responsive::LayoutMode::Compact => "MANTRA DEX",
+        _ => "MANTRA DEX SDK",
+    };
+
+    let title = Paragraph::new(title_text)
         .style(
             Style::default()
                 .fg(Color::Cyan)
@@ -65,11 +106,29 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         .block(Block::default().borders(Borders::ALL));
     frame.render_widget(title, header_chunks[0]);
 
-    // Navigation tabs
-    let tabs: Vec<Line> = crate::tui::app::Screen::all()
+    // Navigation tabs - potentially compact in small screens
+    let screen_list = if layout_config.mode == crate::tui::utils::responsive::LayoutMode::Compact {
+        // Show abbreviated names in compact mode
+        vec![
+            ("Dash", crate::tui::app::Screen::Dashboard),
+            ("Pools", crate::tui::app::Screen::Pools),
+            ("Swap", crate::tui::app::Screen::Swap),
+            ("Liq", crate::tui::app::Screen::Liquidity),
+            ("Rew", crate::tui::app::Screen::Rewards),
+            ("Admin", crate::tui::app::Screen::Admin),
+            ("Set", crate::tui::app::Screen::Settings),
+        ]
+    } else {
+        crate::tui::app::Screen::all()
+            .iter()
+            .map(|s| (s.display_name(), *s))
+            .collect()
+    };
+
+    let tabs: Vec<Line> = screen_list
         .iter()
         .enumerate()
-        .map(|(i, screen)| {
+        .map(|(i, (name, _screen))| {
             let style = if i == app.state.current_tab {
                 Style::default()
                     .fg(Color::Yellow)
@@ -77,7 +136,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
             } else {
                 Style::default().fg(Color::White)
             };
-            Line::from(Span::styled(screen.display_name(), style))
+            Line::from(Span::styled(*name, style))
         })
         .collect();
 
@@ -88,73 +147,147 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         .highlight_style(Style::default().fg(Color::Yellow));
     frame.render_widget(tabs_widget, header_chunks[1]);
 
-    // Wallet/Network info
+    // Wallet/Network info - responsive formatting
     let wallet_info = if let Some(address) = &app.state.wallet_address {
-        format!("Wallet: {}", &address[..8])
+        match layout_config.mode {
+            crate::tui::utils::responsive::LayoutMode::Compact => {
+                format!("W: {}", &address[..6])
+            }
+            _ => {
+                format!("Wallet: {}", &address[..8])
+            }
+        }
     } else {
-        "No Wallet".to_string()
+        match layout_config.mode {
+            crate::tui::utils::responsive::LayoutMode::Compact => "No Wallet".to_string(),
+            _ => "No Wallet".to_string(),
+        }
     };
 
     let block_info = if let Some(height) = app.state.block_height {
-        format!("Block: {}", height)
+        match layout_config.mode {
+            crate::tui::utils::responsive::LayoutMode::Compact => {
+                format!("B: {}", height)
+            }
+            _ => {
+                format!("Block: {}", height)
+            }
+        }
     } else {
-        "Block: -".to_string()
+        match layout_config.mode {
+            crate::tui::utils::responsive::LayoutMode::Compact => "B: -".to_string(),
+            _ => "Block: -".to_string(),
+        }
     };
 
-    let info_text = format!("{}\n{}", wallet_info, block_info);
+    let info_text = if layout_config.mode == crate::tui::utils::responsive::LayoutMode::Compact {
+        format!("{} {}", wallet_info, block_info)
+    } else {
+        format!("{}\n{}", wallet_info, block_info)
+    };
+
     let info = Paragraph::new(info_text)
         .style(Style::default().fg(Color::Green))
         .block(Block::default().borders(Borders::ALL).title("Network"));
     frame.render_widget(info, header_chunks[2]);
 }
 
-/// Render the main content area based on current screen
-fn render_main_content(frame: &mut Frame, area: Rect, app: &App) -> Result<(), Error> {
+/// Render the main content area based on current screen (responsive)
+fn render_main_content(
+    frame: &mut Frame,
+    area: Rect,
+    app: &mut App,
+    layout_config: &LayoutConfig,
+) -> Result<(), Error> {
+    // Create content layout with optional sidebar
+    let content_constraints = layout_config.content_layout_constraints();
+    let content_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(content_constraints)
+        .split(area);
+
+    let main_area = content_chunks[0];
+
+    // Render based on current screen
     match app.state.current_screen {
         crate::tui::app::Screen::Dashboard => {
+            // Pass layout config to dashboard (will need updating)
             render_dashboard(frame, app);
         }
         crate::tui::app::Screen::Pools => {
+            // Pass layout config to pools (will need updating)
             render_pools(frame, app);
         }
         crate::tui::app::Screen::Swap => {
+            // Pass layout config to swap (will need updating)
             render_swap(frame, app);
         }
         crate::tui::app::Screen::MultiHop => {
-            render_multihop_placeholder(frame, area, app);
+            // Pass layout config to multihop (will need updating)
+            render_multihop(frame, app);
         }
         crate::tui::app::Screen::Liquidity => {
+            // Pass layout config to liquidity (will need updating)
             render_liquidity(frame, app);
         }
         crate::tui::app::Screen::Rewards => {
-            render_rewards_placeholder(frame, area, app);
+            // Pass layout config to rewards (will need updating)
+            render_rewards(frame, app);
         }
         crate::tui::app::Screen::Admin => {
-            render_admin_placeholder(frame, area, app);
+            // Pass layout config to admin (will need updating)
+            crate::tui::screens::admin::render_admin(frame, app);
         }
         crate::tui::app::Screen::Settings => {
-            render_settings_placeholder(frame, area, app);
+            // Pass layout config to settings (will need updating)
+            render_settings(frame, main_area, &mut app.state.settings_state);
         }
         crate::tui::app::Screen::TransactionDetails => {
-            render_transaction_placeholder(frame, area, app);
+            // Pass layout config to transaction (will need updating)
+            crate::tui::screens::transaction::render_transaction_screen(
+                frame,
+                app,
+                &app.state.transaction_state,
+            );
         }
     }
+
+    // Render sidebar if enabled and there's space
+    if layout_config.show_sidebar && content_chunks.len() > 1 {
+        render_sidebar(frame, content_chunks[1], app, layout_config);
+    }
+
     Ok(())
 }
 
-/// Render the status bar at the bottom
-fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let status_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
+/// Render the status bar at the bottom (responsive)
+fn render_status_bar(frame: &mut Frame, area: Rect, app: &App, layout_config: &LayoutConfig) {
+    // Adjust status bar layout based on screen size
+    let status_constraints = match layout_config.mode {
+        crate::tui::utils::responsive::LayoutMode::Compact => vec![
+            Constraint::Min(0), // Status message (full width in compact)
+        ],
+        _ => vec![
             Constraint::Min(0),     // Status message
             Constraint::Length(40), // Loading state
-        ])
+        ],
+    };
+
+    let status_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(status_constraints)
         .split(area);
 
     // Status message
     let status_text = if let Some(error) = &app.state.error_message {
-        format!("Error: {}", error)
+        match layout_config.mode {
+            crate::tui::utils::responsive::LayoutMode::Compact => {
+                format!("Err: {}", error)
+            }
+            _ => {
+                format!("Error: {}", error)
+            }
+        }
     } else if let Some(status) = &app.state.status_message {
         status.clone()
     } else {
@@ -174,40 +307,110 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         .block(Block::default().borders(Borders::ALL).title("Status"));
     frame.render_widget(status, status_chunks[0]);
 
-    // Loading state
-    let loading_text = match &app.state.loading_state {
-        crate::tui::app::LoadingState::Idle => "Idle",
-        crate::tui::app::LoadingState::Loading(msg) => msg,
-        crate::tui::app::LoadingState::Success(msg) => msg,
-        crate::tui::app::LoadingState::Error(msg) => msg,
+    // Loading state (only in normal/expanded mode)
+    if status_chunks.len() > 1 {
+        let (loading_text, loading_color) = match &app.state.loading_state {
+            crate::tui::app::LoadingState::Idle => ("Idle".to_string(), Color::Gray),
+            crate::tui::app::LoadingState::Loading {
+                message, progress, ..
+            } => {
+                let text = if let Some(p) = progress {
+                    format!("{} ({}%)", message, *p as u16)
+                } else {
+                    message.clone()
+                };
+                (text, Color::Yellow)
+            }
+            crate::tui::app::LoadingState::Success { message, .. } => {
+                (message.clone(), Color::Green)
+            }
+            crate::tui::app::LoadingState::Error { message, .. } => (message.clone(), Color::Red),
+        };
+
+        let loading = Paragraph::new(loading_text)
+            .style(Style::default().fg(loading_color))
+            .block(Block::default().borders(Borders::ALL).title("State"));
+        frame.render_widget(loading, status_chunks[1]);
+    }
+
+    // Help text - only show in expanded mode
+    if matches!(
+        layout_config.mode,
+        crate::tui::utils::responsive::LayoutMode::Expanded
+    ) {
+        let help_text = "Tab: Next | Shift+Tab: Prev | Enter: Action | Esc: Back | q: Quit";
+        let help = Paragraph::new(help_text)
+            .style(Style::default().fg(Color::DarkGray))
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true });
+
+        // Position help text at bottom of status area
+        if area.height > 1 {
+            let help_area = Rect {
+                x: area.x,
+                y: area.y + area.height.saturating_sub(1),
+                width: area.width,
+                height: 1,
+            };
+            frame.render_widget(help, help_area);
+        }
+    }
+}
+
+/// Render sidebar with quick info and actions
+fn render_sidebar(frame: &mut Frame, area: Rect, app: &App, _layout_config: &LayoutConfig) {
+    let sidebar_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(6), // Quick stats
+            Constraint::Length(8), // Recent transactions
+            Constraint::Min(0),    // Additional info
+        ])
+        .split(area);
+
+    // Quick stats
+    let stats_text = format!(
+        "Connected: {}\n\nPools: {}\nBalance: {}\nPending: {}",
+        if app.state.wallet_address.is_some() {
+            "Yes"
+        } else {
+            "No"
+        },
+        app.state.pool_cache.len(),
+        app.state.balances.len(),
+        app.state.pending_operations.len()
+    );
+
+    let stats = Paragraph::new(stats_text)
+        .style(Style::default().fg(Color::Cyan))
+        .block(Block::default().borders(Borders::ALL).title("Quick Stats"));
+    frame.render_widget(stats, sidebar_chunks[0]);
+
+    // Recent transactions
+    let recent_txs = if app.state.recent_transactions.is_empty() {
+        "No recent transactions".to_string()
+    } else {
+        app.state
+            .recent_transactions
+            .iter()
+            .take(3)
+            .map(|tx| format!("• {}", &tx.hash[..8]))
+            .collect::<Vec<_>>()
+            .join("\n")
     };
 
-    let loading_color = match &app.state.loading_state {
-        crate::tui::app::LoadingState::Idle => Color::Gray,
-        crate::tui::app::LoadingState::Loading(_) => Color::Yellow,
-        crate::tui::app::LoadingState::Success(_) => Color::Green,
-        crate::tui::app::LoadingState::Error(_) => Color::Red,
-    };
+    let transactions = Paragraph::new(recent_txs)
+        .style(Style::default().fg(Color::Green))
+        .block(Block::default().borders(Borders::ALL).title("Recent Txs"));
+    frame.render_widget(transactions, sidebar_chunks[1]);
 
-    let loading = Paragraph::new(loading_text)
-        .style(Style::default().fg(loading_color))
-        .block(Block::default().borders(Borders::ALL).title("State"));
-    frame.render_widget(loading, status_chunks[1]);
-
-    // Help text at the bottom
-    let help_text = "Tab: Next | Shift+Tab: Prev | Enter: Action | Esc: Back | q: Quit";
+    // Additional info
+    let help_text = "Keyboard Shortcuts:\n\n• Tab/Shift+Tab: Navigate\n• Enter: Activate\n• Esc: Back\n• q: Quit\n• F1: Help";
     let help = Paragraph::new(help_text)
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Yellow))
+        .block(Block::default().borders(Borders::ALL).title("Help"))
         .wrap(Wrap { trim: true });
-
-    let help_area = Rect {
-        x: area.x,
-        y: area.y + area.height.saturating_sub(1),
-        width: area.width,
-        height: 1,
-    };
-    frame.render_widget(help, help_area);
+    frame.render_widget(help, sidebar_chunks[2]);
 }
 
 // Placeholder functions for different screens - these will be replaced with actual screen implementations
@@ -257,13 +460,6 @@ fn render_admin_placeholder(frame: &mut Frame, area: Rect, _app: &App) {
 fn render_settings_placeholder(frame: &mut Frame, area: Rect, _app: &App) {
     let placeholder = Paragraph::new("Settings Screen\n\nThis will show:\n• Network configuration\n• Wallet management\n• Display preferences\n• Application settings")
         .block(Block::default().borders(Borders::ALL).title("Settings"))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(placeholder, area);
-}
-
-fn render_transaction_placeholder(frame: &mut Frame, area: Rect, _app: &App) {
-    let placeholder = Paragraph::new("Transaction Details Screen\n\nThis will show:\n• Transaction information\n• Status and confirmations\n• Gas fees and events\n• Transaction history")
-        .block(Block::default().borders(Borders::ALL).title("Transaction Details"))
         .wrap(Wrap { trim: true });
     frame.render_widget(placeholder, area);
 }

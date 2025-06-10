@@ -453,27 +453,27 @@ fn render_execute_button(f: &mut Frame, area: Rect, app: &App) {
     let is_focused = matches!(swap_state.input_focus, SwapInputFocus::Execute);
     let is_valid = swap_state.clone().validate();
 
-    let (button_style, button_text) = if matches!(app.state.loading_state, LoadingState::Loading(_))
-    {
-        (Style::default().fg(Color::Yellow), "Processing Swap...")
-    } else if !is_valid {
-        (Style::default().fg(Color::DarkGray), "Invalid Input")
-    } else if is_focused {
-        (
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-            "► Execute Swap ◄",
-        )
-    } else {
-        (
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-            "Execute Swap",
-        )
-    };
+    let (button_style, button_text) =
+        if matches!(app.state.loading_state, LoadingState::Loading { .. }) {
+            (Style::default().fg(Color::Yellow), "Processing Swap...")
+        } else if !is_valid {
+            (Style::default().fg(Color::DarkGray), "Invalid Input")
+        } else if is_focused {
+            (
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+                "► Execute Swap ◄",
+            )
+        } else {
+            (
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+                "Execute Swap",
+            )
+        };
 
     let button = Paragraph::new(button_text)
         .style(button_style)
@@ -582,7 +582,7 @@ fn render_simulation_results(f: &mut Frame, area: Rect, app: &App) {
 
     let content = if let Some(ref simulation) = app.state.swap_state.simulation_result {
         render_simulation_details(simulation)
-    } else if matches!(app.state.loading_state, LoadingState::Loading(_)) {
+    } else if matches!(app.state.loading_state, LoadingState::Loading { .. }) {
         vec![Line::from(vec![Span::styled(
             "Running simulation...",
             Style::default().fg(Color::Yellow),

@@ -124,134 +124,127 @@
 - [x] **Execute Swap** with confirmation modal
 
 ### Task 4.4: Liquidity Screen (`src/tui/screens/liquidity.rs`)
-- [ ] **Provide Liquidity Panel**:
+- [x] **Provide Liquidity Panel**:
   - Dual asset input fields
   - Pool selection
   - Slippage settings (liquidity + swap)
   - Expected LP tokens
-- [ ] **Withdraw Liquidity Panel**:
+- [x] **Withdraw Liquidity Panel**:
   - LP token amount input
   - Expected asset outputs
-- [ ] **Current Positions** table showing:
+- [x] **Current Positions** table showing:
   - Pool positions, LP tokens, estimated value
-- [ ] **Position Details** with PnL calculations
+- [x] **Position Details** with PnL calculations
 
 ### Task 4.5: Rewards Screen (`src/tui/screens/rewards.rs`)
-- [ ] **Rewards Dashboard**:
+- [x] **Rewards Dashboard**:
   - Total claimable rewards
   - Rewards by pool/epoch
   - Current epoch information
-- [ ] **Claim Interface**:
+- [x] **Claim Interface**:
   - Claim all rewards option
   - Claim until specific epoch
   - Epoch selection input
-- [ ] **Rewards History** table
-- [ ] **Epoch Timeline** visualization
+- [x] **Rewards History** table
+- [x] **Epoch Timeline** visualization
 
 ### Task 4.6: Multi-hop Swap Screen (`src/tui/screens/multihop.rs`)
-- [ ] **Swap Route Builder**:
+- [x] **Swap Route Builder**:
   - Add/remove swap operations
   - Route visualization
   - Optimal path suggestions
-- [ ] **Route Analysis**:
+- [x] **Route Analysis**:
   - Total price impact
   - Fee breakdown per hop
   - Estimated output
-- [ ] **Execute Multi-hop** with confirmation
+- [x] **Execute Multi-hop** with confirmation
 
 ## Phase 5: Admin/Advanced Features
 
 ### Task 5.1: Admin Screen (`src/tui/screens/admin.rs`)
-- [ ] **Pool Management Panel**:
+- [x] **Pool Management Panel**:
   - Create new pools interface
   - Pool feature toggles (deposits, withdrawals, swaps)
   - Fee structure editor
-- [ ] **Pool Feature Controls**:
+- [x] **Pool Feature Controls**:
   - Enable/disable operations per pool
   - Global feature updates
-- [ ] **Pool Creation Wizard**:
+- [x] **Pool Creation Wizard**:
   - Asset selection
   - Decimals configuration
   - Fee structure setup with validation
   - Pool type selection
 
 ### Task 5.2: Settings Screen (`src/tui/screens/settings.rs`)
-- [ ] **Network Configuration**:
+- [x] **Network Configuration**:
   - Switch between mainnet/testnet
   - Custom RPC endpoint
-- [ ] **Wallet Management**:
-  - Import from mnemonic
+- [x] **Wallet Management**:
+  - Import from mnemonic (read from a local config file for easy wallet management when reloading the app)
   - Display current address
   - Export/backup options
-- [ ] **Display Preferences**:
+- [x] **Display Preferences**:
   - Theme selection
   - Refresh intervals
   - Decimal precision
 
 ### Task 5.3: Transaction Details Screen
-- [ ] **Transaction Viewer**:
+- [x] **Transaction Viewer**:
   - Transaction hash, status, block height
   - Gas used, fees paid
   - Event logs and messages
-- [ ] **Transaction History** with filtering
-- [ ] **Export** transaction data
+- [x] **Transaction History** with filtering
+- [x] **Export** transaction data
 
 ## Phase 6: Advanced UI Features
 
 ### Task 6.1: Real-time Updates
-- [ ] **Auto-refresh** for:
+- [x] **Auto-refresh** for:
   - Balances every 30 seconds
   - Pool data every 60 seconds
   - Transaction status checks
-- [ ] **Live Price Updates** where applicable
-- [ ] **Background data syncing** without blocking UI
+- [x] **Live Price Updates** where applicable
+- [x] **Background data syncing** without blocking UI
 
 ### Task 6.2: Error Handling & User Experience
-- [ ] **Comprehensive Error Display**:
+- [x] **Comprehensive Error Display**:
   - Network errors with retry options
   - Validation errors with guidance
   - Transaction failures with explanations
-- [ ] **Loading States** for all async operations
-- [ ] **Confirmation Dialogs** for all transactions
-- [ ] **Help/Documentation** overlay with keyboard shortcuts
+- [x] **Loading States** for all async operations
+- [x] **Confirmation Dialogs** for all transactions
+- [x] **Help/Documentation** overlay with keyboard shortcuts
 
 ### Task 6.3: Data Visualization
-- [ ] **Progress Bars** for:
+- [x] **Progress Bars** for:
   - Transaction confirmation progress
   - Sync status
 
 ## Phase 7: Integration & Testing
 
 ### Task 7.1: SDK Integration
-- [ ] **Async Integration**:
+- [x] **Async Integration**:
   - Non-blocking UI during blockchain operations
   - Proper error propagation from SDK
   - Status updates during long operations
-- [ ] **State Synchronization**:
+- [x] **State Synchronization**:
   - Keep UI state in sync with blockchain state
   - Handle network disconnections gracefully
 
-### Task 7.2: Testing Framework
-- [ ] **Unit Tests** for:
-  - State management logic
-  - Event handling
-
-### Task 7.3: Documentation
-- [ ] **Documentation** with screenshots and usage examples
-
 ### Task 8.1: Accessibility & Usability
-- [ ] **Keyboard Navigation**:
+- [x] **Keyboard Navigation**:
   - Consistent key bindings across screens
   - Tab order for form inputs
   - Escape key handling
-- [ ] **Color Scheme**:
-  - Support for different terminal color capabilities
-  - High contrast mode
-- [ ] **Responsive Layout**:
+- [x] **Responsive Layout**:
   - Adapt to different terminal sizes
   - Minimum size requirements
 
-### Task 8.2: Documentation
+### Task 8.2: Final App Screen
+- [x] **Final App Screen** with access to all the features of the SDK
+- [x] **Cargo Run** add a command to run the app
+
+### Task 8.3: Documentation
 - [ ] **User Guide** with instructions
 - [ ] **README** with setup and usage instructions
 

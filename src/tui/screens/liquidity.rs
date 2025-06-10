@@ -19,11 +19,9 @@ use cosmwasm_std::Uint128;
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, Cell, Gauge, Paragraph, Row, Table, Tabs, Wrap},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs, Wrap},
     Frame,
 };
-use std::collections::HashMap;
 use tui_input::InputRequest;
 
 /// Liquidity screen operation modes
@@ -106,7 +104,7 @@ impl Default for LiquidityScreenState {
             .required()
             .with_placeholder("0.0");
 
-        let mut second_asset_input = TextInput::new("Second Asset Amount")
+        let second_asset_input = TextInput::new("Second Asset Amount")
             .with_type(InputType::Amount)
             .required()
             .with_placeholder("0.0");
@@ -395,7 +393,12 @@ impl LiquidityScreenState {
             _ => "Invalid operation".to_string(),
         };
 
-        self.modal_state = Some(ModalState::new(title, content));
+        self.modal_state = Some(ModalState::confirmation(
+            title.to_string(),
+            content,
+            None,
+            None,
+        ));
         self.show_confirmation = true;
     }
 
@@ -444,9 +447,9 @@ pub fn render_liquidity(f: &mut Frame, app: &App) {
         .split(size);
 
     // Render header, navigation, and status bar
-    render_header(f, main_chunks[0], app);
-    render_navigation(f, main_chunks[1], &app.state.current_screen);
-    render_status_bar(f, main_chunks[3], app);
+    render_header(f, &app.state, main_chunks[0]);
+    render_navigation(f, &app.state, main_chunks[1]);
+    render_status_bar(f, &app.state, main_chunks[3]);
 
     // Render liquidity content
     render_liquidity_content(f, main_chunks[2], app);
@@ -455,7 +458,7 @@ pub fn render_liquidity(f: &mut Frame, app: &App) {
     let liquidity_state = get_liquidity_screen_state();
     if liquidity_state.show_confirmation {
         if let Some(ref modal_state) = liquidity_state.modal_state {
-            render_modal(f, modal_state);
+            render_modal(f, modal_state, size);
         }
     }
 }
@@ -553,16 +556,16 @@ fn render_provide_liquidity_form(f: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Render the provide liquidity preview
-fn render_provide_liquidity_preview(f: &mut Frame, area: Rect, app: &App) {
+fn render_provide_liquidity_preview(f: &mut Frame, area: Rect, _app: &App) {
     let liquidity_state = get_liquidity_screen_state();
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
         .title("Preview");
-    f.render_widget(block, area);
 
     let inner = block.inner(area);
+    f.render_widget(block, area);
 
     let preview_text = if liquidity_state.first_asset_input.value().is_empty()
         || liquidity_state.second_asset_input.value().is_empty()
@@ -649,16 +652,16 @@ fn render_withdraw_liquidity_form(f: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Render the withdraw liquidity preview
-fn render_withdraw_liquidity_preview(f: &mut Frame, area: Rect, app: &App) {
+fn render_withdraw_liquidity_preview(f: &mut Frame, area: Rect, _app: &App) {
     let liquidity_state = get_liquidity_screen_state();
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Green))
         .title("Expected Assets");
-    f.render_widget(block, area);
 
     let inner = block.inner(area);
+    f.render_widget(block, area);
 
     let preview_text = if liquidity_state.withdraw_amount_input.value().is_empty()
         || liquidity_state.pool_dropdown.selected_value().is_none()
@@ -714,7 +717,7 @@ fn render_positions_panel(f: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Render the current positions table
-fn render_positions_table(f: &mut Frame, area: Rect, app: &App) {
+fn render_positions_table(f: &mut Frame, area: Rect, _app: &App) {
     let liquidity_state = get_liquidity_screen_state();
 
     let block = Block::default()
@@ -791,7 +794,7 @@ fn render_positions_table(f: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Render detailed information for the selected position
-fn render_position_details(f: &mut Frame, area: Rect, app: &App) {
+fn render_position_details(f: &mut Frame, area: Rect, _app: &App) {
     let liquidity_state = get_liquidity_screen_state();
 
     let block = Block::default()
@@ -851,9 +854,9 @@ fn render_execute_button(f: &mut Frame, area: Rect, app: &App, button_text: &str
     };
 
     let loading_text = match &app.state.loading_state {
-        LoadingState::Loading(msg) => format!("Loading: {}", msg),
-        LoadingState::Success(msg) => format!("Success: {}", msg),
-        LoadingState::Error(msg) => format!("Error: {}", msg),
+        LoadingState::Loading { message, .. } => format!("Loading: {}", message),
+        LoadingState::Success { message, .. } => format!("Success: {}", message),
+        LoadingState::Error { message, .. } => format!("Error: {}", message),
         LoadingState::Idle => button_text.to_string(),
     };
 

@@ -30,13 +30,15 @@ pub fn render_status_bar(f: &mut Frame, app_state: &AppState, area: Rect) {
 /// Render the status/message section
 fn render_status_section(f: &mut Frame, app_state: &AppState, area: Rect) {
     match &app_state.loading_state {
-        LoadingState::Loading(message) => {
+        LoadingState::Loading {
+            message, progress, ..
+        } => {
             render_loading_status(f, message, area);
         }
-        LoadingState::Success(message) => {
+        LoadingState::Success { message, .. } => {
             render_success_status(f, message, area);
         }
-        LoadingState::Error(message) => {
+        LoadingState::Error { message, .. } => {
             render_error_status(f, message, area);
         }
         LoadingState::Idle => {

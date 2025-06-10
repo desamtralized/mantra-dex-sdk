@@ -1,15 +1,17 @@
-//! TUI Utility Functions
+//! TUI Utility Modules
 //!
-//! This module contains utility functions for the TUI, including
-//! formatting, validation, and async operation helpers.
+//! This module contains utility functions and helpers for the TUI implementation.
 
 // Re-export utilities when they are implemented
-// pub mod formatting;
-// pub mod validation;
-// pub mod async_ops;
+pub mod async_ops;
+pub mod focus_manager;
+pub mod formatting;
+pub mod responsive;
+pub mod validation;
 
-// pub use formatting::*;
-// pub use validation::*;
-// pub use async_ops::*;
+pub use async_ops::*;
+pub use focus_manager::*;
+pub use formatting::*;
+pub use validation::*;
 
 // Placeholder - utilities will be implemented in future tasks

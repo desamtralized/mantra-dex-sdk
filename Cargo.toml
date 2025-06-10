@@ -5,9 +5,27 @@ edition = "2021"
 description = "A Rust SDK for interacting with the Mantra DEX on the Mantra Dukong Network"
 license = "MIT"
 
+[[bin]]
+name = "mantra-dex-tui"
+path = "src/bin/main.rs"
+
+[[bin]]
+name = "tui"
+path = "src/bin/tui.rs"
+
+[package.metadata.commands]
+tui = "cargo run --bin mantra-dex-tui --features tui"
+
 [features]
 default = []
-tui = ["ratatui", "crossterm", "tokio-util", "tui-input", "chrono"]
+tui = [
+    "ratatui",
+    "crossterm",
+    "tokio-util",
+    "tui-input",
+    "chrono",
+    "env_logger",
+]
 
 [dependencies]
 mantra-dex-std = "3.0.0"
@@ -45,7 +63,14 @@ crossterm = { version = "0.28.1", optional = true }
 tokio-util = { version = "0.7", optional = true }
 tui-input = { version = "0.10", optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
+env_logger = { version = "0.10", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
 env_logger = "0.10"
+
+# Note: Use cargo run --bin mantra-dex-tui --features tui to start the TUI
+# Examples:
+#   cargo run --bin mantra-dex-tui --features tui --help
+#   cargo run --bin mantra-dex-tui --features tui --network testnet  
+#   cargo run --bin mantra-dex-tui --features tui --network mainnet

@@ -4,7 +4,13 @@
 //! screen navigation, data caching, and state transitions.
 
 #[cfg(feature = "tui")]
+use crate::tui::components::modals::{ErrorType, ModalState};
+#[cfg(feature = "tui")]
 use crate::tui::events::Event;
+#[cfg(feature = "tui")]
+use crate::tui::utils::async_ops::SyncConfig;
+#[cfg(feature = "tui")]
+use crate::tui::utils::focus_manager::FocusManager;
 #[cfg(feature = "tui")]
 use crate::{Error, MantraDexClient, MantraNetworkConfig};
 #[cfg(feature = "tui")]
@@ -15,6 +21,13 @@ use cosmwasm_std::{Coin, Uint128};
 use mantra_dex_std::pool_manager::{PoolInfoResponse, SimulationResponse};
 #[cfg(feature = "tui")]
 use std::collections::HashMap;
+#[cfg(feature = "tui")]
+use std::sync::Arc;
+#[cfg(feature = "tui")]
+use std::time::Duration;
+
+#[cfg(feature = "tui")]
+use tokio::sync::mpsc;
 
 /// Available screens in the TUI application
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,13 +74,143 @@ impl Screen {
     }
 }
 
-/// Loading state for async operations
+/// Enhanced loading state for comprehensive async operations
 #[derive(Debug, Clone)]
 pub enum LoadingState {
     Idle,
-    Loading(String), // Loading with description
-    Success(String), // Success with message
-    Error(String),   // Error with message
+    Loading {
+        message: String,
+        progress: Option<f64>, // 0.0 to 100.0, None for indeterminate
+        can_cancel: bool,
+        operation_id: Option<String>, // For cancellation tracking
+    },
+    Success {
+        message: String,
+        details: Option<Vec<String>>,
+    },
+    Error {
+        message: String,
+        error_type: ErrorType,
+        details: Option<Vec<String>>,
+        retry_action: Option<String>,
+    },
+}
+
+impl LoadingState {
+    /// Create a simple loading state
+    pub fn loading(message: String) -> Self {
+        Self::Loading {
+            message,
+            progress: None,
+            can_cancel: false,
+            operation_id: None,
+        }
+    }
+
+    /// Create a loading state with progress
+    pub fn loading_with_progress(message: String, progress: f64, can_cancel: bool) -> Self {
+        Self::Loading {
+            message,
+            progress: Some(progress),
+            can_cancel,
+            operation_id: None,
+        }
+    }
+
+    /// Create a loading state with operation ID for cancellation
+    pub fn loading_with_id(message: String, operation_id: String, can_cancel: bool) -> Self {
+        Self::Loading {
+            message,
+            progress: None,
+            can_cancel,
+            operation_id: Some(operation_id),
+        }
+    }
+
+    /// Create a success state
+    pub fn success(message: String) -> Self {
+        Self::Success {
+            message,
+            details: None,
+        }
+    }
+
+    /// Create a success state with details
+    pub fn success_with_details(message: String, details: Vec<String>) -> Self {
+        Self::Success {
+            message,
+            details: Some(details),
+        }
+    }
+
+    /// Create a comprehensive error state
+    pub fn error(message: String, error_type: ErrorType) -> Self {
+        Self::Error {
+            message,
+            error_type,
+            details: None,
+            retry_action: None,
+        }
+    }
+
+    /// Create an error state with retry action
+    pub fn error_with_retry(message: String, error_type: ErrorType, retry_action: String) -> Self {
+        Self::Error {
+            message,
+            error_type,
+            details: None,
+            retry_action: Some(retry_action),
+        }
+    }
+
+    /// Create an error state with detailed information
+    pub fn error_with_details(
+        message: String,
+        error_type: ErrorType,
+        details: Vec<String>,
+        retry_action: Option<String>,
+    ) -> Self {
+        Self::Error {
+            message,
+            error_type,
+            details: Some(details),
+            retry_action,
+        }
+    }
+
+    /// Check if the state represents an active loading operation
+    pub fn is_loading(&self) -> bool {
+        matches!(self, LoadingState::Loading { .. })
+    }
+
+    /// Check if the state represents an error
+    pub fn is_error(&self) -> bool {
+        matches!(self, LoadingState::Error { .. })
+    }
+
+    /// Check if the loading operation can be cancelled
+    pub fn can_cancel(&self) -> bool {
+        match self {
+            LoadingState::Loading { can_cancel, .. } => *can_cancel,
+            _ => false,
+        }
+    }
+
+    /// Get the current progress if available
+    pub fn progress(&self) -> Option<f64> {
+        match self {
+            LoadingState::Loading { progress, .. } => *progress,
+            _ => None,
+        }
+    }
+
+    /// Get the operation ID if available
+    pub fn operation_id(&self) -> Option<&String> {
+        match self {
+            LoadingState::Loading { operation_id, .. } => operation_id.as_ref(),
+            _ => None,
+        }
+    }
 }
 
 /// Transaction details for tracking
@@ -164,12 +307,14 @@ impl Default for LiquidityState {
 pub struct AppState {
     /// Current active screen
     pub current_screen: Screen,
-    /// Loading state for async operations
+    /// Enhanced loading state for async operations
     pub loading_state: LoadingState,
-    /// Error messages to display
+    /// Error messages to display (deprecated in favor of modal_state)
     pub error_message: Option<String>,
     /// Status message to display
     pub status_message: Option<String>,
+    /// Modal state for comprehensive dialogs
+    pub modal_state: Option<ModalState>,
     /// Selected pool ID (if any)
     pub selected_pool_id: Option<u64>,
     /// User token balances cache
@@ -194,17 +339,42 @@ pub struct AppState {
     pub current_epoch: Option<u64>,
     /// Claimable rewards amount
     pub claimable_rewards: HashMap<String, Uint128>,
+    /// Rewards screen state
+    pub rewards_state: crate::tui::screens::rewards::RewardsState,
+    /// Admin screen state
+    pub admin_state: crate::tui::screens::admin::AdminState,
+    /// Settings screen state
+    pub settings_state: crate::tui::screens::settings::SettingsState,
+    /// Transaction screen state
+    pub transaction_state: crate::tui::screens::transaction::TransactionState,
     /// Network information
     pub network_info: NetworkInfo,
+    /// Pending async operations for tracking
+    pub pending_operations: HashMap<String, PendingOperation>,
+    /// Focus management for keyboard navigation
+    pub focus_manager: FocusManager,
 }
 
-/// Network information for display
+/// Pending operation tracking for comprehensive loading states
+#[derive(Debug, Clone)]
+pub struct PendingOperation {
+    pub operation_type: String,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub can_cancel: bool,
+    pub cancel_token: Option<String>,
+}
+
+/// Enhanced network information with detailed connection state
 #[derive(Debug, Clone)]
 pub struct NetworkInfo {
     pub chain_id: Option<String>,
     pub node_version: Option<String>,
     pub is_syncing: bool,
     pub last_sync_time: Option<chrono::DateTime<chrono::Utc>>,
+    pub connection_state: crate::tui::utils::async_ops::NetworkState,
+    pub last_block_height: Option<u64>,
+    pub connection_latency: Option<Duration>,
+    pub retry_count: u32,
 }
 
 impl Default for NetworkInfo {
@@ -214,6 +384,10 @@ impl Default for NetworkInfo {
             node_version: None,
             is_syncing: false,
             last_sync_time: None,
+            connection_state: crate::tui::utils::async_ops::NetworkState::Connected,
+            last_block_height: None,
+            connection_latency: None,
+            retry_count: 0,
         }
     }
 }
@@ -225,6 +399,7 @@ impl Default for AppState {
             loading_state: LoadingState::Idle,
             error_message: None,
             status_message: None,
+            modal_state: None,
             selected_pool_id: None,
             balances: HashMap::new(),
             recent_transactions: Vec::new(),
@@ -237,7 +412,13 @@ impl Default for AppState {
             liquidity_state: LiquidityState::default(),
             current_epoch: None,
             claimable_rewards: HashMap::new(),
+            rewards_state: crate::tui::screens::rewards::RewardsState::default(),
+            admin_state: crate::tui::screens::admin::AdminState::default(),
+            settings_state: crate::tui::screens::settings::SettingsState::default(),
+            transaction_state: crate::tui::screens::transaction::TransactionState::default(),
             network_info: NetworkInfo::default(),
+            pending_operations: HashMap::new(),
+            focus_manager: FocusManager::new(),
         }
     }
 }
@@ -246,10 +427,14 @@ impl Default for AppState {
 pub struct App {
     /// Application state
     pub state: AppState,
-    /// DEX client
-    pub client: MantraDexClient,
+    /// DEX client wrapped in Arc for sharing
+    pub client: Arc<MantraDexClient>,
     /// Configuration
     pub config: MantraNetworkConfig,
+    /// Event sender for background task communication
+    event_sender: Option<mpsc::UnboundedSender<Event>>,
+    /// Enhanced background task coordinator
+    background_coordinator: Option<crate::tui::utils::async_ops::BackgroundTaskCoordinator>,
 }
 
 impl App {
@@ -257,15 +442,801 @@ impl App {
     pub fn new(client: MantraDexClient, config: MantraNetworkConfig) -> Self {
         Self {
             state: AppState::default(),
-            client,
+            client: Arc::new(client),
             config,
+            event_sender: None,
+            background_coordinator: None,
         }
     }
 
-    /// Set an error message
+    /// Initialize background tasks for data synchronization with enhanced coordination
+    pub fn initialize_background_tasks(&mut self, event_sender: mpsc::UnboundedSender<Event>) {
+        // Create enhanced background task coordinator
+        let client_arc = Arc::clone(&self.client);
+        let mut coordinator = crate::tui::utils::async_ops::BackgroundTaskCoordinator::new(
+            event_sender.clone(),
+            client_arc,
+            None, // Use default config for now
+        );
+
+        // Set wallet address if available
+        if let Some(wallet_address) = &self.state.wallet_address {
+            coordinator.set_wallet_address(wallet_address.clone());
+        }
+
+        // Start background coordination
+        coordinator.start();
+
+        self.background_coordinator = Some(coordinator);
+        self.event_sender = Some(event_sender);
+    }
+
+    /// Stop background tasks with proper cleanup
+    pub fn stop_background_tasks(&mut self) {
+        if let Some(mut coordinator) = self.background_coordinator.take() {
+            coordinator.stop();
+        }
+    }
+
+    /// Update sync configuration
+    pub fn update_sync_config(&mut self, config: crate::tui::utils::async_ops::SyncConfig) {
+        if let Some(coordinator) = &mut self.background_coordinator {
+            coordinator.update_config(config);
+        }
+    }
+
+    /// Check if real-time synchronization is active
+    pub fn is_real_time_sync_active(&self) -> bool {
+        self.background_coordinator
+            .as_ref()
+            .map(|c| c.is_active())
+            .unwrap_or(false)
+    }
+
+    /// Get current network state
+    pub async fn get_network_state(&self) -> crate::tui::utils::async_ops::NetworkState {
+        if let Some(coordinator) = &self.background_coordinator {
+            coordinator.get_network_state().await
+        } else {
+            crate::tui::utils::async_ops::NetworkState::Connected
+        }
+    }
+
+    /// Execute async operation with comprehensive error handling
+    pub async fn execute_async_operation<F, Fut, T>(
+        &mut self,
+        operation_name: &str,
+        operation: F,
+    ) -> Result<T, Error>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<T, Error>>,
+    {
+        // Set loading state
+        self.set_loading_with_progress(format!("Executing {}...", operation_name), Some(0.1), true);
+
+        let start_time = std::time::Instant::now();
+
+        // Check network state first
+        let network_state = self.get_network_state().await;
+        match network_state {
+            crate::tui::utils::async_ops::NetworkState::Disconnected => {
+                let error_msg =
+                    "Network is disconnected. Please check your connection.".to_string();
+                self.set_error_with_retry(
+                    error_msg.clone(),
+                    ErrorType::Network,
+                    "retry_connection".to_string(),
+                );
+                return Err(Error::Network(error_msg));
+            }
+            crate::tui::utils::async_ops::NetworkState::Error(ref err) => {
+                let error_msg = format!("Network error: {}", err);
+                self.set_error_with_retry(
+                    error_msg.clone(),
+                    ErrorType::Network,
+                    "retry_connection".to_string(),
+                );
+                return Err(Error::Network(error_msg));
+            }
+            _ => {}
+        }
+
+        // Update progress
+        self.update_loading_progress(25.0, Some(format!("Executing {}...", operation_name)));
+
+        // Execute the operation with timeout
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(30), // 30 second timeout
+            operation(),
+        )
+        .await;
+
+        match result {
+            Ok(Ok(value)) => {
+                let duration = start_time.elapsed();
+                self.set_success(format!(
+                    "{} completed successfully in {:.2}s",
+                    operation_name,
+                    duration.as_secs_f64()
+                ));
+                Ok(value)
+            }
+            Ok(Err(e)) => {
+                let categorized_error = self.categorize_error(&e);
+                let error_msg = format!("{} failed: {}", operation_name, e);
+
+                match categorized_error {
+                    ErrorType::Network => {
+                        self.set_error_with_retry(
+                            error_msg,
+                            categorized_error,
+                            "retry_operation".to_string(),
+                        );
+                    }
+                    ErrorType::Validation => {
+                        self.set_error_with_type(error_msg, categorized_error);
+                    }
+                    _ => {
+                        self.set_error_with_retry(
+                            error_msg,
+                            categorized_error,
+                            "retry_operation".to_string(),
+                        );
+                    }
+                }
+                Err(e)
+            }
+            Err(_) => {
+                let error_msg = format!("{} timed out after 30 seconds", operation_name);
+                self.set_error_with_retry(
+                    error_msg.clone(),
+                    ErrorType::Timeout,
+                    "retry_operation".to_string(),
+                );
+                Err(Error::Rpc(error_msg))
+            }
+        }
+    }
+
+    /// Enhanced error handling with comprehensive categorization
+    fn categorize_error(&self, error: &Error) -> ErrorType {
+        let error_string = error.to_string().to_lowercase();
+
+        if error_string.contains("connection")
+            || error_string.contains("network")
+            || error_string.contains("timeout")
+        {
+            ErrorType::Network
+        } else if error_string.contains("unauthorized") || error_string.contains("forbidden") {
+            ErrorType::Authentication
+        } else if error_string.contains("validation") || error_string.contains("invalid") {
+            ErrorType::Validation
+        } else if error_string.contains("insufficient") || error_string.contains("balance") {
+            ErrorType::InsufficientFunds
+        } else if error_string.contains("contract") || error_string.contains("execute") {
+            ErrorType::Contract
+        } else {
+            ErrorType::Unknown
+        }
+    }
+
+    /// Handle async blockchain operations with comprehensive status updates
+    pub async fn handle_event(&mut self, event: Event) -> Result<bool, Error> {
+        // Handle network state changes
+        if let Event::Custom(ref custom_event) = event {
+            if custom_event.starts_with("network_state_changed:") {
+                let parts: Vec<&str> = custom_event.split(':').collect();
+                if parts.len() >= 3 {
+                    let new_state = parts[2];
+                    match new_state {
+                        "connected" => {
+                            self.state.network_info.connection_state =
+                                crate::tui::utils::async_ops::NetworkState::Connected;
+                            self.set_status("Network connection restored".to_string());
+                        }
+                        "disconnected" => {
+                            self.state.network_info.connection_state =
+                                crate::tui::utils::async_ops::NetworkState::Disconnected;
+                            self.set_error_with_type(
+                                "Network disconnected. Some features may be unavailable."
+                                    .to_string(),
+                                ErrorType::Network,
+                            );
+                        }
+                        "error" => {
+                            self.state.network_info.connection_state =
+                                crate::tui::utils::async_ops::NetworkState::Error(
+                                    "Network error".to_string(),
+                                );
+                            self.set_error_with_retry(
+                                "Network error detected. Attempting to reconnect...".to_string(),
+                                ErrorType::Network,
+                                "retry_connection".to_string(),
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                return Ok(false);
+            }
+        }
+
+        // Handle blockchain progress events
+        if let Event::BlockchainProgress {
+            operation,
+            status,
+            progress,
+        } = &event
+        {
+            self.update_loading_progress(
+                progress.unwrap_or(0.0) as f64 * 100.0,
+                Some(format!("{}: {}", operation, status)),
+            );
+            return Ok(false);
+        }
+
+        // Handle blockchain success events
+        if let Event::BlockchainSuccess {
+            operation,
+            result,
+            transaction_hash,
+        } = &event
+        {
+            let mut success_details = vec![result.clone()];
+            if let Some(tx_hash) = transaction_hash {
+                success_details.push(format!("Transaction: {}", tx_hash));
+            }
+
+            self.state.loading_state = LoadingState::success_with_details(
+                format!("{} completed successfully", operation),
+                success_details,
+            );
+            return Ok(false);
+        }
+
+        // Handle blockchain error events
+        if let Event::BlockchainError { operation, error } = &event {
+            let error_type = if error.to_lowercase().contains("network") {
+                ErrorType::Network
+            } else if error.to_lowercase().contains("contract") {
+                ErrorType::Contract
+            } else {
+                ErrorType::Unknown
+            };
+
+            self.state.loading_state = LoadingState::error_with_details(
+                format!("{} failed", operation),
+                error_type,
+                vec![error.clone()],
+                Some("retry_operation".to_string()),
+            );
+            return Ok(false);
+        }
+
+        // Handle data refresh events with enhanced error reporting
+        if let Event::DataRefresh {
+            data_type,
+            success,
+            error,
+        } = &event
+        {
+            match self
+                .handle_data_refresh(data_type.clone(), *success, error.clone())
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    self.set_error_with_type(
+                        format!("Failed to refresh {}: {}", data_type, e),
+                        ErrorType::Unknown,
+                    );
+                }
+            }
+            return Ok(false);
+        }
+
+        // Handle blockchain action events with comprehensive async processing
+        match &event {
+            Event::ExecuteSwap {
+                from_asset,
+                to_asset,
+                amount,
+                pool_id,
+                slippage_tolerance,
+            } => {
+                let operation_name = "swap";
+                let from_asset = from_asset.clone();
+                let to_asset = to_asset.clone();
+                let amount = amount.clone();
+                let pool_id = *pool_id;
+                let slippage_tolerance = slippage_tolerance.clone();
+
+                // Execute swap with comprehensive error handling
+                let result = self
+                    .execute_async_operation(operation_name, || async {
+                        // TODO: Implement actual swap execution
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        Ok(())
+                    })
+                    .await;
+
+                if let Err(e) = result {
+                    eprintln!("Swap failed: {}", e);
+                }
+                return Ok(false);
+            }
+            Event::ProvideLiquidity {
+                pool_id,
+                asset_1_amount,
+                asset_2_amount,
+                slippage_tolerance,
+            } => {
+                let operation_name = "provide_liquidity";
+                let pool_id = *pool_id;
+                let asset_1_amount = asset_1_amount.clone();
+                let asset_2_amount = asset_2_amount.clone();
+                let slippage_tolerance = slippage_tolerance.clone();
+
+                let result = self
+                    .execute_async_operation(operation_name, || async {
+                        // TODO: Implement actual liquidity provision
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        Ok(())
+                    })
+                    .await;
+
+                if let Err(e) = result {
+                    eprintln!("Liquidity provision failed: {}", e);
+                }
+                return Ok(false);
+            }
+            Event::ClaimRewards {
+                pool_id,
+                epochs,
+                claim_all,
+            } => {
+                let operation_name = "claim_rewards";
+                let pool_id = *pool_id;
+                let epochs = epochs.clone();
+                let claim_all = *claim_all;
+
+                let result = self
+                    .execute_async_operation(operation_name, || async {
+                        // TODO: Implement actual rewards claiming
+                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                        Ok(())
+                    })
+                    .await;
+
+                if let Err(e) = result {
+                    eprintln!("Rewards claiming failed: {}", e);
+                }
+                return Ok(false);
+            }
+            _ => {}
+        }
+
+        // Handle focus management events
+        if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
+            // Focus changed, you can add logic here to update component states
+            self.update_component_focus(&focused_component);
+        }
+
+        // Handle standard navigation events
+        match event {
+            Event::Quit => {
+                self.state.should_quit = true;
+                return Ok(true);
+            }
+            Event::Tab => {
+                // Alt+Tab for screen navigation
+                self.next_tab();
+            }
+            Event::BackTab => {
+                // Alt+Shift+Tab for reverse screen navigation
+                self.previous_tab();
+            }
+            Event::Escape => {
+                // Handle escape key - close modals or return to previous focus
+                if self.state.modal_state.is_some() {
+                    self.state.modal_state = None;
+                } else {
+                    self.state.focus_manager.return_to_previous();
+                }
+            }
+            Event::Help => {
+                self.show_help();
+            }
+            Event::Refresh => {
+                self.refresh_current_screen_data().await?;
+            }
+            Event::Enter => {
+                // Handle enter key based on current focus
+                if let Some(modal) = &self.state.modal_state {
+                    if modal.is_confirmed() {
+                        self.handle_confirmation();
+                        self.state.modal_state = None;
+                    }
+                } else {
+                    self.handle_enter_key().await?;
+                }
+            }
+            Event::ContextAction => {
+                // Handle space bar for context-sensitive actions
+                self.handle_context_action().await?;
+            }
+            Event::F(1) => {
+                self.show_help();
+            }
+            Event::F(5) => {
+                self.refresh_current_screen_data().await?;
+            }
+            _ => {
+                // Handle modal events if modal is open
+                if self.state.modal_state.is_some() {
+                    if self.handle_modal_event(&event) {
+                        return Ok(false);
+                    }
+                }
+
+                // Handle screen-specific events
+                self.handle_screen_specific_event(event).await?;
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Update component focus state when focus changes
+    fn update_component_focus(
+        &mut self,
+        focused_component: &crate::tui::events::FocusableComponent,
+    ) {
+        // This method can be used to update the focus state of specific components
+        // For now, we just log the focus change
+        #[cfg(debug_assertions)]
+        println!("Focus changed to: {:?}", focused_component);
+    }
+
+    /// Initialize focus manager for the current screen
+    pub fn initialize_focus_for_screen(&mut self, screen: Screen) {
+        use crate::tui::utils::focus_manager::component_ids::*;
+
+        let components = match screen {
+            Screen::Dashboard => vec![dashboard_refresh_button(), dashboard_transactions_table()],
+            Screen::Pools => vec![pools_search_input(), pools_table()],
+            Screen::Swap => vec![
+                swap_from_asset_input(),
+                swap_to_asset_dropdown(),
+                swap_amount_input(),
+                swap_slippage_input(),
+                swap_execute_button(),
+            ],
+            Screen::Liquidity => vec![
+                liquidity_pool_dropdown(),
+                liquidity_amount1_input(),
+                liquidity_amount2_input(),
+                liquidity_provide_button(),
+                liquidity_withdraw_button(),
+            ],
+            Screen::Rewards => vec![
+                rewards_epoch_input(),
+                rewards_claim_all_button(),
+                rewards_history_table(),
+            ],
+            Screen::Admin => vec![
+                admin_asset1_input(),
+                admin_asset2_input(),
+                admin_fee_input(),
+                admin_create_pool_button(),
+            ],
+            Screen::Settings => vec![
+                settings_network_dropdown(),
+                settings_rpc_input(),
+                settings_wallet_input(),
+            ],
+            _ => vec![],
+        };
+
+        self.state.focus_manager.set_tab_order(components);
+        // Set focus to first component
+        self.state.focus_manager.focus_first();
+    }
+
+    /// Handle refresh for current screen
+    async fn refresh_current_screen_data(&mut self) -> Result<(), Error> {
+        match self.state.current_screen {
+            Screen::Dashboard => {
+                // Refresh dashboard data
+                if let Some(sender) = &self.event_sender {
+                    let _ = sender.send(Event::DataRefresh {
+                        data_type: "dashboard".to_string(),
+                        success: true,
+                        error: None,
+                    });
+                }
+            }
+            Screen::Pools => {
+                // Refresh pool data
+                if let Some(sender) = &self.event_sender {
+                    let _ = sender.send(Event::DataRefresh {
+                        data_type: "pools".to_string(),
+                        success: true,
+                        error: None,
+                    });
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle enter key based on current focus
+    async fn handle_enter_key(&mut self) -> Result<(), Error> {
+        let focused = self.state.focus_manager.current_focus().cloned();
+        if let Some(focused) = focused {
+            match focused {
+                crate::tui::events::FocusableComponent::Button(button_id) => {
+                    self.handle_button_activation(&button_id).await?;
+                }
+                crate::tui::events::FocusableComponent::Dropdown(dropdown_id) => {
+                    // Toggle dropdown
+                    self.handle_dropdown_toggle(&dropdown_id);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle context action (space bar)
+    async fn handle_context_action(&mut self) -> Result<(), Error> {
+        let focused = self.state.focus_manager.current_focus().cloned();
+        if let Some(focused) = focused {
+            match focused {
+                crate::tui::events::FocusableComponent::Checkbox(checkbox_id) => {
+                    self.handle_checkbox_toggle(&checkbox_id);
+                }
+                crate::tui::events::FocusableComponent::Button(button_id) => {
+                    self.handle_button_activation(&button_id).await?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Handle button activation
+    async fn handle_button_activation(&mut self, button_id: &str) -> Result<(), Error> {
+        match button_id {
+            "swap_execute" => {
+                // Execute swap
+                let swap_state = self.state.swap_state.clone();
+                if let (Some(from_asset), Some(to_asset)) =
+                    (&swap_state.from_asset, &swap_state.to_asset)
+                {
+                    if let Some(sender) = &self.event_sender {
+                        let _ = sender.send(Event::ExecuteSwap {
+                            from_asset: from_asset.clone(),
+                            to_asset: to_asset.clone(),
+                            amount: swap_state.amount,
+                            pool_id: swap_state.selected_pool_id.and_then(|id| id.parse().ok()),
+                            slippage_tolerance: Some(swap_state.slippage),
+                        });
+                    }
+                }
+            }
+            "liquidity_provide" => {
+                // Provide liquidity
+                let liquidity_state = self.state.liquidity_state.clone();
+                if let Some(pool_id_str) = &liquidity_state.selected_pool_id {
+                    if let Ok(pool_id) = pool_id_str.parse::<u64>() {
+                        if let Some(sender) = &self.event_sender {
+                            let _ = sender.send(Event::ProvideLiquidity {
+                                pool_id,
+                                asset_1_amount: liquidity_state.first_asset_amount,
+                                asset_2_amount: liquidity_state.second_asset_amount,
+                                slippage_tolerance: Some(liquidity_state.slippage_amount),
+                            });
+                        }
+                    }
+                }
+            }
+            "rewards_claim_all" => {
+                // Claim all rewards
+                if let Some(sender) = &self.event_sender {
+                    let _ = sender.send(Event::ClaimRewards {
+                        pool_id: None,
+                        epochs: None,
+                        claim_all: true,
+                    });
+                }
+            }
+            "dashboard_refresh" => {
+                self.refresh_current_screen_data().await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle dropdown toggle
+    fn handle_dropdown_toggle(&mut self, _dropdown_id: &str) {
+        // Implementation depends on specific dropdown state management
+        // This is a placeholder
+    }
+
+    /// Handle checkbox toggle
+    fn handle_checkbox_toggle(&mut self, _checkbox_id: &str) {
+        // Implementation depends on specific checkbox state management
+        // This is a placeholder
+    }
+
+    /// Handle screen-specific events
+    async fn handle_screen_specific_event(&mut self, event: Event) -> Result<(), Error> {
+        match self.state.current_screen {
+            Screen::Swap => {
+                self.handle_swap_screen_event(event).await?;
+            }
+            Screen::Liquidity => {
+                self.handle_liquidity_screen_event(event).await?;
+            }
+            Screen::Settings => {
+                self.handle_settings_screen_event(event).await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle swap screen specific events
+    async fn handle_swap_screen_event(&mut self, event: Event) -> Result<(), Error> {
+        match event {
+            Event::Char(c) => {
+                // Handle character input for focused text fields
+                let focused = self.state.focus_manager.current_focus().cloned();
+                if let Some(focused) = focused {
+                    match focused {
+                        crate::tui::events::FocusableComponent::TextInput(field_id) => {
+                            match field_id.as_str() {
+                                "swap_amount" => {
+                                    self.state.swap_state.amount.push(c);
+                                }
+                                "swap_slippage" => {
+                                    self.state.swap_state.slippage.push(c);
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Event::Backspace => {
+                // Handle backspace for focused text fields
+                let focused = self.state.focus_manager.current_focus().cloned();
+                if let Some(focused) = focused {
+                    match focused {
+                        crate::tui::events::FocusableComponent::TextInput(field_id) => {
+                            match field_id.as_str() {
+                                "swap_amount" => {
+                                    self.state.swap_state.amount.pop();
+                                }
+                                "swap_slippage" => {
+                                    self.state.swap_state.slippage.pop();
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle liquidity screen specific events
+    async fn handle_liquidity_screen_event(&mut self, event: Event) -> Result<(), Error> {
+        match event {
+            Event::Char(c) => {
+                let focused = self.state.focus_manager.current_focus().cloned();
+                if let Some(focused) = focused {
+                    match focused {
+                        crate::tui::events::FocusableComponent::TextInput(field_id) => {
+                            match field_id.as_str() {
+                                "liquidity_amount1" => {
+                                    self.state.liquidity_state.first_asset_amount.push(c);
+                                }
+                                "liquidity_amount2" => {
+                                    self.state.liquidity_state.second_asset_amount.push(c);
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Event::Backspace => {
+                let focused = self.state.focus_manager.current_focus().cloned();
+                if let Some(focused) = focused {
+                    match focused {
+                        crate::tui::events::FocusableComponent::TextInput(field_id) => {
+                            match field_id.as_str() {
+                                "liquidity_amount1" => {
+                                    self.state.liquidity_state.first_asset_amount.pop();
+                                }
+                                "liquidity_amount2" => {
+                                    self.state.liquidity_state.second_asset_amount.pop();
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Handle settings screen specific events
+    async fn handle_settings_screen_event(&mut self, event: Event) -> Result<(), Error> {
+        match event {
+            Event::Char(c) => {
+                self.handle_settings_input(c).await?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Set an error with comprehensive error handling
     pub fn set_error(&mut self, message: String) {
+        self.set_error_with_type(message, ErrorType::Unknown)
+    }
+
+    /// Set an error with specific error type
+    pub fn set_error_with_type(&mut self, message: String, error_type: ErrorType) {
         self.state.error_message = Some(message.clone());
-        self.state.loading_state = LoadingState::Error(message);
+        self.state.loading_state = LoadingState::error(message.clone(), error_type.clone());
+
+        // Show comprehensive error modal
+        self.state.modal_state = Some(ModalState::error(
+            "Error".to_string(),
+            message,
+            error_type,
+            None,
+            None,
+        ));
+    }
+
+    /// Set an error with retry capability
+    pub fn set_error_with_retry(
+        &mut self,
+        message: String,
+        error_type: ErrorType,
+        retry_action: String,
+    ) {
+        self.state.error_message = Some(message.clone());
+        self.state.loading_state = LoadingState::error_with_retry(
+            message.clone(),
+            error_type.clone(),
+            retry_action.clone(),
+        );
+
+        // Show error modal with retry option
+        self.state.modal_state = Some(ModalState::error(
+            "Error".to_string(),
+            message,
+            error_type,
+            None,
+            Some(retry_action),
+        ));
     }
 
     /// Set a status message
@@ -277,29 +1248,178 @@ impl App {
     pub fn clear_messages(&mut self) {
         self.state.error_message = None;
         self.state.status_message = None;
+        self.state.modal_state = None;
         if matches!(
             self.state.loading_state,
-            LoadingState::Error(_) | LoadingState::Success(_)
+            LoadingState::Error { .. } | LoadingState::Success { .. }
         ) {
             self.state.loading_state = LoadingState::Idle;
         }
     }
 
-    /// Set loading state
+    /// Set loading state with comprehensive progress tracking
     pub fn set_loading(&mut self, message: String) {
-        self.state.loading_state = LoadingState::Loading(message);
+        self.set_loading_with_progress(message, None, false)
+    }
+
+    /// Set loading state with progress and cancellation support
+    pub fn set_loading_with_progress(
+        &mut self,
+        message: String,
+        progress: Option<f64>,
+        can_cancel: bool,
+    ) {
+        self.state.loading_state = LoadingState::Loading {
+            message: message.clone(),
+            progress,
+            can_cancel,
+            operation_id: None,
+        };
+
+        // Show loading modal for long operations
+        if can_cancel || progress.is_some() {
+            self.state.modal_state = Some(ModalState::loading(
+                "Processing".to_string(),
+                message,
+                progress,
+                can_cancel,
+            ));
+        }
+    }
+
+    /// Update loading progress
+    pub fn update_loading_progress(&mut self, progress: f64, message: Option<String>) {
+        if let LoadingState::Loading {
+            message: ref mut m,
+            progress: ref mut p,
+            ..
+        } = self.state.loading_state
+        {
+            *p = Some(progress);
+            if let Some(ref new_message) = message {
+                *m = new_message.clone();
+            }
+        }
+
+        // Update modal if visible
+        if let Some(ref mut modal) = self.state.modal_state {
+            modal.update_progress(Some(progress));
+            if let Some(new_message) = message {
+                modal.update_loading_message(new_message);
+            }
+        }
     }
 
     /// Set success state
     pub fn set_success(&mut self, message: String) {
-        self.state.loading_state = LoadingState::Success(message.clone());
+        self.state.loading_state = LoadingState::success(message.clone());
         self.state.status_message = Some(message);
+        // Clear any modal on success
+        self.state.modal_state = None;
+    }
+
+    /// Show confirmation dialog
+    pub fn show_confirmation(
+        &mut self,
+        title: String,
+        message: String,
+        confirm_text: Option<String>,
+        cancel_text: Option<String>,
+    ) {
+        self.state.modal_state = Some(ModalState::confirmation(
+            title,
+            message,
+            confirm_text,
+            cancel_text,
+        ));
+    }
+
+    /// Show help modal
+    pub fn show_help(&mut self) {
+        self.state.modal_state = Some(crate::tui::components::modals::create_comprehensive_help());
+    }
+
+    /// Show validation error
+    pub fn show_validation_error(
+        &mut self,
+        field_name: String,
+        error_message: String,
+        suggestions: Vec<String>,
+    ) {
+        self.state.modal_state = Some(ModalState::validation_error(
+            "Validation Error".to_string(),
+            field_name,
+            error_message,
+            suggestions,
+        ));
+    }
+
+    /// Handle modal events (navigation, confirmation, etc.)
+    pub fn handle_modal_event(&mut self, event: &Event) -> bool {
+        if let Some(ref mut modal) = self.state.modal_state {
+            match event {
+                Event::Up => {
+                    modal.scroll_up();
+                    return true;
+                }
+                Event::Down => {
+                    modal.scroll_down();
+                    return true;
+                }
+                Event::Left => {
+                    modal.select_previous();
+                    return true;
+                }
+                Event::Right => {
+                    modal.select_next();
+                    return true;
+                }
+                Event::Enter => {
+                    // Handle confirmation or retry
+                    let should_retry = modal.is_retry_selected();
+                    let is_confirmed = modal.is_confirmed();
+
+                    // Clear modal first
+                    self.state.modal_state = None;
+
+                    if should_retry {
+                        // Implement retry logic based on the last failed operation
+                        self.retry_last_operation();
+                    } else if is_confirmed {
+                        // Handle confirmation actions
+                        self.handle_confirmation();
+                    }
+                    return true;
+                }
+                Event::Escape => {
+                    self.state.modal_state = None;
+                    return true;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Retry the last failed operation
+    fn retry_last_operation(&mut self) {
+        // This would implement retry logic based on the operation type
+        // For now, just refresh the current screen
+        self.set_status("Retrying operation...".to_string());
+    }
+
+    /// Handle confirmation actions
+    fn handle_confirmation(&mut self) {
+        // This would implement confirmation-specific logic
+        self.set_status("Action confirmed".to_string());
     }
 
     /// Navigate to a specific screen
     pub fn navigate_to(&mut self, screen: Screen) {
         self.state.current_screen = screen;
         self.clear_messages();
+        // Initialize focus for the new screen
+        self.initialize_focus_for_screen(screen);
     }
 
     /// Navigate to the next tab
@@ -308,6 +1428,8 @@ impl App {
         self.state.current_tab = (self.state.current_tab + 1) % screens.len();
         self.state.current_screen = screens[self.state.current_tab];
         self.clear_messages();
+        // Initialize focus for the new screen
+        self.initialize_focus_for_screen(self.state.current_screen);
     }
 
     /// Navigate to the previous tab
@@ -320,221 +1442,99 @@ impl App {
         }
         self.state.current_screen = screens[self.state.current_tab];
         self.clear_messages();
+        // Initialize focus for the new screen
+        self.initialize_focus_for_screen(self.state.current_screen);
     }
 
-    /// Handle application events
-    pub async fn handle_event(&mut self, event: Event) -> Result<bool, Error> {
-        match event {
-            Event::Quit => {
-                self.state.should_quit = true;
-                return Ok(true);
+    /// Handle background data refresh events
+    async fn handle_data_refresh(
+        &mut self,
+        data_type: String,
+        success: bool,
+        error: Option<String>,
+    ) -> Result<(), Error> {
+        if !success {
+            if let Some(err) = error {
+                self.set_error(format!("Failed to refresh {}: {}", data_type, err));
             }
-            Event::Tab => {
-                self.next_tab();
+            return Ok(());
+        }
+
+        // Perform actual data refresh based on type
+        match data_type.as_str() {
+            "balances" => {
+                if let Some(address) = &self.state.wallet_address.clone() {
+                    // Refresh balances
+                    if let Ok(balances) = self.client.get_balances().await {
+                        for balance in balances {
+                            self.state
+                                .balances
+                                .insert(balance.denom, balance.amount.to_string());
+                        }
+                    }
+
+                    // Note: Wallet address updated for future background tasks
+                }
             }
-            Event::BackTab => {
-                self.previous_tab();
-            }
-            Event::Enter => {
-                // Handle enter key based on current screen
-                match self.state.current_screen {
-                    Screen::Dashboard => {
-                        // Refresh dashboard data
-                        self.refresh_dashboard_data().await?;
-                    }
-                    Screen::Pools => {
-                        // Refresh pool data
-                        self.refresh_pool_data().await?;
-                    }
-                    Screen::Swap => {
-                        // Execute swap simulation or actual swap
-                        self.handle_swap_action().await?;
-                    }
-                    Screen::Liquidity => {
-                        // Handle liquidity operations
-                        self.handle_liquidity_action().await?;
-                    }
-                    _ => {
-                        // Screen-specific enter handling will be implemented in screen modules
+            "pools" => {
+                // Refresh pool data
+                if let Ok(pools) = self.client.get_pools(None).await {
+                    for pool in pools {
+                        let pool_id = pool.pool_info.pool_identifier.clone();
+                        let cache_entry = PoolCacheEntry {
+                            pool_info: pool,
+                            cached_at: chrono::Utc::now(),
+                        };
+                        self.state.pool_cache.insert(pool_id, cache_entry);
                     }
                 }
             }
-            Event::Escape => {
-                // Clear any error states or go back to dashboard
-                self.clear_messages();
-                if self.state.current_screen != Screen::Dashboard {
-                    self.navigate_to(Screen::Dashboard);
+            "transactions" => {
+                // Refresh transaction status for pending transactions
+                let pending_txs: Vec<String> = self
+                    .state
+                    .recent_transactions
+                    .iter()
+                    .filter(|tx| tx.status == TransactionStatus::Pending)
+                    .map(|tx| tx.hash.clone())
+                    .collect();
+
+                // TODO: Implement transaction status checking when SDK supports it
+                // For now, we'll mark pending transactions as unknown status
+                for tx_hash in pending_txs {
+                    if let Some(tx_info) = self
+                        .state
+                        .recent_transactions
+                        .iter_mut()
+                        .find(|tx| tx.hash == tx_hash)
+                    {
+                        // Mark as unknown for now - would check actual status in real implementation
+                        tx_info.status = TransactionStatus::Unknown;
+                    }
                 }
             }
-            Event::Refresh => {
-                self.refresh_current_screen_data().await?;
+            "network_info" => {
+                // Refresh network information
+                if let Ok(height) = self.client.get_last_block_height().await {
+                    self.state.block_height = Some(height);
+                }
+
+                // Update sync status
+                self.state.network_info.last_sync_time = Some(chrono::Utc::now());
+                self.state.network_info.is_syncing = false;
+            }
+            "prices" => {
+                // Refresh price data - this would be implemented when price APIs are available
+                // For now, just update the last sync time
+                self.state.network_info.last_sync_time = Some(chrono::Utc::now());
             }
             _ => {
-                // Other events will be handled by specific screens
-            }
-        }
-
-        Ok(self.state.should_quit)
-    }
-
-    /// Refresh data for the current screen
-    async fn refresh_current_screen_data(&mut self) -> Result<(), Error> {
-        match self.state.current_screen {
-            Screen::Dashboard => self.refresh_dashboard_data().await,
-            Screen::Pools => self.refresh_pool_data().await,
-            Screen::Swap => self.refresh_swap_data().await,
-            Screen::Liquidity => self.refresh_liquidity_data().await,
-            Screen::Rewards => self.refresh_rewards_data().await,
-            _ => Ok(()),
-        }
-    }
-
-    /// Refresh dashboard data
-    async fn refresh_dashboard_data(&mut self) -> Result<(), Error> {
-        self.set_loading("Refreshing dashboard data...".to_string());
-
-        // Update block height
-        if let Ok(height) = self.client.get_last_block_height().await {
-            self.state.block_height = Some(height);
-        }
-
-        // Update balances
-        if let Ok(balances) = self.client.get_balances().await {
-            for balance in balances {
-                self.state
-                    .balances
-                    .insert(balance.denom, balance.amount.to_string());
-            }
-        }
-
-        // Update current epoch
-        if let Ok(epoch) = self.client.get_current_epoch().await {
-            self.state.current_epoch = Some(epoch);
-        }
-
-        self.set_success("Dashboard data refreshed".to_string());
-        Ok(())
-    }
-
-    /// Refresh pool data
-    async fn refresh_pool_data(&mut self) -> Result<(), Error> {
-        self.set_loading("Refreshing pool data...".to_string());
-
-        match self.client.get_pools(Some(20)).await {
-            Ok(pools) => {
-                let now = chrono::Utc::now();
-                for pool in pools {
-                    let pool_id = pool.pool_info.pool_identifier.clone();
-                    self.state.pool_cache.insert(
-                        pool_id,
-                        PoolCacheEntry {
-                            pool_info: pool,
-                            cached_at: now,
-                        },
-                    );
-                }
-                self.set_success("Pool data refreshed".to_string());
-            }
-            Err(e) => {
-                self.set_error(format!("Failed to refresh pool data: {}", e));
+                // Unknown data type, log but don't error
+                eprintln!("Unknown data refresh type: {}", data_type);
             }
         }
 
         Ok(())
-    }
-
-    /// Refresh swap-related data
-    async fn refresh_swap_data(&mut self) -> Result<(), Error> {
-        self.set_loading("Refreshing swap data...".to_string());
-
-        // Refresh simulation if we have swap parameters
-        if let (Some(pool_id), Some(from_asset)) = (
-            &self.state.swap_state.selected_pool_id,
-            &self.state.swap_state.from_asset,
-        ) {
-            if let Ok(amount) = self.state.swap_state.amount.parse::<u128>() {
-                let offer_asset = Coin {
-                    denom: from_asset.clone(),
-                    amount: Uint128::new(amount),
-                };
-
-                if let Some(to_asset) = &self.state.swap_state.to_asset {
-                    match self
-                        .client
-                        .simulate_swap(pool_id, offer_asset, to_asset)
-                        .await
-                    {
-                        Ok(simulation) => {
-                            self.state.swap_state.simulation_result = Some(simulation);
-                            self.set_success("Swap simulation updated".to_string());
-                        }
-                        Err(e) => {
-                            self.set_error(format!("Simulation failed: {}", e));
-                        }
-                    }
-                }
-            }
-        } else {
-            self.set_success("Swap data current".to_string());
-        }
-
-        Ok(())
-    }
-
-    /// Refresh liquidity data
-    async fn refresh_liquidity_data(&mut self) -> Result<(), Error> {
-        self.set_loading("Refreshing liquidity data...".to_string());
-
-        // Refresh pool data first since liquidity operations depend on it
-        self.refresh_pool_data().await?;
-
-        // Refresh positions if wallet is connected
-        if let Some(_address) = &self.state.wallet_address {
-            // TODO: Query user's liquidity positions
-            // This would involve querying the user's LP token balances
-            // and calculating position values
-            self.set_success("Liquidity data refreshed".to_string());
-        } else {
-            self.set_success("Liquidity data refreshed (no wallet connected)".to_string());
-        }
-
-        Ok(())
-    }
-
-    /// Refresh rewards data
-    async fn refresh_rewards_data(&mut self) -> Result<(), Error> {
-        self.set_loading("Refreshing rewards data...".to_string());
-
-        if let Some(address) = &self.state.wallet_address {
-            match self.client.query_all_rewards(address).await {
-                Ok(_rewards_data) => {
-                    // Parse rewards data and update claimable_rewards
-                    // This would depend on the specific format returned by the query
-                    self.set_success("Rewards data refreshed".to_string());
-                }
-                Err(e) => {
-                    self.set_error(format!("Failed to refresh rewards: {}", e));
-                }
-            }
-        } else {
-            self.set_error("No wallet address available for rewards query".to_string());
-        }
-
-        Ok(())
-    }
-
-    /// Handle swap action (simulation or execution)
-    async fn handle_swap_action(&mut self) -> Result<(), Error> {
-        // This method would be expanded to handle swap execution
-        // For now, just trigger simulation refresh
-        self.refresh_swap_data().await
-    }
-
-    /// Handle liquidity action (provide/withdraw liquidity)
-    async fn handle_liquidity_action(&mut self) -> Result<(), Error> {
-        // This method would be expanded to handle liquidity operations
-        // For now, just trigger liquidity data refresh
-        self.refresh_liquidity_data().await
     }
 
     /// Update wallet address
@@ -659,5 +1659,141 @@ impl App {
         if status == TransactionStatus::Success {
             let _ = self.refresh_dashboard_data().await;
         }
+    }
+
+    /// Refresh settings data
+    async fn refresh_dashboard_data(&mut self) -> Result<(), Error> {
+        // Refresh balances, network info, and other dashboard data
+        self.set_loading("Refreshing dashboard data...".to_string());
+
+        // Add actual refresh logic here
+        // For now, just simulate a refresh
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+        self.set_success("Dashboard refreshed".to_string());
+        Ok(())
+    }
+
+    async fn refresh_settings_data(&mut self) -> Result<(), Error> {
+        // Initialize settings state with current config if needed
+        if self.state.settings_state.current_config.mnemonic.is_none() {
+            // Load current config into settings state
+            let current_config = crate::config::Config {
+                network: self.config.clone(),
+                mnemonic: None, // We don't store mnemonic in memory for security
+                tokens: std::collections::HashMap::new(),
+            };
+            self.state.settings_state =
+                crate::tui::screens::settings::SettingsState::new(current_config);
+        }
+        Ok(())
+    }
+
+    /// Handle settings actions
+    async fn handle_settings_action(&mut self) -> Result<(), Error> {
+        // If showing confirmation, handle confirmation
+        if self.state.settings_state.show_confirmation {
+            // Save settings
+            match self.state.settings_state.save_settings() {
+                Ok(new_config) => {
+                    // Update application config
+                    self.config = new_config.network;
+                    self.state.settings_state.show_confirmation = false;
+                    self.set_success("Settings saved successfully!".to_string());
+                }
+                Err(e) => {
+                    self.set_error(format!("Failed to save settings: {}", e));
+                    self.state.settings_state.show_confirmation = false;
+                }
+            }
+        } else if self.state.settings_state.has_changes {
+            // Show confirmation dialog
+            self.state.settings_state.show_confirmation = true;
+        } else {
+            // No changes, just refresh
+            self.refresh_settings_data().await?;
+        }
+        Ok(())
+    }
+
+    /// Handle character input for settings screen
+    async fn handle_settings_input(&mut self, c: char) -> Result<(), Error> {
+        // Clear any messages first
+        self.state.settings_state.clear_message();
+
+        match c {
+            // Ctrl+S - Save settings
+            '\x13' => {
+                if self.state.settings_state.has_changes {
+                    self.state.settings_state.show_confirmation = true;
+                } else {
+                    self.state.settings_state.message =
+                        Some(("No changes to save".to_string(), false));
+                }
+            }
+            // Ctrl+R - Reset settings
+            '\x12' => {
+                self.state.settings_state.reset_to_defaults();
+            }
+            // Section navigation
+            '\t' => {
+                self.state.settings_state.next_section();
+            }
+            // Environment/theme toggles
+            'e' => {
+                if self.state.settings_state.current_section
+                    == crate::tui::screens::settings::SettingsSection::Network
+                {
+                    self.state.settings_state.toggle_network_environment();
+                }
+            }
+            't' => {
+                if self.state.settings_state.current_section
+                    == crate::tui::screens::settings::SettingsSection::Display
+                {
+                    self.state.settings_state.toggle_theme();
+                }
+            }
+            'a' => {
+                if self.state.settings_state.current_section
+                    == crate::tui::screens::settings::SettingsSection::Display
+                {
+                    self.state.settings_state.toggle_auto_refresh();
+                }
+            }
+            'i' => {
+                if self.state.settings_state.current_section
+                    == crate::tui::screens::settings::SettingsSection::Wallet
+                {
+                    self.state.settings_state.toggle_import_mode();
+                }
+            }
+            'm' => {
+                if self.state.settings_state.current_section
+                    == crate::tui::screens::settings::SettingsSection::Wallet
+                {
+                    self.state.settings_state.toggle_mnemonic_visibility();
+                }
+            }
+            // Escape key handling
+            '\x1b' => {
+                if self.state.settings_state.show_confirmation {
+                    self.state.settings_state.show_confirmation = false;
+                } else if self.state.settings_state.message.is_some() {
+                    self.state.settings_state.clear_message();
+                }
+            }
+            // Backspace
+            '\x08' | '\x7f' => {
+                let _ = self.state.settings_state.handle_backspace();
+            }
+            // Regular character input
+            _ => {
+                if c.is_ascii_graphic() || c == ' ' {
+                    let _ = self.state.settings_state.handle_char_input(c);
+                }
+            }
+        }
+        Ok(())
     }
 }

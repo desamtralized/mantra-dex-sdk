@@ -146,11 +146,18 @@ pub async fn run_tui(client: MantraDexClient, config: MantraNetworkConfig) -> Re
     let mut app = App::new(client, config);
     let mut event_handler = EventHandler::new();
 
+    // Initialize background tasks with event communication
+    let event_sender = event_handler.get_sender();
+    app.initialize_background_tasks(event_sender);
+
     // Set initial status
     app.set_status("MANTRA DEX TUI - Press 'q' to quit, 'h' for help".to_string());
 
     // Application result for error handling
     let app_result = run_app_loop(&mut terminal, &mut app, &mut event_handler).await;
+
+    // Stop background tasks before cleanup
+    app.stop_background_tasks();
 
     // Always attempt to restore terminal, even if app_result is an error
     if let Err(restore_error) = restore_terminal(&mut terminal) {

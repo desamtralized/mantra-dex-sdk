@@ -11,6 +11,42 @@ use std::time::Duration;
 #[cfg(feature = "tui")]
 use tokio::sync::mpsc;
 
+/// Focus direction for keyboard navigation
+#[derive(Debug, Clone, PartialEq)]
+pub enum FocusDirection {
+    Next,
+    Previous,
+    Up,
+    Down,
+    Left,
+    Right,
+    First,
+    Last,
+}
+
+/// Focusable component types for navigation
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum FocusableComponent {
+    /// Text input field
+    TextInput(String), // field name/id
+    /// Dropdown/select component
+    Dropdown(String),
+    /// Checkbox component
+    Checkbox(String),
+    /// Button component
+    Button(String),
+    /// Table component
+    Table(String),
+    /// List component
+    List(String),
+    /// Tab navigation
+    TabBar,
+    /// Modal dialog
+    Modal,
+    /// Custom component
+    Custom(String),
+}
+
 /// Application events that can be handled
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -59,6 +95,26 @@ pub enum Event {
     Mouse,
     /// Custom application events
     Custom(String),
+
+    // === Focus Management Events ===
+    /// Move focus in a specific direction
+    MoveFocus(FocusDirection),
+    /// Set focus to a specific component
+    SetFocus(FocusableComponent),
+    /// Clear all focus
+    ClearFocus,
+    /// Focus next component in tab order
+    FocusNext,
+    /// Focus previous component in tab order
+    FocusPrevious,
+    /// Jump to first focusable component
+    FocusFirst,
+    /// Jump to last focusable component
+    FocusLast,
+    /// Activate/interact with focused component
+    ActivateFocused,
+    /// Context-sensitive action (Space bar)
+    ContextAction,
 
     // === DEX-specific Action Events ===
     /// Execute a swap operation
@@ -441,18 +497,18 @@ impl EventHandler {
                 ..
             } => Some(Event::Quit),
 
-            // Tab navigation
+            // Tab navigation - Enhanced for focus management
             KeyEvent {
                 code: KeyCode::Tab,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => Some(Event::Tab),
+            } => Some(Event::FocusNext), // Changed from Event::Tab for better focus handling
 
             KeyEvent {
                 code: KeyCode::BackTab,
                 modifiers: KeyModifiers::SHIFT,
                 ..
-            } => Some(Event::BackTab),
+            } => Some(Event::FocusPrevious), // Changed from Event::BackTab
 
             // Action keys
             KeyEvent {
@@ -467,30 +523,50 @@ impl EventHandler {
                 ..
             } => Some(Event::Escape),
 
-            // Arrow keys
+            // Arrow keys - Enhanced for directional focus movement
             KeyEvent {
                 code: KeyCode::Up,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => Some(Event::Up),
+            } => Some(Event::MoveFocus(FocusDirection::Up)),
 
             KeyEvent {
                 code: KeyCode::Down,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => Some(Event::Down),
+            } => Some(Event::MoveFocus(FocusDirection::Down)),
 
             KeyEvent {
                 code: KeyCode::Left,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => Some(Event::Left),
+            } => Some(Event::MoveFocus(FocusDirection::Left)),
 
             KeyEvent {
                 code: KeyCode::Right,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => Some(Event::Right),
+            } => Some(Event::MoveFocus(FocusDirection::Right)),
+
+            // Navigation keys with enhanced focus support
+            KeyEvent {
+                code: KeyCode::Home,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => Some(Event::FocusFirst),
+
+            KeyEvent {
+                code: KeyCode::End,
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => Some(Event::FocusLast),
+
+            // Space bar for context-sensitive actions
+            KeyEvent {
+                code: KeyCode::Char(' '),
+                modifiers: KeyModifiers::NONE,
+                ..
+            } => Some(Event::ContextAction),
 
             // Editing keys
             KeyEvent {
@@ -504,18 +580,6 @@ impl EventHandler {
                 modifiers: KeyModifiers::NONE,
                 ..
             } => Some(Event::Delete),
-
-            KeyEvent {
-                code: KeyCode::Home,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => Some(Event::Home),
-
-            KeyEvent {
-                code: KeyCode::End,
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => Some(Event::End),
 
             KeyEvent {
                 code: KeyCode::PageUp,
@@ -535,7 +599,7 @@ impl EventHandler {
                 ..
             } => Some(Event::Insert),
 
-            // Function keys
+            // Function keys with enhanced shortcuts
             KeyEvent {
                 code: KeyCode::F(n),
                 modifiers: KeyModifiers::NONE,
@@ -545,6 +609,33 @@ impl EventHandler {
                 5 => Some(Event::Refresh),
                 _ => Some(Event::F(n)),
             },
+
+            // Enhanced keyboard shortcuts for accessibility
+            // Ctrl+Home/End for navigation
+            KeyEvent {
+                code: KeyCode::Home,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Some(Event::FocusFirst),
+
+            KeyEvent {
+                code: KeyCode::End,
+                modifiers: KeyModifiers::CONTROL,
+                ..
+            } => Some(Event::FocusLast),
+
+            // Alt+Tab for screen navigation (preserve Tab for internal navigation)
+            KeyEvent {
+                code: KeyCode::Tab,
+                modifiers: KeyModifiers::ALT,
+                ..
+            } => Some(Event::Tab),
+
+            KeyEvent {
+                code: KeyCode::BackTab,
+                modifiers: KeyModifiers::ALT,
+                ..
+            } => Some(Event::BackTab),
 
             // Character input
             KeyEvent {
@@ -582,6 +673,19 @@ impl EventHandler {
     /// Send a custom event
     pub fn send_custom_event(&self, event: Event) -> Result<(), mpsc::error::SendError<Event>> {
         self.sender.send(event)
+    }
+
+    /// Get a clone of the event sender for use in background tasks
+    pub fn get_sender(&self) -> mpsc::UnboundedSender<Event> {
+        self.sender.clone()
+    }
+
+    /// Handle crossterm events and convert them to application events
+    pub fn handle_crossterm_event(
+        &self,
+        crossterm_event: crossterm::event::Event,
+    ) -> Option<Event> {
+        Self::convert_terminal_event(crossterm_event)
     }
 
     /// Get an async blockchain processor for performing blockchain operations
@@ -723,7 +827,7 @@ mod tests {
             kind: event::KeyEventKind::Press,
             state: event::KeyEventState::NONE,
         };
-        assert_eq!(EventHandler::convert_key_event(tab), Some(Event::Tab));
+        assert_eq!(EventHandler::convert_key_event(tab), Some(Event::FocusNext));
 
         // Test character input
         let char_a = KeyEvent {

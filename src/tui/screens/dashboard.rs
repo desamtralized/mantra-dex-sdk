@@ -6,7 +6,13 @@
 use crate::tui::{
     app::{App, LoadingState, TransactionStatus},
     components::{
-        header::render_header, navigation::render_navigation, status_bar::render_status_bar,
+        charts::{
+            render_network_sync_progress, render_progress_dashboard,
+            render_transaction_confirmation_progress,
+        },
+        header::render_header,
+        navigation::render_navigation,
+        status_bar::render_status_bar,
     },
 };
 use ratatui::{
@@ -82,7 +88,7 @@ fn render_overview_panel(f: &mut Frame, area: Rect, app: &App) {
     let active_positions = count_active_positions(&app.state.pool_cache);
     let recent_activity_count = app.state.recent_transactions.len();
 
-    let content = if matches!(app.state.loading_state, LoadingState::Loading(_)) {
+    let content = if matches!(app.state.loading_state, LoadingState::Loading { .. }) {
         vec![Line::from(vec![Span::styled(
             "Loading portfolio data...",
             Style::default().fg(Color::Yellow),
@@ -218,29 +224,63 @@ fn render_quick_stats(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
-/// Render recent transactions list
+/// Render recent transactions with enhanced progress visualization for pending ones
 fn render_recent_transactions(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
-        .title("Recent Transactions")
+        .title("Transactions & Progress")
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow))
         .padding(Padding::uniform(1));
 
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+
     if app.state.recent_transactions.is_empty() {
         let empty_msg = Paragraph::new("No recent transactions")
-            .block(block)
             .style(Style::default().fg(Color::Gray))
             .alignment(Alignment::Center);
-        f.render_widget(empty_msg, area);
+        f.render_widget(empty_msg, inner_area);
         return;
     }
 
+    // Check if there are pending transactions to show progress bars
+    let pending_count = app
+        .state
+        .recent_transactions
+        .iter()
+        .filter(|tx| tx.status == TransactionStatus::Pending)
+        .count();
+
+    if pending_count > 0 {
+        // Split area: progress bars for pending transactions + transaction list
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length((pending_count.min(3) * 4) as u16), // Progress bars (max 3)
+                Constraint::Length(1),                                 // Spacer
+                Constraint::Min(0),                                    // Transaction list
+            ])
+            .split(inner_area);
+
+        // Render transaction confirmation progress for pending transactions
+        render_transaction_confirmation_progress(f, &app.state.recent_transactions, chunks[0]);
+
+        // Render transaction list in the remaining space
+        render_transaction_list(f, chunks[2], app);
+    } else {
+        // No pending transactions, just show the list
+        render_transaction_list(f, inner_area, app);
+    }
+}
+
+/// Render the transaction list portion
+fn render_transaction_list(f: &mut Frame, area: Rect, app: &App) {
     // Create list items from recent transactions
     let items: Vec<ListItem> = app
         .state
         .recent_transactions
         .iter()
-        .take(10) // Show last 10 transactions
+        .take(8) // Show last 8 transactions to make room for progress bars
         .map(|tx| {
             let status_color = match tx.status {
                 TransactionStatus::Success => Color::Green,
@@ -271,50 +311,37 @@ fn render_recent_transactions(f: &mut Frame, area: Rect, app: &App) {
         })
         .collect();
 
-    let list = List::new(items).block(block);
+    let list = List::new(items).block(
+        Block::default()
+            .title("Recent Transactions")
+            .borders(Borders::ALL),
+    );
     f.render_widget(list, area);
 }
 
-/// Render network health indicators
+/// Render network health indicators with enhanced progress visualization
 fn render_network_health(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
-        .title("Network Health")
+        .title("Network Health & Progress")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red))
+        .border_style(Style::default().fg(Color::Blue))
         .padding(Padding::uniform(1));
-
-    // Calculate sync progress (mock calculation for now)
-    let sync_progress = if app.state.network_info.is_syncing {
-        0.75 // 75% synced
-    } else {
-        1.0 // 100% synced
-    };
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
 
-    // Create layout for gauges and info
+    // Create layout for enhanced progress bars and info
     let health_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2), // Sync gauge
+            Constraint::Length(4), // Enhanced sync progress with ETA
             Constraint::Length(1), // Spacer
             Constraint::Min(0),    // Status info
         ])
         .split(inner_area);
 
-    // Render sync progress gauge
-    let sync_gauge = Gauge::default()
-        .block(Block::default().title("Sync Progress"))
-        .gauge_style(if sync_progress >= 1.0 {
-            Style::default().fg(Color::Green)
-        } else {
-            Style::default().fg(Color::Yellow)
-        })
-        .percent((sync_progress * 100.0) as u16)
-        .label(format!("{:.0}%", sync_progress * 100.0));
-
-    f.render_widget(sync_gauge, health_chunks[0]);
+    // Render enhanced network sync progress bar
+    render_network_sync_progress(f, &app.state, health_chunks[0]);
 
     // Network status information
     let last_sync = app

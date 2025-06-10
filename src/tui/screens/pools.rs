@@ -246,14 +246,14 @@ fn render_pool_list_table(f: &mut Frame, area: Rect, app: &App) {
 /// Render empty pool list message
 fn render_empty_pool_list(f: &mut Frame, area: Rect, app: &App) {
     let message = match app.state.loading_state {
-        LoadingState::Loading(_) => "Loading pools...",
-        LoadingState::Error(_) => "Error loading pools. Check connection and try again.",
+        LoadingState::Loading { .. } => "Loading pools...",
+        LoadingState::Error { .. } => "Error loading pools. Check connection and try again.",
         _ => "No pools available\nCheck network connection or try refreshing.",
     };
 
     let color = match app.state.loading_state {
-        LoadingState::Loading(_) => Color::Yellow,
-        LoadingState::Error(_) => Color::Red,
+        LoadingState::Loading { .. } => Color::Yellow,
+        LoadingState::Error { .. } => Color::Red,
         _ => Color::Gray,
     };
 

@@ -122,6 +122,11 @@ impl TextInput {
         self.focused = focused;
     }
 
+    /// Check if this checkbox is focused
+    pub fn is_focused(&self) -> bool {
+        self.focused
+    }
+
     /// Get the current value
     pub fn value(&self) -> &str {
         self.input.value()
@@ -397,6 +402,11 @@ impl<T: Clone> Dropdown<T> {
         }
     }
 
+    /// Check if this dropdown is focused
+    pub fn is_focused(&self) -> bool {
+        self.focused
+    }
+
     /// Toggle dropdown open/closed
     pub fn toggle(&mut self) {
         if self.focused {
@@ -455,6 +465,29 @@ impl<T: Clone> Dropdown<T> {
         self.selected
             .and_then(|idx| self.options.get(idx))
             .map(|opt| opt.text.as_str())
+    }
+
+    /// Clear the current selection
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
+    }
+
+    /// Select option by value
+    pub fn select_by_value(&mut self, value: &T) -> bool
+    where
+        T: PartialEq,
+    {
+        if let Some((index, _)) = self
+            .options
+            .iter()
+            .enumerate()
+            .find(|(_, opt)| &opt.value == value)
+        {
+            self.selected = Some(index);
+            true
+        } else {
+            false
+        }
     }
 
     /// Render the dropdown

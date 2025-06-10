@@ -16,10 +16,12 @@ pub use navigation::*;
 pub use status_bar::*;
 
 // Data display components - implemented in Task 3.2
-pub mod tables;
+pub mod charts;
+pub mod tables; // Data visualization components - implemented in Task 6.3
 
 // Input components - implemented in Task 3.3
 pub mod forms;
 
+pub use charts::*;
 pub use forms::*;
 pub use tables::*;
