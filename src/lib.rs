@@ -1,6 +1,7 @@
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod tui;
 pub mod wallet;
 // Re-export mantra-dex-std for user convenience
 pub use mantra_dex_std;
