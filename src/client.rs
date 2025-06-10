@@ -51,7 +51,7 @@ impl PoolStatus {
 
 /// Mantra DEX client for interacting with the network
 ///
-/// This client provides methods to interact with the Mantra DEX v3.0.0,
+/// This client provides methods to interact with the Mantra DEX,
 /// including pool operations, swapping, liquidity provision, and rewards management.
 pub struct MantraDexClient {
     /// RPC client for the Mantra network
@@ -409,7 +409,7 @@ impl MantraDexClient {
         let status = &pool.pool_info.status;
 
         // If all operations are enabled, the pool is Available
-        // In v3.0.0, we check if swaps, deposits, and withdrawals are all enabled
+        // Check if swaps, deposits, and withdrawals are all enabled
         if status.swaps_enabled && status.deposits_enabled && status.withdrawals_enabled {
             PoolStatus::Available
         } else {
@@ -450,17 +450,14 @@ impl MantraDexClient {
         self.query(&pool_manager_address, &query).await
     }
 
-    /// Swap tokens
     /// Execute a swap operation on a pool
-    ///
-    /// **v3.0.0 Breaking Change**: The `max_spread` parameter has been renamed to `max_slippage`
     ///
     /// # Arguments
     ///
     /// * `pool_id` - The identifier of the pool to swap in
     /// * `offer_asset` - The asset being offered for swap
     /// * `ask_asset_denom` - The denomination of the asset being requested
-    /// * `max_slippage` - Optional maximum slippage tolerance (replaces `max_spread` from v2.x)
+    /// * `max_slippage` - Optional maximum slippage tolerance
     ///
     /// # Returns
     ///
@@ -502,16 +499,12 @@ impl MantraDexClient {
 
     /// Provide liquidity to a pool
     ///
-    /// **v3.0.0 Breaking Changes**:
-    /// - `slippage_tolerance` parameter renamed to `liquidity_max_slippage`
-    /// - `max_spread` parameter renamed to `swap_max_slippage`
-    ///
     /// # Arguments
     ///
     /// * `pool_id` - The identifier of the pool to provide liquidity to
     /// * `assets` - Vector of assets to provide as liquidity
-    /// * `liquidity_max_slippage` - Optional maximum slippage for liquidity provision (replaces `slippage_tolerance`)
-    /// * `swap_max_slippage` - Optional maximum slippage for internal swaps (replaces `max_spread`)
+    /// * `liquidity_max_slippage` - Optional maximum slippage for liquidity provision
+    /// * `swap_max_slippage` - Optional maximum slippage for internal swaps
     ///
     /// # Returns
     ///
@@ -568,8 +561,6 @@ impl MantraDexClient {
     ///
     /// This method bypasses pool status validation and should only be used when creating new pools
     /// or in scenarios where pool status checking is not required.
-    ///
-    /// **v3.0.0 Breaking Changes**: Same parameter renames as `provide_liquidity`
     ///
     /// # Arguments
     ///
@@ -656,13 +647,11 @@ impl MantraDexClient {
 
     /// Create a new pool with the specified assets and configuration
     ///
-    /// **v3.0.0 New Feature**: Enhanced fee validation ensures total fees ≤ 20%
-    ///
     /// # Arguments
     ///
     /// * `asset_denoms` - Vector of asset denominations for the pool
     /// * `asset_decimals` - Vector of decimal places for each asset
-    /// * `pool_fees` - Fee structure for the pool (validated against v3.0.0 requirements)
+    /// * `pool_fees` - Fee structure for the pool (validated to ensure total fees ≤ 20%)
     /// * `pool_type` - Type of pool to create
     /// * `pool_identifier` - Optional custom identifier for the pool
     ///
@@ -687,7 +676,7 @@ impl MantraDexClient {
         pool_type: mantra_dex_std::pool_manager::PoolType,
         pool_identifier: Option<String>,
     ) -> Result<TxResponse, Error> {
-        // Validate pool fees before creating the pool (v3.0.0 requirement)
+        // Validate pool fees before creating the pool
         self.validate_pool_fees(&pool_fees)?;
 
         let msg = pool_manager::ExecuteMsg::CreatePool {
@@ -748,13 +737,11 @@ impl MantraDexClient {
     // Farm Manager Functionality
     // =========================
 
-    /// Claim rewards from farm manager with optional epoch parameter
-    ///
-    /// **v3.0.0 New Feature**: Enhanced claim functionality with epoch-based claiming
+    /// Claim rewards from farm manager up to a specific epoch
     ///
     /// # Arguments
     ///
-    /// * `until_epoch` - Optional epoch limit for claiming rewards. If provided, only claims rewards up to that epoch
+    /// * `until_epoch` - Epoch limit for claiming rewards
     ///
     /// # Returns
     ///
@@ -765,67 +752,27 @@ impl MantraDexClient {
     /// * Returns error if farm manager contract is not configured
     /// * Returns error if the claim transaction fails
     /// * Returns error if no wallet is configured
-    ///
-    /// # Backward Compatibility
-    ///
-    /// When `until_epoch` is `None`, behaves like the v2.x parameterless claim
-    pub async fn claim_rewards(&self, until_epoch: Option<u64>) -> Result<TxResponse, Error> {
+    pub async fn claim_rewards(&self, until_epoch: u64) -> Result<TxResponse, Error> {
         let farm_manager_address =
             self.config.contracts.farm_manager.as_ref().ok_or_else(|| {
                 Error::Other("Farm manager contract address not configured".to_string())
             })?;
 
-        let msg = if let Some(epoch) = until_epoch {
-            serde_json::json!({
-                "claim": {
-                    "until_epoch": epoch
-                }
-            })
-        } else {
-            // Backward compatibility: parameterless claim
-            serde_json::json!({
-                "claim": {}
-            })
-        };
+        let msg = serde_json::json!({
+            "claim": {
+                "until_epoch": until_epoch
+            }
+        });
 
         self.execute(farm_manager_address, &msg, vec![]).await
     }
 
-    /// Claim rewards without epoch parameter (backward compatibility)
-    ///
-    /// This is a convenience method that calls `claim_rewards(None)` for backward compatibility
-    /// with v2.x code that used parameterless claim methods.
-    ///
-    /// # Returns
-    ///
-    /// Transaction response containing the claim result
-    pub async fn claim_rewards_all(&self) -> Result<TxResponse, Error> {
-        self.claim_rewards(None).await
-    }
-
-    /// Claim rewards up to a specific epoch
-    ///
-    /// This is a convenience method that calls `claim_rewards(Some(until_epoch))`.
-    ///
-    /// # Arguments
-    ///
-    /// * `until_epoch` - The epoch limit for claiming rewards
-    ///
-    /// # Returns
-    ///
-    /// Transaction response containing the claim result
-    pub async fn claim_rewards_until_epoch(&self, until_epoch: u64) -> Result<TxResponse, Error> {
-        self.claim_rewards(Some(until_epoch)).await
-    }
-
-    /// Query rewards for an address with optional epoch parameter
-    ///
-    /// **v3.0.0 New Feature**: Enhanced rewards query with epoch range support
+    /// Query rewards for an address up to a specific epoch
     ///
     /// # Arguments
     ///
     /// * `address` - The address to query rewards for
-    /// * `until_epoch` - Optional epoch limit for querying rewards. If provided, only returns rewards up to that epoch
+    /// * `until_epoch` - Epoch limit for querying rewards
     ///
     /// # Returns
     ///
@@ -835,50 +782,24 @@ impl MantraDexClient {
     ///
     /// * Returns error if farm manager contract is not configured
     /// * Returns error if the query fails
-    ///
-    /// # Backward Compatibility
-    ///
-    /// When `until_epoch` is `None`, behaves like the v2.x parameterless rewards query
     pub async fn query_rewards(
         &self,
         address: &str,
-        until_epoch: Option<u64>,
+        until_epoch: u64,
     ) -> Result<serde_json::Value, Error> {
         let farm_manager_address =
             self.config.contracts.farm_manager.as_ref().ok_or_else(|| {
                 Error::Other("Farm manager contract address not configured".to_string())
             })?;
 
-        let query = if let Some(epoch) = until_epoch {
-            serde_json::json!({
-                "rewards": {
-                    "address": address,
-                    "until_epoch": epoch
-                }
-            })
-        } else {
-            serde_json::json!({
-                "rewards": {
-                    "address": address
-                }
-            })
-        };
+        let query = serde_json::json!({
+            "rewards": {
+                "address": address,
+                "until_epoch": until_epoch
+            }
+        });
 
         self.query(farm_manager_address, &query).await
-    }
-
-    /// Query all rewards for an address (backward compatibility)
-    pub async fn query_all_rewards(&self, address: &str) -> Result<serde_json::Value, Error> {
-        self.query_rewards(address, None).await
-    }
-
-    /// Query rewards for an address up to a specific epoch
-    pub async fn query_rewards_until_epoch(
-        &self,
-        address: &str,
-        until_epoch: u64,
-    ) -> Result<serde_json::Value, Error> {
-        self.query_rewards(address, Some(until_epoch)).await
     }
 
     /// Get current epoch from epoch manager contract
@@ -923,11 +844,9 @@ impl MantraDexClient {
     // Feature Toggle Functionality
     // =========================
 
-    /// Update pool feature toggles with per-pool control
-    /// This allows fine-tuned control over which operations are allowed for a specific pool
     /// Update feature toggles for a specific pool
     ///
-    /// **v3.0.0 New Feature**: Per-pool feature toggles with pool_identifier targeting
+    /// This allows fine-tuned control over which operations are allowed for a specific pool
     ///
     /// # Arguments
     ///
@@ -947,7 +866,7 @@ impl MantraDexClient {
     ///
     /// # Notes
     ///
-    /// In v3.0.0, all feature toggles must target specific pools via pool_identifier
+    /// All feature toggles must target specific pools via pool_identifier
     pub async fn update_pool_features(
         &self,
         pool_identifier: &str,
@@ -1033,42 +952,14 @@ impl MantraDexClient {
             .await
     }
 
-    /// Update global feature toggles (backward compatibility)
-    /// This method maintains compatibility with the v2.x approach but uses per-pool targeting
-    /// The pool_identifier parameter allows targeting specific pools for global-style operations
-    #[deprecated(
-        since = "3.0.0",
-        note = "Use update_pool_features for per-pool control"
-    )]
-    pub async fn update_global_features(
-        &self,
-        pool_identifier: &str, // Required in v3.0.0 - pools must be targeted specifically
-        withdrawals_enabled: Option<bool>,
-        deposits_enabled: Option<bool>,
-        swaps_enabled: Option<bool>,
-    ) -> Result<TxResponse, Error> {
-        // Delegate to the new per-pool method
-        self.update_pool_features(
-            pool_identifier,
-            withdrawals_enabled,
-            deposits_enabled,
-            swaps_enabled,
-        )
-        .await
-    }
-
     // =========================
-    // Fee Validation Functionality for v3.0.0
+    // Fee Validation Functionality
     // =========================
 
-    /// Validate pool fee structure to ensure total fees don't exceed 20%
-    /// This is a critical requirement for v3.0.0 compatibility
-    /// Validate pool fees according to v3.0.0 requirements
-    ///
-    /// **v3.0.0 New Feature**: Enhanced fee validation ensures total fees ≤ 20%
+    /// Validate pool fees to ensure total fees don't exceed 20%
     ///
     /// This method validates that the sum of all fees (protocol_fee + swap_fee + burn_fee + extra_fees)
-    /// does not exceed 20% (0.2) as required by the v3.0.0 specification.
+    /// does not exceed 20% (0.2).
     ///
     /// # Arguments
     ///
@@ -1085,7 +976,7 @@ impl MantraDexClient {
     ///
     /// # Fee Structure
     ///
-    /// The v3.0.0 fee structure includes:
+    /// The fee structure includes:
     /// - `protocol_fee`: Fee for the protocol
     /// - `swap_fee`: Fee for swaps  
     /// - `burn_fee`: Optional fee that gets burned
@@ -1143,13 +1034,10 @@ impl MantraDexClient {
         Ok(())
     }
 
-    /// Create a validated PoolFee structure with automatic total fee checking
     /// Create a validated pool fee structure
     ///
-    /// **v3.0.0 New Feature**: Helper method to create and validate pool fees in one step
-    ///
     /// This method creates a `PoolFee` structure from the provided fee components and validates
-    /// that the total fees do not exceed 20% as required by v3.0.0.
+    /// that the total fees do not exceed 20%.
     ///
     /// # Arguments
     ///
@@ -1167,7 +1055,6 @@ impl MantraDexClient {
     /// * Returns `FeeValidation` error if total fees exceed 20%
     /// * Returns `FeeValidation` error if any individual fee is negative
     ///
-
     pub fn create_validated_pool_fees(
         &self,
         protocol_fee: cosmwasm_std::Decimal,

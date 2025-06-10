@@ -267,39 +267,6 @@ async fn test_disable_all_pool_operations() {
 }
 
 #[tokio::test]
-async fn test_backward_compatibility_global_features() {
-    // Only run this test if we should execute writes
-    if !should_execute_writes() {
-        println!("Skipping write test (EXECUTE_WRITES=false)");
-        return;
-    }
-
-    let client = create_test_client().await;
-
-    // Get a test pool
-    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
-    assert!(pool_id.is_some(), "Pool ID not found");
-    let pool_id = pool_id.unwrap();
-
-    // Test the deprecated global features method
-    #[allow(deprecated)]
-    match client
-        .update_global_features(&pool_id, Some(true), Some(true), Some(true))
-        .await
-    {
-        Ok(response) => {
-            println!("Global features update successful: {}", response.txhash);
-            assert!(!response.txhash.is_empty());
-            assert_eq!(response.code, 0u32);
-        }
-        Err(e) => {
-            println!("Global features update failed (may be expected): {:?}", e);
-            // Don't fail the test as this requires admin permissions
-        }
-    }
-}
-
-#[tokio::test]
 async fn test_feature_toggle_method_signatures() {
     let client = create_test_client().await;
 
@@ -341,13 +308,6 @@ async fn test_feature_toggle_method_signatures() {
 
     let result9 = client.disable_all_pool_operations(&pool_id).await;
     println!("disable_all_pool_operations result: {:?}", result9.is_ok());
-
-    // Test backward compatibility method
-    #[allow(deprecated)]
-    let result10 = client
-        .update_global_features(&pool_id, Some(true), Some(true), Some(true))
-        .await;
-    println!("update_global_features result: {:?}", result10.is_ok());
 
     // All methods should be callable (they may fail due to permissions, but compilation should work)
 }

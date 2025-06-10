@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             amount: Uint128::from(1000000u128),
         },
         "uusdt",
-        Some(Decimal::percent(1)), // 1% max spread
+        Some(Decimal::percent(1)), // 1% max slippage
     ).await?;
     println!("Swap tx hash: {}", result.txhash);
     
@@ -130,7 +130,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let result = client.provide_liquidity(
         "pool123",
         assets,
-        Some(Decimal::percent(1)), // 1% slippage tolerance
+        Some(Decimal::percent(1)), // 1% liquidity max slippage
+        Some(Decimal::percent(1)), // 1% swap max slippage
     ).await?;
     println!("Liquidity provision tx hash: {}", result.txhash);
     
@@ -176,8 +177,8 @@ The main client interface for interacting with the MANTRA DEX:
 - `get_pools(limit: Option<u32>) -> Result<Vec<PoolInfoResponse>, Error>` - Query available pools
 - `get_pool(pool_id: &str) -> Result<PoolInfoResponse, Error>` - Get info for a specific pool
 - `simulate_swap(pool_id: &str, offer_asset: Coin, ask_asset_denom: &str) -> Result<SimulationResponse, Error>` - Simulate a swap
-- `swap(pool_id: &str, offer_asset: Coin, ask_asset_denom: &str, max_spread: Option<Decimal>) -> Result<TxResponse, Error>` - Execute a swap
-- `provide_liquidity(pool_id: &str, assets: Vec<Coin>, slippage_tolerance: Option<Decimal>) -> Result<TxResponse, Error>` - Provide liquidity
+- `swap(pool_id: &str, offer_asset: Coin, ask_asset_denom: &str, max_slippage: Option<Decimal>) -> Result<TxResponse, Error>` - Execute a swap
+- `provide_liquidity(pool_id: &str, assets: Vec<Coin>, liquidity_max_slippage: Option<Decimal>, swap_max_slippage: Option<Decimal>) -> Result<TxResponse, Error>` - Provide liquidity
 - `withdraw_liquidity(pool_id: &str, lp_amount: Uint128) -> Result<TxResponse, Error>` - Withdraw liquidity
 - `execute_swap_operations(operations: Vec<SwapOperation>, amount: Uint128) -> Result<TxResponse, Error>` - Execute multi-hop swaps
 

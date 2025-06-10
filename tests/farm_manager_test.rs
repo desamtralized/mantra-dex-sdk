@@ -29,36 +29,6 @@ async fn test_farm_manager_configuration() {
     }
 }
 
-/// Test basic claim functionality (backward compatibility)
-#[tokio::test]
-async fn test_claim_rewards_backward_compatibility() {
-    let client = create_test_client().await;
-
-    // Only run this test if we should execute writes
-    if !should_execute_writes() {
-        println!("Skipping write test (EXECUTE_WRITES=false)");
-        return;
-    }
-
-    // Only run if farm manager is configured
-    if client.config().contracts.farm_manager.is_none() {
-        println!("Skipping test: farm manager contract not configured");
-        return;
-    }
-
-    // Test backward compatible claim (without epoch parameter)
-    match client.claim_rewards_all().await {
-        Ok(response) => {
-            println!("Claim rewards successful: {}", response.txhash);
-            assert!(!response.txhash.is_empty());
-        }
-        Err(e) => {
-            println!("Claim rewards failed (expected if no rewards): {:?}", e);
-            // Don't fail the test as this might be expected if no rewards are available
-        }
-    }
-}
-
 /// Test enhanced claim functionality with epoch parameter
 #[tokio::test]
 async fn test_claim_rewards_with_epoch() {
@@ -90,7 +60,7 @@ async fn test_claim_rewards_with_epoch() {
                 current_epoch
             };
 
-            match client.claim_rewards_until_epoch(target_epoch).await {
+            match client.claim_rewards(target_epoch).await {
                 Ok(response) => {
                     println!(
                         "Claim rewards until epoch {} successful: {}",
@@ -131,17 +101,24 @@ async fn test_query_rewards() {
         .expect("Wallet should be available in test client");
     let address = wallet.address().unwrap().to_string();
 
-    // Test basic rewards query (backward compatibility)
-    match client.query_all_rewards(&address).await {
-        Ok(rewards) => {
-            println!("Rewards query successful: {:?}", rewards);
+    // Test basic rewards query - need to get current epoch first
+    match client.get_current_epoch().await {
+        Ok(current_epoch) => {
+            match client.query_rewards(&address, current_epoch).await {
+                Ok(rewards) => {
+                    println!("Rewards query successful: {:?}", rewards);
+                }
+                Err(e) => {
+                    println!(
+                        "Rewards query failed (expected if contract not deployed): {:?}",
+                        e
+                    );
+                    // Don't fail the test as the contract might not be deployed
+                }
+            }
         }
         Err(e) => {
-            println!(
-                "Rewards query failed (expected if contract not deployed): {:?}",
-                e
-            );
-            // Don't fail the test as the contract might not be deployed
+            println!("Failed to get current epoch: {:?}", e);
         }
     }
 }
@@ -177,10 +154,7 @@ async fn test_query_rewards_with_epoch() {
                 current_epoch
             };
 
-            match client
-                .query_rewards_until_epoch(&address, target_epoch)
-                .await
-            {
+            match client.query_rewards(&address, target_epoch).await {
                 Ok(rewards) => {
                     println!(
                         "Rewards query until epoch {} successful: {:?}",
@@ -276,24 +250,25 @@ async fn test_claim_method_signatures() {
         return;
     }
 
-    // Test that all method signatures compile and can be called
-    // (These will likely fail due to contract deployment, but that's expected)
+    // Test that the method signature compiles and can be called
+    // (This will likely fail due to contract deployment, but that's expected)
 
-    // Method 1: Generic claim with optional epoch
-    let result1 = client.claim_rewards(None).await;
-    println!("claim_rewards(None) result: {:?}", result1.is_ok());
-
-    let result2 = client.claim_rewards(Some(1)).await;
-    println!("claim_rewards(Some(1)) result: {:?}", result2.is_ok());
-
-    // Method 2: Backward compatible claim all
-    let result3 = client.claim_rewards_all().await;
-    println!("claim_rewards_all() result: {:?}", result3.is_ok());
-
-    // Method 3: Claim until specific epoch
-    let result4 = client.claim_rewards_until_epoch(1).await;
-    println!("claim_rewards_until_epoch(1) result: {:?}", result4.is_ok());
-
-    // All methods should have the same function signature and be callable
-    // (They may fail due to contract not being deployed, but compilation should work)
+    // Get current epoch first
+    match client.get_current_epoch().await {
+        Ok(current_epoch) => {
+            // Method: claim rewards with specific epoch
+            let result = client.claim_rewards(current_epoch).await;
+            println!(
+                "claim_rewards({}) result: {:?}",
+                current_epoch,
+                result.is_ok()
+            );
+        }
+        Err(e) => {
+            println!("Failed to get current epoch: {:?}", e);
+            // Test with a default epoch if we can't get current epoch
+            let result = client.claim_rewards(1).await;
+            println!("claim_rewards(1) result: {:?}", result.is_ok());
+        }
+    }
 }

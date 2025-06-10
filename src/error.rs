@@ -1,10 +1,9 @@
 use cosmrs::rpc::endpoint::broadcast::tx_sync::Response as SyncTxResponse;
 use thiserror::Error;
 
-/// SDK Error type for MANTRA DEX SDK v3.0.0
+/// SDK Error type for MANTRA DEX SDK
 ///
 /// This enum represents all possible errors that can occur when using the SDK.
-/// v3.0.0 introduces new error types for enhanced fee validation and pool status checking.
 #[derive(Error, Debug)]
 pub enum Error {
     /// Error when interacting with CosmRS
@@ -43,7 +42,7 @@ pub enum Error {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// Fee validation error - **v3.0.0 New**: occurs when pool fees exceed 20% total limit
+    /// Fee validation error - occurs when pool fees exceed 20% total limit
     ///
     /// This error is thrown when:
     /// - Total pool fees (protocol_fee + swap_fee + burn_fee + extra_fees) exceed 20%

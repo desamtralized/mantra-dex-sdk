@@ -4,7 +4,7 @@ use mantra_dex_sdk::{
 };
 use std::str::FromStr;
 
-/// Comprehensive example demonstrating MANTRA DEX SDK v3.0.0 features
+/// Comprehensive example demonstrating MANTRA DEX SDK features
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // Initialize configuration and client
@@ -15,7 +15,7 @@ async fn main() -> Result<(), Error> {
     let wallet = MantraWallet::from_mnemonic("your mnemonic phrase here", 0)?;
     let client = client.with_wallet(wallet);
 
-    println!("=== MANTRA DEX SDK v3.0.0 Examples ===\n");
+    println!("=== MANTRA DEX SDK Examples ===\n");
 
     // Example 1: Basic Operations with Updated Parameters
     basic_operations_example(&client).await?;
@@ -45,15 +45,15 @@ async fn basic_operations_example(client: &MantraDexClient) -> Result<(), Error>
         amount: Uint128::new(1000000), // 1 OM
     };
 
-    // Swap with new parameter name: max_slippage (was max_spread in v2.x)
+    // Swap with max_slippage parameter
     println!("   - Performing swap with max_slippage parameter");
     let max_slippage = Some(Decimal::percent(5)); // 5% slippage tolerance
     let _swap_result = client
         .swap(pool_id, offer_asset.clone(), "uusdc", max_slippage)
         .await;
 
-    // Provide liquidity with new parameter names
-    println!("   - Providing liquidity with new parameter names");
+    // Provide liquidity
+    println!("   - Providing liquidity");
     let assets = vec![
         Coin {
             denom: "uom".to_string(),
@@ -65,7 +65,7 @@ async fn basic_operations_example(client: &MantraDexClient) -> Result<(), Error>
         },
     ];
 
-    // New parameter names: liquidity_max_slippage and swap_max_slippage
+    // Parameter names: liquidity_max_slippage and swap_max_slippage
     let liquidity_max_slippage = Some(Decimal::percent(2)); // 2% for liquidity operations
     let swap_max_slippage = Some(Decimal::percent(3)); // 3% for internal swaps
 
@@ -158,21 +158,11 @@ async fn epoch_rewards_example(client: &MantraDexClient) -> Result<(), Error> {
     // Query rewards with epoch parameter
     println!("   - Querying rewards up to specific epoch");
     let until_epoch = current_epoch.saturating_sub(1); // Previous epoch
-    let _rewards = client
-        .query_rewards_until_epoch(&address, until_epoch)
-        .await;
-
-    // Query all rewards (backward compatibility)
-    println!("   - Querying all rewards (backward compatibility)");
-    let _all_rewards = client.query_all_rewards(&address).await;
+    let _rewards = client.query_rewards(&address, until_epoch).await;
 
     // Claim rewards with epoch parameter
     println!("   - Claiming rewards up to specific epoch");
-    let _claim_result = client.claim_rewards_until_epoch(until_epoch).await;
-
-    // Claim all rewards (backward compatibility)
-    println!("   - Claiming all rewards (backward compatibility)");
-    let _claim_all_result = client.claim_rewards_all().await;
+    let _claim_result = client.claim_rewards(until_epoch).await;
 
     // Validate epoch parameter
     println!("   - Validating epoch parameter");

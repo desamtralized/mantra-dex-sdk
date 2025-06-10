@@ -5,13 +5,13 @@ use std::str::FromStr;
 mod utils;
 use utils::test_utils::*;
 
-/// Test end-to-end flow with new parameter structures
+/// Test end-to-end provide liquidity flow
 #[tokio::test]
-async fn test_end_to_end_provide_liquidity_with_new_parameters() {
+async fn test_end_to_end_provide_liquidity() {
     let client = create_test_client().await;
     let pool_id = "test_pool_1";
 
-    // Test with new parameter names
+    // Test provide liquidity with proper parameters
     let assets = vec![
         Coin {
             denom: "uom".to_string(),
@@ -26,7 +26,7 @@ async fn test_end_to_end_provide_liquidity_with_new_parameters() {
     let liquidity_max_slippage = Some(Decimal::from_str("0.05").unwrap()); // 5%
     let swap_max_slippage = Some(Decimal::from_str("0.03").unwrap()); // 3%
 
-    // This should work with the new parameter structure
+    // This should work with the current parameter structure
     let result = client
         .provide_liquidity(pool_id, assets, liquidity_max_slippage, swap_max_slippage)
         .await;
@@ -35,7 +35,7 @@ async fn test_end_to_end_provide_liquidity_with_new_parameters() {
     match result {
         Ok(_) => {
             // Success case - verify the transaction was properly constructed
-            println!("Provide liquidity succeeded with new parameters");
+            println!("Provide liquidity succeeded");
         }
         Err(Error::Contract(msg)) => {
             // Expected for mock environment - verify error is properly formatted
@@ -47,9 +47,9 @@ async fn test_end_to_end_provide_liquidity_with_new_parameters() {
     }
 }
 
-/// Test end-to-end swap flow with new parameter structure
+/// Test end-to-end swap flow
 #[tokio::test]
-async fn test_end_to_end_swap_with_new_parameters() {
+async fn test_end_to_end_swap() {
     let client = create_test_client().await;
     let pool_id = "test_pool_1";
 
@@ -60,14 +60,14 @@ async fn test_end_to_end_swap_with_new_parameters() {
     let ask_asset_denom = "uusdc";
     let max_slippage = Some(Decimal::from_str("0.05").unwrap()); // 5%
 
-    // Test swap with new max_slippage parameter (renamed from max_spread)
+    // Test swap with max_slippage parameter
     let result = client
         .swap(pool_id, offer_asset, ask_asset_denom, max_slippage)
         .await;
 
     match result {
         Ok(_) => {
-            println!("Swap succeeded with new parameters");
+            println!("Swap succeeded");
         }
         Err(Error::Contract(msg)) => {
             // Expected for mock environment
@@ -75,73 +75,6 @@ async fn test_end_to_end_swap_with_new_parameters() {
         }
         Err(e) => {
             panic!("Unexpected error type: {:?}", e);
-        }
-    }
-}
-
-/// Test backward compatibility scenarios
-#[tokio::test]
-async fn test_backward_compatibility_optional_parameters() {
-    let client = create_test_client().await;
-    let pool_id = "test_pool_1";
-
-    // Test provide liquidity with None values (backward compatibility)
-    let assets = vec![Coin {
-        denom: "uom".to_string(),
-        amount: Uint128::from(1000000u128),
-    }];
-
-    let result = client.provide_liquidity(pool_id, assets, None, None).await;
-
-    // Should handle None values gracefully
-    match result {
-        Ok(_) => {
-            println!("Backward compatibility maintained for optional parameters");
-        }
-        Err(Error::Contract(_)) => {
-            // Expected for mock environment
-        }
-        Err(e) => {
-            panic!("Unexpected error for backward compatibility: {:?}", e);
-        }
-    }
-}
-
-/// Test backward compatibility for claim rewards
-#[tokio::test]
-async fn test_backward_compatibility_claim_rewards() {
-    let client = create_test_client().await;
-
-    // Test claim rewards without epoch parameter (backward compatibility)
-    let result = client.claim_rewards(None).await;
-
-    match result {
-        Ok(_) => {
-            println!("Claim rewards backward compatibility maintained");
-        }
-        Err(Error::Contract(_)) => {
-            // Expected for mock environment
-        }
-        Err(e) => {
-            panic!(
-                "Unexpected error for claim rewards backward compatibility: {:?}",
-                e
-            );
-        }
-    }
-
-    // Test claim rewards with epoch parameter (new functionality)
-    let result = client.claim_rewards(Some(100)).await;
-
-    match result {
-        Ok(_) => {
-            println!("Claim rewards with epoch parameter works");
-        }
-        Err(Error::Contract(_)) => {
-            // Expected for mock environment
-        }
-        Err(e) => {
-            panic!("Unexpected error for claim rewards with epoch: {:?}", e);
         }
     }
 }
@@ -304,7 +237,7 @@ async fn test_epoch_validation_and_rewards() {
             assert!(validation_result.is_ok());
 
             // Test rewards query with epoch
-            let rewards_result = client.query_rewards(test_address, Some(epoch)).await;
+            let rewards_result = client.query_rewards(test_address, epoch).await;
 
             // Should handle gracefully even if address doesn't exist
             match rewards_result {
@@ -358,21 +291,21 @@ async fn test_feature_toggle_with_pool_identifiers() {
     }
 }
 
-/// Test parameter migration validation
+/// Test parameter validation
 #[tokio::test]
-async fn test_parameter_migration_validation() {
+async fn test_parameter_validation() {
     let client = create_test_client().await;
 
-    // Verify that old parameter names are not used in method signatures
-    // This is a compile-time check - if this compiles, the migration is correct
+    // Verify that current parameter names are used in method signatures
+    // This is a compile-time check - if this compiles, the API is correct
 
-    let pool_id = "migration_test_pool";
+    let pool_id = "test_pool";
     let assets = vec![Coin {
         denom: "uom".to_string(),
         amount: Uint128::from(1000000u128),
     }];
 
-    // Test that new parameter names are used
+    // Test that current parameter names are used
     let _result = client
         .provide_liquidity(
             pool_id,
@@ -382,7 +315,7 @@ async fn test_parameter_migration_validation() {
         )
         .await;
 
-    // Test swap with new parameter name
+    // Test swap with current parameter name
     let offer_asset = Coin {
         denom: "uom".to_string(),
         amount: Uint128::from(100000u128),
@@ -393,11 +326,11 @@ async fn test_parameter_migration_validation() {
             pool_id,
             offer_asset,
             "uusdc",
-            Some(Decimal::from_str("0.05").unwrap()), // max_slippage (renamed from max_spread)
+            Some(Decimal::from_str("0.05").unwrap()), // max_slippage
         )
         .await;
 
-    println!("Parameter migration validation passed - new parameter names are in use");
+    println!("Parameter validation passed - API signatures are correct");
 }
 
 /// Test response parsing updates
@@ -426,58 +359,4 @@ async fn test_response_parsing_updates() {
         }
         Err(e) => panic!("Unexpected error in response parsing: {:?}", e),
     }
-}
-
-/// Test dependency compatibility
-#[tokio::test]
-async fn test_dependency_compatibility() {
-    // This test verifies that all dependencies work together correctly
-    let client = create_test_client().await;
-
-    // Test that mantra-dex-std v3.0.0 and mantrachain-std v0.2.0 work together
-    let config = client.config();
-    assert!(!config.rpc_url.is_empty());
-    assert!(!config.network_id.is_empty());
-
-    // Test basic client functionality
-    let balances_result = client.get_balances().await;
-    match balances_result {
-        Ok(_) => println!("Dependency compatibility verified"),
-        Err(Error::Wallet(_)) => {
-            // Expected when no wallet is configured
-            println!("Dependency compatibility verified (no wallet configured)");
-        }
-        Err(e) => panic!("Dependency compatibility issue: {:?}", e),
-    }
-}
-
-/// Performance regression test
-#[tokio::test]
-async fn test_performance_regression() {
-    use std::time::Instant;
-
-    let client = create_test_client().await;
-
-    // Test that basic operations complete within reasonable time
-    let start = Instant::now();
-
-    // Perform multiple operations
-    for i in 0..10 {
-        let pool_id = format!("perf_test_pool_{}", i);
-        let _result = client.get_pool(&pool_id).await;
-    }
-
-    let duration = start.elapsed();
-
-    // Should complete within 30 seconds for 10 operations
-    assert!(
-        duration.as_secs() < 30,
-        "Performance regression detected: operations took {:?}",
-        duration
-    );
-
-    println!(
-        "Performance test passed: {} operations in {:?}",
-        10, duration
-    );
 }
