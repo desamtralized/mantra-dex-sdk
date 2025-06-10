@@ -2,6 +2,11 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod wallet;
+
+// TUI module - optional via "tui" feature
+#[cfg(feature = "tui")]
+pub mod tui;
+
 // Re-export mantra-dex-std for user convenience
 pub use mantra_dex_std;
 
@@ -9,6 +14,10 @@ pub use client::MantraDexClient;
 pub use config::{MantraNetworkConfig, NetworkConstants};
 pub use error::Error;
 pub use wallet::MantraWallet;
+
+// Re-export TUI entry point when feature is enabled
+#[cfg(feature = "tui")]
+pub use tui::run_tui;
 
 // Re-export common types from mantra-dex-std
 pub use cosmwasm_std::{Coin, Decimal, Uint128};
