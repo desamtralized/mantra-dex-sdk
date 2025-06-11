@@ -7,7 +7,7 @@
 use crate::tui::{
     app::{App, LoadingState},
     components::{
-        forms::{Dropdown, DropdownOption, InputType, TextInput},
+        forms::{Dropdown, InputType, TextInput},
         header::render_header,
         modals::{render_modal, ModalState},
         navigation::render_navigation,
@@ -147,21 +147,8 @@ impl Default for MultiHopScreenState {
         // Set initial focus
         from_token_dropdown.set_focused(true);
 
-        let available_tokens = vec![
-            "USDC".to_string(),
-            "USDT".to_string(),
-            "ATOM".to_string(),
-            "OSMO".to_string(),
-            "MANTRA".to_string(),
-        ];
-
-        // Initialize token dropdowns
-        for token in &available_tokens {
-            from_token_dropdown =
-                from_token_dropdown.add_option(DropdownOption::new(token.clone(), token.clone()));
-            to_token_dropdown =
-                to_token_dropdown.add_option(DropdownOption::new(token.clone(), token.clone()));
-        }
+        // Start with empty dropdowns - will be populated when real data loads
+        let available_tokens = Vec::new();
 
         Self {
             input_focus: MultiHopInputFocus::FromToken,

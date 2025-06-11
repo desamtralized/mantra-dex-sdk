@@ -117,6 +117,11 @@ impl TextInput {
         self
     }
 
+    /// Set the current value of the input field.
+    pub fn set_value(&mut self, value: &str) {
+        self.input = self.input.clone().with_value(value.to_string());
+    }
+
     /// Set focus state
     pub fn set_focused(&mut self, focused: bool) {
         self.focused = focused;
@@ -244,7 +249,7 @@ impl TextInput {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // Label
-                Constraint::Length(3), // Input box
+                Constraint::Length(3), // Input box (fixed height for single line)
                 Constraint::Length(1), // Error message
             ])
             .split(area);
@@ -268,11 +273,11 @@ impl TextInput {
 
         // Render input box
         let input_style = if self.focused {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
         } else if self.error.is_some() {
             Style::default().fg(Color::Red)
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(Color::Gray)
         };
 
         let block = Block::default().borders(Borders::ALL).style(input_style);
@@ -285,13 +290,15 @@ impl TextInput {
             self.input.value().to_string()
         };
 
-        let input_widget = Paragraph::new(display_value).block(block).style(
-            if self.input.value().is_empty() && !self.focused {
-                Style::default().fg(Color::DarkGray)
-            } else {
-                Style::default().fg(Color::White)
-            },
-        );
+        let text_style = if self.input.value().is_empty() && !self.focused {
+            Style::default().fg(Color::DarkGray)
+        } else if self.focused {
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+
+        let input_widget = Paragraph::new(display_value).block(block).style(text_style);
 
         frame.render_widget(input_widget, chunks[1]);
 
@@ -329,6 +336,8 @@ pub struct Dropdown<T> {
     list_state: ListState,
     /// Whether selection is required
     required: bool,
+    /// Currently highlighted option when open
+    highlighted: Option<usize>,
 }
 
 /// Option for dropdown component
@@ -373,6 +382,7 @@ impl<T: Clone> Dropdown<T> {
             focused: false,
             list_state: ListState::default(),
             required: false,
+            highlighted: None,
         }
     }
 
@@ -399,6 +409,7 @@ impl<T: Clone> Dropdown<T> {
         self.focused = focused;
         if !focused {
             self.open = false;
+            self.highlighted = None;
         }
     }
 
@@ -407,47 +418,62 @@ impl<T: Clone> Dropdown<T> {
         self.focused
     }
 
+    /// Check if this dropdown is open
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
     /// Toggle dropdown open/closed
     pub fn toggle(&mut self) {
-        if self.focused {
+        if self.focused && !self.options.is_empty() {
             self.open = !self.open;
-            if self.open && !self.options.is_empty() {
-                self.list_state.select(self.selected.or(Some(0)));
+            if self.open {
+                // Set initial highlight to selected item or first item
+                let initial_highlight = self.selected.unwrap_or(0);
+                self.highlighted = Some(initial_highlight);
+                self.list_state.select(Some(initial_highlight));
+            } else {
+                self.highlighted = None;
             }
         }
     }
 
     /// Move selection up in dropdown
     pub fn move_up(&mut self) {
-        if self.open {
-            let selected = self.list_state.selected().unwrap_or(0);
-            if selected > 0 {
-                self.list_state.select(Some(selected - 1));
+        if self.open && !self.options.is_empty() {
+            let current = self.highlighted.unwrap_or(0);
+            let new_highlighted = if current > 0 {
+                current - 1
             } else {
-                self.list_state.select(Some(self.options.len() - 1));
-            }
+                self.options.len() - 1
+            };
+            self.highlighted = Some(new_highlighted);
+            self.list_state.select(Some(new_highlighted));
         }
     }
 
     /// Move selection down in dropdown
     pub fn move_down(&mut self) {
-        if self.open {
-            let selected = self.list_state.selected().unwrap_or(0);
-            if selected + 1 < self.options.len() {
-                self.list_state.select(Some(selected + 1));
+        if self.open && !self.options.is_empty() {
+            let current = self.highlighted.unwrap_or(0);
+            let new_highlighted = if current + 1 < self.options.len() {
+                current + 1
             } else {
-                self.list_state.select(Some(0));
-            }
+                0
+            };
+            self.highlighted = Some(new_highlighted);
+            self.list_state.select(Some(new_highlighted));
         }
     }
 
     /// Select the currently highlighted option
     pub fn select_current(&mut self) {
         if self.open {
-            if let Some(selected) = self.list_state.selected() {
-                if selected < self.options.len() && self.options[selected].enabled {
-                    self.selected = Some(selected);
+            if let Some(highlighted) = self.highlighted {
+                if highlighted < self.options.len() && self.options[highlighted].enabled {
+                    self.selected = Some(highlighted);
                     self.open = false;
+                    self.highlighted = None;
                 }
             }
         }
@@ -522,13 +548,16 @@ impl<T: Clone> Dropdown<T> {
         let box_style = if self.focused {
             Style::default().fg(Color::Yellow)
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(Color::Gray)
         };
 
-        let selected_text = self
-            .selected_text()
-            .unwrap_or("Select an option...")
-            .to_string();
+        let selected_text = if self.options.is_empty() {
+            "Loading options...".to_string()
+        } else {
+            self.selected_text()
+                .unwrap_or("Select an option...")
+                .to_string()
+        };
 
         let arrow = if self.open { "▲" } else { "▼" };
         let display_text = format!("{} {}", selected_text, arrow);
@@ -544,11 +573,12 @@ impl<T: Clone> Dropdown<T> {
 
         // Render dropdown list if open
         if self.open && !self.options.is_empty() {
+            let list_height = (self.options.len() as u16 + 2).min(8); // Max 8 items visible
             let list_area = Rect {
                 x: chunks[1].x,
                 y: chunks[1].y + chunks[1].height,
                 width: chunks[1].width,
-                height: (self.options.len() as u16 + 2).min(10), // Max 10 items
+                height: list_height,
             };
 
             // Clear background
@@ -557,19 +587,34 @@ impl<T: Clone> Dropdown<T> {
             let items: Vec<ListItem> = self
                 .options
                 .iter()
-                .map(|opt| {
-                    let style = if opt.enabled {
-                        Style::default().fg(Color::White)
-                    } else {
+                .enumerate()
+                .map(|(idx, opt)| {
+                    let style = if !opt.enabled {
                         Style::default().fg(Color::DarkGray)
+                    } else if Some(idx) == self.highlighted {
+                        Style::default().fg(Color::Black).bg(Color::Yellow)
+                    } else {
+                        Style::default().fg(Color::White)
                     };
-                    ListItem::new(opt.text.clone()).style(style)
+                    
+                    let text = if Some(idx) == self.selected {
+                        format!("✓ {}", opt.text)
+                    } else {
+                        format!("  {}", opt.text)
+                    };
+                    
+                    ListItem::new(text).style(style)
                 })
                 .collect();
 
             let list = List::new(items)
-                .block(Block::default().borders(Borders::ALL))
-                .highlight_style(Style::default().bg(Color::Blue));
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title("Select Option")
+                        .border_style(Style::default().fg(Color::Yellow))
+                )
+                .highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
 
             frame.render_stateful_widget(list, list_area, &mut self.list_state);
         }

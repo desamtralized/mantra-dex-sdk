@@ -202,6 +202,8 @@ pub enum Event {
         success: bool,
         error: Option<String>,
     },
+    /// Trigger simulation based on input changes
+    TriggerSimulation,
 }
 
 /// Swap operation for multi-hop swaps

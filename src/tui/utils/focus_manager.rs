@@ -166,25 +166,17 @@ impl FocusManager {
             return None;
         }
 
-        let current_index = self.current_focus_index();
-        let start_index = current_index.unwrap_or(0);
+        let start_index = self.current_focus_index().unwrap_or(0);
 
-        // Find previous focusable component
-        for i in 0..self.tab_order.len() {
-            let index = if start_index >= i {
-                start_index - i
-            } else {
-                self.tab_order.len() - (i - start_index)
-            };
+        // Find previous focusable component by iterating backwards
+        for i in 1..=self.tab_order.len() {
+            let index = (start_index + self.tab_order.len() - i) % self.tab_order.len();
+            let component = self.tab_order[index].clone();
 
-            if index < self.tab_order.len() {
-                let component = self.tab_order[index].clone();
-
-                if self.is_component_focusable(&component) {
-                    self.add_to_history();
-                    self.current_focus = Some(component.clone());
-                    return Some(component);
-                }
+            if self.is_component_focusable(&component) {
+                self.add_to_history();
+                self.current_focus = Some(component.clone());
+                return Some(component.clone());
             }
         }
 
@@ -354,8 +346,17 @@ pub mod component_ids {
         FocusableComponent::TextInput("swap_from_asset".to_string())
     }
 
+    pub fn swap_from_asset_dropdown() -> FocusableComponent {
+        FocusableComponent::Dropdown("swap_from_asset".to_string())
+    }
+
     pub fn swap_to_asset_dropdown() -> FocusableComponent {
         FocusableComponent::Dropdown("swap_to_asset".to_string())
+    }
+
+    /// Dropdown for selecting the pool used for the swap
+    pub fn swap_pool_dropdown() -> FocusableComponent {
+        FocusableComponent::Dropdown("swap_pool".to_string())
     }
 
     pub fn swap_amount_input() -> FocusableComponent {

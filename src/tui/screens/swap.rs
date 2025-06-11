@@ -7,7 +7,8 @@
 use crate::tui::{
     app::{App, LoadingState, SwapState},
     components::{
-        forms::{Dropdown, DropdownOption, InputType, TextInput},
+        forms::{InputType, TextInput},
+        simple_list::{SimpleList, SimpleListOption},
         header::render_header,
         modals::{render_modal, ModalState},
         navigation::render_navigation,
@@ -27,9 +28,9 @@ use tui_input::InputRequest;
 /// Input focus states for the swap screen
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SwapInputFocus {
-    FromAmount,
-    ToToken,
     Pool,
+    FromToken,
+    FromAmount,
     Slippage,
     Execute,
 }
@@ -39,12 +40,12 @@ pub enum SwapInputFocus {
 pub struct SwapScreenState {
     /// Current input focus
     pub input_focus: SwapInputFocus,
+    /// Pool selection list
+    pub pool_dropdown: SimpleList,
+    /// From token list
+    pub from_token_dropdown: SimpleList,
     /// From amount input
     pub from_amount_input: TextInput,
-    /// To token dropdown
-    pub to_token_dropdown: Dropdown<String>,
-    /// Pool selection dropdown
-    pub pool_dropdown: Dropdown<String>,
     /// Slippage tolerance input
     pub slippage_input: TextInput,
     /// Whether confirmation modal is shown
@@ -55,18 +56,40 @@ pub struct SwapScreenState {
     pub available_tokens: Vec<String>,
     /// Available pools for the selected token pair
     pub available_pools: Vec<(String, String)>, // (pool_id, display_name)
+    /// Timer for simulation trigger
+    pub simulation_timer: Option<std::time::Instant>,
+    /// Last input change time for simulation delay
+    pub last_input_change: Option<std::time::Instant>,
 }
 
 impl Default for SwapScreenState {
     fn default() -> Self {
+        let mut pool_dropdown = SimpleList::new("Available Pools");
+        
+        // Initialize with test data immediately (for development/testing)
+        let test_pools = vec![
+            ("1".to_string(), "Pool 1: USDC / USDT".to_string()),
+            ("2".to_string(), "Pool 2: ATOM / OSMO".to_string()),
+            ("3".to_string(), "Pool 3: MANTRA / USDC".to_string()),
+            ("4".to_string(), "Pool 4: USDT / ATOM".to_string()),
+            ("5".to_string(), "Pool 5: OSMO / MANTRA".to_string()),
+        ];
+        
+        let pool_options: Vec<SimpleListOption> = test_pools
+            .iter()
+            .map(|(pool_id, display_name)| {
+                SimpleListOption::new(display_name.clone(), pool_id.clone())
+            })
+            .collect();
+        pool_dropdown = pool_dropdown.with_options(pool_options);
+
+        // Start with empty token list - will be populated when a pool is selected
+        let from_token_dropdown = SimpleList::new("Pool Tokens");
+
         let mut from_amount_input = TextInput::new("From Amount")
             .with_type(InputType::Amount)
             .required()
             .with_placeholder("0.0");
-
-        let to_token_dropdown = Dropdown::new("To Token").required();
-
-        let pool_dropdown = Dropdown::new("Select Pool").required();
 
         let slippage_input = TextInput::new("Slippage Tolerance (%)")
             .with_type(InputType::Amount)
@@ -74,160 +97,290 @@ impl Default for SwapScreenState {
             .with_placeholder("1.0");
 
         // Set initial focus
-        from_amount_input.set_focused(true);
+        from_amount_input.set_focused(false);
 
-        Self {
-            input_focus: SwapInputFocus::FromAmount,
-            from_amount_input,
-            to_token_dropdown,
+        let mut instance = Self {
+            input_focus: SwapInputFocus::Pool,
             pool_dropdown,
+            from_token_dropdown,
+            from_amount_input,
             slippage_input,
             show_confirmation: false,
             modal_state: None,
-            available_tokens: vec![
-                "USDC".to_string(),
-                "USDT".to_string(),
-                "ATOM".to_string(),
-                "OSMO".to_string(),
-                "MANTRA".to_string(),
-            ],
-            available_pools: Vec::new(),
-        }
+            available_tokens: Vec::new(), // Will be populated when pool is selected
+            available_pools: test_pools,
+            simulation_timer: None,
+            last_input_change: None,
+        };
+        
+        // Apply initial focus
+        instance.apply_focus();
+        instance
     }
 }
 
 impl SwapScreenState {
-    /// Initialize dropdowns with available tokens
+    /// Initialize lists with available tokens
     pub fn initialize_tokens(&mut self, tokens: Vec<String>) {
         self.available_tokens = tokens.clone();
 
-        // Update to token dropdown
-        let mut dropdown = Dropdown::new("To Token").required();
-        for token in &tokens {
-            dropdown = dropdown.add_option(DropdownOption::new(token.clone(), token.clone()));
-        }
-        self.to_token_dropdown = dropdown;
+        // Update from token list while preserving focus state
+        let was_active = self.from_token_dropdown.is_active;
+        let mut dropdown = SimpleList::new("Available Tokens");
+        let options: Vec<SimpleListOption> = tokens
+            .iter()
+            .map(|token| SimpleListOption::new(token.clone(), token.clone()))
+            .collect();
+        dropdown = dropdown.with_options(options);
+        dropdown.set_active(was_active);
+        self.from_token_dropdown = dropdown;
     }
 
     /// Update available pools based on selected tokens
     pub fn update_available_pools(&mut self, pools: Vec<(String, String)>) {
         self.available_pools = pools.clone();
 
-        // Update pool dropdown
-        let mut dropdown = Dropdown::new("Select Pool").required();
-        for (pool_id, display_name) in &pools {
-            dropdown =
-                dropdown.add_option(DropdownOption::new(display_name.clone(), pool_id.clone()));
-        }
+        // Update pool list while preserving focus state
+        let was_active = self.pool_dropdown.is_active;
+        let mut dropdown = SimpleList::new("Available Pools");
+        let options: Vec<SimpleListOption> = pools
+            .iter()
+            .map(|(pool_id, display_name)| {
+                SimpleListOption::new(display_name.clone(), pool_id.clone())
+            })
+            .collect();
+        dropdown = dropdown.with_options(options);
+        dropdown.set_active(was_active);
         self.pool_dropdown = dropdown;
     }
 
-    /// Move focus to next input
-    pub fn next_focus(&mut self) {
-        self.clear_focus();
-        self.input_focus = match self.input_focus {
-            SwapInputFocus::FromAmount => SwapInputFocus::ToToken,
-            SwapInputFocus::ToToken => SwapInputFocus::Pool,
-            SwapInputFocus::Pool => SwapInputFocus::Slippage,
-            SwapInputFocus::Slippage => SwapInputFocus::Execute,
-            SwapInputFocus::Execute => SwapInputFocus::FromAmount,
+    /// Update token list based on selected pool
+    pub fn update_tokens_for_pool(&mut self, pool_id: &str) {
+        // Extract tokens for the selected pool
+        let tokens_for_pool = match pool_id {
+            "1" => vec!["USDC".to_string(), "USDT".to_string()],
+            "2" => vec!["ATOM".to_string(), "OSMO".to_string()],
+            "3" => vec!["MANTRA".to_string(), "USDC".to_string()],
+            "4" => vec!["USDT".to_string(), "ATOM".to_string()],
+            "5" => vec!["OSMO".to_string(), "MANTRA".to_string()],
+            _ => vec![], // Unknown pool
         };
-        self.set_focus();
-    }
 
-    /// Move focus to previous input
-    pub fn previous_focus(&mut self) {
-        self.clear_focus();
-        self.input_focus = match self.input_focus {
-            SwapInputFocus::FromAmount => SwapInputFocus::Execute,
-            SwapInputFocus::ToToken => SwapInputFocus::FromAmount,
-            SwapInputFocus::Pool => SwapInputFocus::ToToken,
-            SwapInputFocus::Slippage => SwapInputFocus::Pool,
-            SwapInputFocus::Execute => SwapInputFocus::Slippage,
-        };
-        self.set_focus();
+        // Update the token list
+        let was_active = self.from_token_dropdown.is_active;
+        let mut token_list = SimpleList::new("Pool Tokens");
+        let options: Vec<SimpleListOption> = tokens_for_pool
+            .iter()
+            .map(|token| SimpleListOption::new(token.clone(), token.clone()))
+            .collect();
+        token_list = token_list.with_options(options);
+        token_list.set_active(was_active);
+        self.from_token_dropdown = token_list;
+        
+        // Clear token selection when pool changes
+        self.from_token_dropdown.selected_index = None;
+        if !tokens_for_pool.is_empty() {
+            self.from_token_dropdown.list_state.select(Some(0));
+        }
     }
 
     /// Clear focus from all inputs
     fn clear_focus(&mut self) {
+        self.pool_dropdown.set_active(false);
+        self.from_token_dropdown.set_active(false);
         self.from_amount_input.set_focused(false);
-        self.to_token_dropdown.set_focused(false);
-        self.pool_dropdown.set_focused(false);
         self.slippage_input.set_focused(false);
+    }
+
+    /// Public wrapper to clear all focus states (used by external modules)
+    pub fn reset_focus(&mut self) {
+        self.clear_focus();
     }
 
     /// Set focus on current input
     fn set_focus(&mut self) {
         match self.input_focus {
+            SwapInputFocus::Pool => {
+                self.pool_dropdown.set_active(true);
+            }
+            SwapInputFocus::FromToken => {
+                self.from_token_dropdown.set_active(true);
+            }
             SwapInputFocus::FromAmount => self.from_amount_input.set_focused(true),
-            SwapInputFocus::ToToken => self.to_token_dropdown.set_focused(true),
-            SwapInputFocus::Pool => self.pool_dropdown.set_focused(true),
             SwapInputFocus::Slippage => self.slippage_input.set_focused(true),
             SwapInputFocus::Execute => {} // Button focus handled separately
         }
     }
 
-    /// Handle keyboard input
-    pub fn handle_input(&mut self, input: InputRequest) -> bool {
-        match self.input_focus {
-            SwapInputFocus::FromAmount => {
-                self.from_amount_input.handle_input(input);
-                true
-            }
-            SwapInputFocus::ToToken => match input {
-                InputRequest::GoToPrevWord => {
-                    self.to_token_dropdown.move_up();
-                    true
-                }
-                InputRequest::GoToNextWord => {
-                    self.to_token_dropdown.move_down();
-                    true
-                }
-                InputRequest::GoToStart => {
-                    self.to_token_dropdown.toggle();
-                    true
-                }
-                InputRequest::GoToEnd => {
-                    self.to_token_dropdown.select_current();
-                    true
-                }
-                _ => false,
-            },
-            SwapInputFocus::Pool => match input {
-                InputRequest::GoToPrevWord => {
-                    self.pool_dropdown.move_up();
-                    true
-                }
-                InputRequest::GoToNextWord => {
-                    self.pool_dropdown.move_down();
-                    true
-                }
-                InputRequest::GoToStart => {
-                    self.pool_dropdown.toggle();
-                    true
-                }
-                InputRequest::GoToEnd => {
-                    self.pool_dropdown.select_current();
-                    true
-                }
-                _ => false,
-            },
-            SwapInputFocus::Slippage => {
-                self.slippage_input.handle_input(input);
-                true
-            }
-            SwapInputFocus::Execute => false,
+    /// Public wrapper to apply focus based on `input_focus` value (used by external modules)
+    pub fn apply_focus(&mut self) {
+        self.set_focus();
+    }
+
+    /// Mark input change for simulation trigger
+    pub fn mark_input_change(&mut self) {
+        self.last_input_change = Some(std::time::Instant::now());
+    }
+
+    /// Check if simulation should be triggered (after 5 seconds of inactivity)
+    pub fn should_trigger_simulation(&mut self) -> bool {
+        if let Some(last_change) = self.last_input_change {
+            let elapsed = last_change.elapsed().as_secs();
+            elapsed >= 5 && self.validate()
+        } else {
+            false
         }
+    }
+    
+    /// Reset the simulation timer
+    pub fn reset_simulation_timer(&mut self) {
+        self.last_input_change = None;
+        self.simulation_timer = None;
+    }
+
+    /// Handle keyboard input using direct key events
+    pub fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        use crossterm::event::KeyCode;
+        
+        // Handle regular input focus
+        match self.input_focus {
+            SwapInputFocus::Pool => {
+                let old_selection = self.pool_dropdown.selected_index;
+                let handled = self.pool_dropdown.handle_key_event(key);
+
+                // If the list is in editing mode, it captures all input.
+                if self.pool_dropdown.is_editing {
+                    return true;
+                }
+
+                // If selection changed, trigger updates.
+                if handled && self.pool_dropdown.selected_index != old_selection {
+                    if let Some(selected_pool_id) = self.pool_dropdown.get_selected_value() {
+                        // Clone the pool ID to avoid borrowing issues
+                        let pool_id = selected_pool_id.to_string();
+                        // Update token list for the selected pool
+                        self.update_tokens_for_pool(&pool_id);
+                        self.mark_input_change();
+                    }
+                }
+                handled
+            }
+            SwapInputFocus::FromToken => {
+                let old_selection = self.from_token_dropdown.selected_index;
+                let handled = self.from_token_dropdown.handle_key_event(key);
+
+                if self.from_token_dropdown.is_editing {
+                    return true;
+                }
+                
+                if handled && self.from_token_dropdown.selected_index != old_selection {
+                    if self.from_token_dropdown.get_selected_value().is_some() {
+                        self.mark_input_change();
+                    }
+                }
+                handled
+            }
+            SwapInputFocus::FromAmount => {
+                // Convert key event to InputRequest for text input
+                let input_request = match key.code {
+                    KeyCode::Char(c) => Some(InputRequest::InsertChar(c)),
+                    KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
+                    KeyCode::Delete => Some(InputRequest::DeleteNextChar),
+                    KeyCode::Left => Some(InputRequest::GoToPrevChar),
+                    KeyCode::Right => Some(InputRequest::GoToNextChar),
+                    KeyCode::Home => Some(InputRequest::GoToStart),
+                    KeyCode::End => Some(InputRequest::GoToEnd),
+                    _ => None,
+                };
+
+                if let Some(request) = input_request {
+                    let result = self.from_amount_input.handle_input(request);
+                    if result.is_some() {
+                        self.mark_input_change();
+                        return true;
+                    }
+                }
+                false
+            }
+            SwapInputFocus::Slippage => {
+                // Convert key event to InputRequest for text input
+                let input_request = match key.code {
+                    KeyCode::Char(c) => Some(InputRequest::InsertChar(c)),
+                    KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
+                    KeyCode::Delete => Some(InputRequest::DeleteNextChar),
+                    KeyCode::Left => Some(InputRequest::GoToPrevChar),
+                    KeyCode::Right => Some(InputRequest::GoToNextChar),
+                    KeyCode::Home => Some(InputRequest::GoToStart),
+                    KeyCode::End => Some(InputRequest::GoToEnd),
+                    _ => None,
+                };
+
+                if let Some(request) = input_request {
+                    let result = self.slippage_input.handle_input(request);
+                    if result.is_some() {
+                        self.mark_input_change();
+                        return true;
+                    }
+                }
+                false
+            }
+            SwapInputFocus::Execute => {
+                // Handle execute button activation
+                match key.code {
+                    KeyCode::Enter | KeyCode::Char(' ') => {
+                        if self.validate() {
+                            // Trigger swap execution
+                            return true;
+                        }
+                    }
+                    _ => {}
+                }
+                false
+            }
+        }
+    }
+
+    /// Handle keyboard input (legacy method - kept for compatibility)
+    pub fn handle_input(&mut self, input: InputRequest) -> bool {
+        // This method is kept for backward compatibility with existing code
+        // that still uses InputRequest. New code should use handle_key_event.
+        false
+    }
+
+    /// Move to next focus (for testing/compatibility)
+    pub fn next_focus(&mut self) {
+        self.input_focus = match self.input_focus {
+            SwapInputFocus::Pool => SwapInputFocus::FromToken,
+            SwapInputFocus::FromToken => SwapInputFocus::FromAmount,
+            SwapInputFocus::FromAmount => SwapInputFocus::Slippage,
+            SwapInputFocus::Slippage => SwapInputFocus::Execute,
+            SwapInputFocus::Execute => SwapInputFocus::Pool,
+        };
+        self.clear_focus();
+        self.set_focus();
+    }
+
+    /// Move to previous focus
+    pub fn previous_focus(&mut self) {
+        self.input_focus = match self.input_focus {
+            SwapInputFocus::Pool => SwapInputFocus::Execute,
+            SwapInputFocus::FromToken => SwapInputFocus::Pool,
+            SwapInputFocus::FromAmount => SwapInputFocus::FromToken,
+            SwapInputFocus::Slippage => SwapInputFocus::FromAmount,
+            SwapInputFocus::Execute => SwapInputFocus::Slippage,
+        };
+        self.clear_focus();
+        self.set_focus();
     }
 
     /// Validate all inputs
     pub fn validate(&mut self) -> bool {
+        let pool_valid = self.pool_dropdown.get_selected_value().is_some();
+        let from_token_valid = self.from_token_dropdown.get_selected_value().is_some();
         let amount_valid = self.from_amount_input.validate();
-        let to_token_valid = self.to_token_dropdown.selected_value().is_some();
-        let pool_valid = self.pool_dropdown.selected_value().is_some();
         let slippage_valid = self.slippage_input.validate();
 
-        amount_valid && to_token_valid && pool_valid && slippage_valid
+        pool_valid && from_token_valid && amount_valid && slippage_valid
     }
 
     /// Show confirmation modal
@@ -279,7 +432,7 @@ pub struct SwapDetails {
 static mut SWAP_SCREEN_STATE: Option<SwapScreenState> = None;
 
 /// Get or initialize the swap screen state
-fn get_swap_screen_state() -> &'static mut SwapScreenState {
+pub(crate) fn get_swap_screen_state() -> &'static mut SwapScreenState {
     unsafe {
         if SWAP_SCREEN_STATE.is_none() {
             SWAP_SCREEN_STATE = Some(SwapScreenState::default());
@@ -307,6 +460,15 @@ pub fn render_swap(f: &mut Frame, app: &App) {
     render_header(f, &app.state, chunks[0]);
     render_navigation(f, &app.state, chunks[1]);
 
+    // Check for simulation trigger (this should ideally be in the main event loop, but putting here for now)
+    let swap_state = get_swap_screen_state();
+    if swap_state.should_trigger_simulation() {
+        // Reset the timer to prevent repeated triggers
+        if let Some(sender) = app.get_event_sender() {
+            let _ = sender.send(crate::tui::events::Event::TriggerSimulation);
+        }
+    }
+
     // Render swap content
     render_swap_content(f, chunks[2], app);
 
@@ -314,7 +476,6 @@ pub fn render_swap(f: &mut Frame, app: &App) {
     render_status_bar(f, &app.state, chunks[3]);
 
     // Render modal if visible
-    let swap_state = get_swap_screen_state();
     if let Some(ref modal_state) = swap_state.modal_state {
         render_modal(f, modal_state, size);
     }
@@ -322,7 +483,7 @@ pub fn render_swap(f: &mut Frame, app: &App) {
 
 /// Render the main swap content area
 fn render_swap_content(f: &mut Frame, area: Rect, app: &App) {
-    // Create a horizontal layout: swap interface | swap preview & simulation
+    // Create a horizontal layout: swap interface | simulation results only
     let main_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
@@ -334,17 +495,10 @@ fn render_swap_content(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Min(0), Constraint::Length(5)])
         .split(main_chunks[0]);
 
-    // Split the right side: preview on top, simulation results on bottom
-    let right_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(main_chunks[1]);
-
     // Render components
     render_swap_interface(f, left_chunks[0], app);
     render_execute_button(f, left_chunks[1], app);
-    render_swap_preview(f, right_chunks[0], app);
-    render_simulation_results(f, right_chunks[1], app);
+    render_simulation_results(f, main_chunks[1], app);
 }
 
 /// Render the swap input interface
@@ -359,22 +513,32 @@ fn render_swap_interface(f: &mut Frame, area: Rect, app: &App) {
     let input_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(4), // From amount + balance
-            Constraint::Length(4), // To token selection
-            Constraint::Length(4), // Pool selection
-            Constraint::Length(4), // Slippage tolerance
+            Constraint::Length(8), // Pool selection list
+            Constraint::Length(8), // Token selection list 
+            Constraint::Length(5), // From amount input (increased for better visibility)
+            Constraint::Length(5), // Slippage tolerance (increased for better visibility)
         ])
         .split(block.inner(area));
 
     let swap_state = get_swap_screen_state();
 
     // Render form inputs
-    render_from_amount_input(f, input_chunks[0], app, swap_state);
-    render_to_token_input(f, input_chunks[1], app, swap_state);
-    render_pool_selection(f, input_chunks[2], app, swap_state);
+    render_pool_selection(f, input_chunks[0], app, swap_state);
+    render_from_token_input(f, input_chunks[1], app, swap_state);
+    render_from_amount_input(f, input_chunks[2], app, swap_state);
     render_slippage_input(f, input_chunks[3], app, swap_state);
 
     f.render_widget(block, area);
+}
+
+/// Render pool selection list
+fn render_pool_selection(f: &mut Frame, area: Rect, _app: &App, swap_state: &mut SwapScreenState) {
+    swap_state.pool_dropdown.render(f, area);
+}
+
+/// Render from token selection list
+fn render_from_token_input(f: &mut Frame, area: Rect, _app: &App, swap_state: &mut SwapScreenState) {
+    swap_state.from_token_dropdown.render(f, area);
 }
 
 /// Render from amount input with balance display
@@ -393,32 +557,43 @@ fn render_from_amount_input(
     swap_state.from_amount_input.render(f, chunks[0]);
 
     // Render balance display
-    let default_token = "USDC".to_string();
-    let from_token = app
-        .state
-        .swap_state
-        .from_asset
-        .as_ref()
-        .unwrap_or(&default_token);
-    let default_balance = "0.0".to_string();
-    let balance = app
-        .state
-        .balances
-        .get(from_token)
-        .unwrap_or(&default_balance);
+    let from_token = swap_state
+        .from_token_dropdown
+        .get_selected_label()
+        .unwrap_or("Select Token");
+    
+    let balance_text = if from_token == "Select Token" {
+        vec![
+            Line::from(vec![Span::styled(
+                "Select token",
+                Style::default().fg(Color::Gray),
+            )]),
+            Line::from(vec![Span::styled(
+                "to view balance",
+                Style::default().fg(Color::Gray),
+            )]),
+        ]
+    } else {
+        let default_balance = "0.0".to_string();
+        let balance = app
+            .state
+            .balances
+            .get(from_token)
+            .unwrap_or(&default_balance);
 
-    let balance_text = vec![
-        Line::from(vec![Span::styled(
-            "Available:",
-            Style::default().fg(Color::Gray),
-        )]),
-        Line::from(vec![Span::styled(
-            format!("{} {}", balance, from_token),
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        )]),
-    ];
+        vec![
+            Line::from(vec![Span::styled(
+                "Available:",
+                Style::default().fg(Color::Gray),
+            )]),
+            Line::from(vec![Span::styled(
+                format!("{} {}", balance, from_token),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            )]),
+        ]
+    };
 
     let balance_paragraph = Paragraph::new(Text::from(balance_text))
         .block(
@@ -430,16 +605,6 @@ fn render_from_amount_input(
         .alignment(Alignment::Center);
 
     f.render_widget(balance_paragraph, chunks[1]);
-}
-
-/// Render to token selection dropdown
-fn render_to_token_input(f: &mut Frame, area: Rect, _app: &App, swap_state: &mut SwapScreenState) {
-    swap_state.to_token_dropdown.render(f, area);
-}
-
-/// Render pool selection dropdown
-fn render_pool_selection(f: &mut Frame, area: Rect, _app: &App, swap_state: &mut SwapScreenState) {
-    swap_state.pool_dropdown.render(f, area);
 }
 
 /// Render slippage tolerance input
@@ -464,14 +629,14 @@ fn render_execute_button(f: &mut Frame, area: Rect, app: &App) {
                     .fg(Color::Black)
                     .bg(Color::Green)
                     .add_modifier(Modifier::BOLD),
-                "► Execute Swap ◄",
+                "► Swap ◄",
             )
         } else {
             (
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
-                "Execute Swap",
+                "Swap",
             )
         };
 
@@ -492,7 +657,7 @@ fn render_execute_button(f: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Render swap preview panel
-fn render_swap_preview(f: &mut Frame, area: Rect, app: &App) {
+fn _render_swap_preview(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
         .title("Swap Preview")
         .borders(Borders::ALL)
@@ -501,34 +666,32 @@ fn render_swap_preview(f: &mut Frame, area: Rect, app: &App) {
 
     let swap_state = get_swap_screen_state();
     let from_amount = swap_state.from_amount_input.value();
-    let to_token = swap_state
-        .to_token_dropdown
-        .selected_text()
+    let from_token = swap_state
+        .from_token_dropdown
+        .get_selected_label()
         .unwrap_or("Select Token");
+    let pool_info = swap_state
+        .pool_dropdown
+        .get_selected_label()
+        .unwrap_or("Select Pool");
     let slippage = swap_state.slippage_input.value();
 
-    let content = if from_amount.is_empty() || to_token == "Select Token" {
+    let content = if from_amount.is_empty() || from_token == "Select Token" || pool_info == "Select Pool" {
         vec![Line::from(vec![Span::styled(
-            "Enter swap details to see preview",
+            "Complete all fields to see preview",
             Style::default().fg(Color::Gray),
         )])]
     } else {
-        let estimated_output = calculate_estimated_output(from_amount, &app.state.swap_state);
-        let price_impact = calculate_price_impact(from_amount, &app.state.swap_state);
+        // Determine the "to token" from the selected pool
+        let to_token = determine_to_token_from_pool(&pool_info, &from_token);
+        let estimated_output = _calculate_estimated_output(from_amount, &app.state.swap_state);
+        let price_impact = _calculate_price_impact(from_amount, &app.state.swap_state);
 
         vec![
             Line::from(vec![
                 Span::styled("From: ", Style::default().fg(Color::White)),
                 Span::styled(
-                    format!(
-                        "{} {}",
-                        from_amount,
-                        app.state
-                            .swap_state
-                            .from_asset
-                            .as_ref()
-                            .unwrap_or(&"USDC".to_string())
-                    ),
+                    format!("{} {}", from_amount, from_token),
                     Style::default()
                         .fg(Color::Cyan)
                         .add_modifier(Modifier::BOLD),
@@ -542,6 +705,11 @@ fn render_swap_preview(f: &mut Frame, area: Rect, app: &App) {
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
                 ),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Pool: ", Style::default().fg(Color::White)),
+                Span::styled(pool_info, Style::default().fg(Color::Cyan)),
             ]),
             Line::from(""),
             Line::from(vec![
@@ -572,6 +740,23 @@ fn render_swap_preview(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
+/// Determine the "to token" from the selected pool and from token
+pub fn determine_to_token_from_pool(pool_info: &str, from_token: &str) -> String {
+    // Extract the asset pair from pool display name (format: "Pool X: TokenA / TokenB")
+    if let Some(pair_part) = pool_info.split(": ").nth(1) {
+        let tokens: Vec<&str> = pair_part.split(" / ").collect();
+        if tokens.len() == 2 {
+            // Return the token that's not the from_token
+            if tokens[0] == from_token {
+                return tokens[1].to_string();
+            } else if tokens[1] == from_token {
+                return tokens[0].to_string();
+            }
+        }
+    }
+    "Unknown".to_string()
+}
+
 /// Render simulation results panel
 fn render_simulation_results(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
@@ -580,6 +765,8 @@ fn render_simulation_results(f: &mut Frame, area: Rect, app: &App) {
         .border_style(Style::default().fg(Color::Magenta))
         .padding(Padding::uniform(1));
 
+    let swap_state = get_swap_screen_state();
+    
     let content = if let Some(ref simulation) = app.state.swap_state.simulation_result {
         render_simulation_details(simulation)
     } else if matches!(app.state.loading_state, LoadingState::Loading { .. }) {
@@ -587,6 +774,32 @@ fn render_simulation_results(f: &mut Frame, area: Rect, app: &App) {
             "Running simulation...",
             Style::default().fg(Color::Yellow),
         )])]
+    } else if swap_state.should_trigger_simulation() {
+        vec![
+            Line::from(vec![Span::styled(
+                "⏳ Auto-simulation will run soon...",
+                Style::default().fg(Color::Yellow),
+            )]),
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "Form completed - simulation triggered after 5s of inactivity",
+                Style::default().fg(Color::DarkGray),
+            )]),
+        ]
+    } else if swap_state.last_input_change.is_some() {
+        let elapsed = swap_state.last_input_change.unwrap().elapsed().as_secs();
+        let remaining = 5_u64.saturating_sub(elapsed);
+        vec![
+            Line::from(vec![Span::styled(
+                format!("⏱️  Simulation in {}s...", remaining),
+                Style::default().fg(Color::Yellow),
+            )]),
+            Line::from(""),
+            Line::from(vec![Span::styled(
+                "Waiting for form completion and input inactivity",
+                Style::default().fg(Color::DarkGray),
+            )]),
+        ]
     } else {
         vec![
             Line::from(vec![Span::styled(
@@ -662,67 +875,58 @@ fn render_simulation_details(simulation: &SimulationResponse) -> Vec<Line> {
     ]
 }
 
-/// Calculate estimated output for preview (placeholder implementation)
-fn calculate_estimated_output(amount: &str, _swap_state: &SwapState) -> String {
+/// Calculate estimated output based on simulation or basic logic
+fn _calculate_estimated_output(amount: &str, _swap_state: &SwapState) -> String {
     if let Ok(amount_val) = amount.parse::<f64>() {
-        // Simple 1:1 ratio for demo - real implementation would use pool data
-        format!("{:.6}", amount_val * 0.99) // Assume small slippage
+        // Placeholder: 1-to-1 swap with 0.3% fee
+        let fee = amount_val * 0.003;
+        format!("{:.4}", amount_val - fee)
     } else {
         "0.0".to_string()
     }
 }
 
-/// Calculate price impact (placeholder implementation)
-fn calculate_price_impact(amount: &str, _swap_state: &SwapState) -> f64 {
+/// Calculate price impact based on simulation or basic logic
+fn _calculate_price_impact(amount: &str, _swap_state: &SwapState) -> f64 {
+    // Placeholder: Price impact increases with amount
     if let Ok(amount_val) = amount.parse::<f64>() {
-        // Simple calculation for demo - real implementation would use pool data
-        if amount_val > 1000.0 {
-            5.0 // High impact for large trades
-        } else if amount_val > 100.0 {
-            1.5 // Medium impact
-        } else {
-            0.1 // Low impact
-        }
+        (amount_val / 1000.0).min(10.0) // Up to 10% impact
     } else {
         0.0
     }
 }
 
-/// Handle swap screen input events
+/// Handle input for the swap screen (delegated from app)
 pub fn handle_swap_screen_input(input: InputRequest) -> bool {
     let swap_state = get_swap_screen_state();
     swap_state.handle_input(input)
-}
-
-/// Handle swap screen navigation
-pub fn handle_swap_screen_navigation(next: bool) {
-    let swap_state = get_swap_screen_state();
-    if next {
-        swap_state.next_focus();
-    } else {
-        swap_state.previous_focus();
-    }
 }
 
 /// Execute swap with confirmation
 pub fn execute_swap_with_confirmation() {
     let swap_state = get_swap_screen_state();
 
+    let from_token = swap_state
+        .from_token_dropdown
+        .get_selected_label()
+        .unwrap_or("Unknown")
+        .to_string();
+    
+    let pool_info = swap_state
+        .pool_dropdown
+        .get_selected_label()
+        .unwrap_or("Unknown Pool")
+        .to_string();
+    
+    let to_token = determine_to_token_from_pool(&pool_info, &from_token);
+
     // Create swap details for confirmation
     let swap_details = SwapDetails {
         from_amount: swap_state.from_amount_input.value().to_string(),
-        from_token: "USDC".to_string(), // Would get from app state
+        from_token,
         to_amount: "0.0".to_string(),   // Would calculate
-        to_token: swap_state
-            .to_token_dropdown
-            .selected_text()
-            .unwrap_or("Unknown")
-            .to_string(),
-        pool_name: swap_state
-            .pool_dropdown
-            .selected_text()
-            .unwrap_or("Unknown Pool")
-            .to_string(),
+        to_token,
+        pool_name: pool_info,
         slippage: swap_state.slippage_input.value().to_string(),
         expected_output: "0.0".to_string(), // Would calculate
         price_impact: 1.5,                  // Would calculate
@@ -758,13 +962,13 @@ mod tests {
     #[test]
     fn test_swap_screen_state_navigation() {
         let mut state = SwapScreenState::default();
-        assert_eq!(state.input_focus, SwapInputFocus::FromAmount);
-
-        state.next_focus();
-        assert_eq!(state.input_focus, SwapInputFocus::ToToken);
-
-        state.next_focus();
         assert_eq!(state.input_focus, SwapInputFocus::Pool);
+
+        state.next_focus();
+        assert_eq!(state.input_focus, SwapInputFocus::FromToken);
+
+        state.next_focus();
+        assert_eq!(state.input_focus, SwapInputFocus::FromAmount);
     }
 
     #[test]
@@ -791,15 +995,15 @@ mod tests {
     #[test]
     fn test_calculate_estimated_output() {
         let swap_state = SwapState::default();
-        let result = calculate_estimated_output("100.0", &swap_state);
-        assert_eq!(result, "99.000000");
+        let result = _calculate_estimated_output("100.0", &swap_state);
+        assert_eq!(result, "99.9700");
     }
 
     #[test]
     fn test_calculate_price_impact() {
         let swap_state = SwapState::default();
-        assert_eq!(calculate_price_impact("50.0", &swap_state), 0.1);
-        assert_eq!(calculate_price_impact("500.0", &swap_state), 1.5);
-        assert_eq!(calculate_price_impact("5000.0", &swap_state), 5.0);
+        assert_eq!(_calculate_price_impact("50.0", &swap_state), 0.05);
+        assert_eq!(_calculate_price_impact("500.0", &swap_state), 0.5);
+        assert_eq!(_calculate_price_impact("5000.0", &swap_state), 5.0);
     }
 }

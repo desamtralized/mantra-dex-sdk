@@ -8,15 +8,13 @@ use crate::tui::components::modals::{ErrorType, ModalState};
 #[cfg(feature = "tui")]
 use crate::tui::events::Event;
 #[cfg(feature = "tui")]
-use crate::tui::utils::async_ops::SyncConfig;
-#[cfg(feature = "tui")]
 use crate::tui::utils::focus_manager::FocusManager;
 #[cfg(feature = "tui")]
 use crate::{Error, MantraDexClient, MantraNetworkConfig};
 #[cfg(feature = "tui")]
 use cosmrs::proto::cosmos::base::abci::v1beta1::TxResponse;
 #[cfg(feature = "tui")]
-use cosmwasm_std::{Coin, Uint128};
+use cosmwasm_std::{Uint128};
 #[cfg(feature = "tui")]
 use mantra_dex_std::pool_manager::{PoolInfoResponse, SimulationResponse};
 #[cfg(feature = "tui")]
@@ -521,6 +519,11 @@ impl App {
         }
     }
 
+    /// Get event sender for internal use
+    pub fn get_event_sender(&self) -> Option<&mpsc::UnboundedSender<Event>> {
+        self.event_sender.as_ref()
+    }
+
     /// Execute async operation with comprehensive error handling
     pub async fn execute_async_operation<F, Fut, T>(
         &mut self,
@@ -765,11 +768,11 @@ impl App {
                 slippage_tolerance,
             } => {
                 let operation_name = "swap";
-                let from_asset = from_asset.clone();
-                let to_asset = to_asset.clone();
-                let amount = amount.clone();
-                let pool_id = *pool_id;
-                let slippage_tolerance = slippage_tolerance.clone();
+                let _from_asset = from_asset.clone();
+                let _to_asset = to_asset.clone();
+                let _amount = amount.clone();
+                let _pool_id = *pool_id;
+                let _slippage_tolerance = slippage_tolerance.clone();
 
                 // Execute swap with comprehensive error handling
                 let result = self
@@ -792,10 +795,10 @@ impl App {
                 slippage_tolerance,
             } => {
                 let operation_name = "provide_liquidity";
-                let pool_id = *pool_id;
-                let asset_1_amount = asset_1_amount.clone();
-                let asset_2_amount = asset_2_amount.clone();
-                let slippage_tolerance = slippage_tolerance.clone();
+                let _pool_id = *pool_id;
+                let _asset_1_amount = asset_1_amount.clone();
+                let _asset_2_amount = asset_2_amount.clone();
+                let _slippage_tolerance = slippage_tolerance.clone();
 
                 let result = self
                     .execute_async_operation(operation_name, || async {
@@ -816,9 +819,9 @@ impl App {
                 claim_all,
             } => {
                 let operation_name = "claim_rewards";
-                let pool_id = *pool_id;
-                let epochs = epochs.clone();
-                let claim_all = *claim_all;
+                let _pool_id = *pool_id;
+                let _epochs = epochs.clone();
+                let _claim_all = *claim_all;
 
                 let result = self
                     .execute_async_operation(operation_name, || async {
@@ -920,15 +923,9 @@ impl App {
                 }
             }
             // Handle focus management events only when in within-screen mode
-            Event::MoveFocus(_)
-            | Event::FocusNext
-            | Event::FocusPrevious
-            | Event::FocusFirst
-            | Event::FocusLast
-            | Event::SetFocus(_)
-            | Event::ClearFocus => {
+            Event::MoveFocus(direction) => {
                 if self.state.navigation_mode == NavigationMode::WithinScreen {
-                    if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
+                    if let Some(focused_component) = self.state.focus_manager.handle_event(&Event::MoveFocus(direction)) {
                         self.update_component_focus(&focused_component);
                     }
                 }
@@ -951,6 +948,11 @@ impl App {
                     }
                 }
 
+                // Screen-specific handlers should be checked before general navigation
+                if self.handle_screen_specific_event(event.clone()).await? {
+                    return Ok(false);
+                }
+
                 // Handle number key navigation for tab switching (1-8) when in ScreenLevel mode
                 if let Event::Char(c) = &event {
                     if self.state.navigation_mode == NavigationMode::ScreenLevel {
@@ -962,9 +964,6 @@ impl App {
                         }
                     }
                 }
-
-                // Handle screen-specific events
-                self.handle_screen_specific_event(event).await?;
             }
         }
 
@@ -976,10 +975,45 @@ impl App {
         &mut self,
         focused_component: &crate::tui::events::FocusableComponent,
     ) {
-        // This method can be used to update the focus state of specific components
-        // For now, we just log the focus change
-        #[cfg(debug_assertions)]
-        println!("Focus changed to: {:?}", focused_component);
+        use crate::tui::events::FocusableComponent;
+
+        // Bridge FocusManager focus changes to per-screen component state so that
+        // individual screen modules can visually highlight the focused widget.
+        match self.state.current_screen {
+            Screen::Swap => {
+                let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                // Clear previous internal focus first
+                swap_state.reset_focus();
+
+                match focused_component {
+                    FocusableComponent::TextInput(id) => {
+                        match id.as_str() {
+                            "swap_amount" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::FromAmount,
+                            "swap_slippage" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Slippage,
+                            _ => {}
+                        }
+                    }
+                    FocusableComponent::Dropdown(id) => {
+                        match id.as_str() {
+                            "swap_pool" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Pool,
+                            "swap_from_asset" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::FromToken,
+                            "swap_to_asset" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::FromToken, // Fallback for old references
+                            _ => {}
+                        }
+                    }
+                    FocusableComponent::Button(id) => {
+                        if id == "swap_execute" {
+                            swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Execute;
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Ensure internal state knows which widget is focused so that render_* helpers style correctly
+                swap_state.apply_focus();
+            }
+            _ => {}
+        }
     }
 
     /// Initialize focus manager for the current screen
@@ -990,11 +1024,11 @@ impl App {
             Screen::Dashboard => vec![dashboard_refresh_button(), dashboard_transactions_table()],
             Screen::Pools => vec![pools_search_input(), pools_table()],
             Screen::Swap => vec![
-                swap_from_asset_input(),
-                swap_to_asset_dropdown(),
-                swap_amount_input(),
-                swap_slippage_input(),
-                swap_execute_button(),
+                swap_pool_dropdown(),     // Pool selection (maps to SwapInputFocus::Pool)
+                swap_from_asset_dropdown(),// From token selection (maps to SwapInputFocus::FromToken)
+                swap_amount_input(),      // From amount input (maps to SwapInputFocus::FromAmount)
+                swap_slippage_input(),    // Slippage tolerance (maps to SwapInputFocus::Slippage)
+                swap_execute_button(),    // Execute button (maps to SwapInputFocus::Execute)
             ],
             Screen::Liquidity => vec![
                 liquidity_pool_dropdown(),
@@ -1024,7 +1058,14 @@ impl App {
             _ => vec![],
         };
 
-        self.state.focus_manager.set_tab_order(components);
+        self.state.focus_manager.set_tab_order(components.clone());
+        
+        // Ensure all components are visible and enabled for proper navigation
+        for component in &components {
+            self.state.focus_manager.set_component_visibility(component.clone(), true);
+            self.state.focus_manager.set_component_enabled(component.clone(), true);
+        }
+        
         // Set focus to first component
         self.state.focus_manager.focus_first();
     }
@@ -1046,9 +1087,144 @@ impl App {
                     });
                 }
             }
+            Screen::Swap => {
+                // Refresh pool data for swap screen and populate dropdowns
+                if let Some(sender) = &self.event_sender {
+                    let _ = sender.send(Event::DataRefresh {
+                        data_type: "pools".to_string(),
+                        success: true,
+                        error: None,
+                    });
+                }
+                // Update swap screen pool dropdown with cached pools
+                self.update_swap_screen_pools();
+            }
+            Screen::Liquidity => {
+                // Refresh pool data for liquidity screen
+                if let Some(sender) = &self.event_sender {
+                    let _ = sender.send(Event::DataRefresh {
+                        data_type: "pools".to_string(),
+                        success: true,
+                        error: None,
+                    });
+                }
+            }
             _ => {}
         }
         Ok(())
+    }
+
+    /// Update swap screen pools dropdown with available pools
+    fn update_swap_screen_pools(&mut self) {
+        let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+        
+        // Extract available pools from cache for swap operations
+        let mut available_pools: Vec<(String, String)> = self.state.pool_cache
+            .values()
+            .filter(|entry| {
+                // Only include pools that have swaps enabled
+                let pool = &entry.pool_info;
+                pool.pool_info.status.swaps_enabled
+            })
+            .map(|entry| {
+                let pool = &entry.pool_info;
+                let pool_id = pool.pool_info.pool_identifier.to_string();
+                
+                // Create display name showing asset pair
+                let asset_pair = if pool.pool_info.assets.len() >= 2 {
+                    let asset1 = &pool.pool_info.assets[0].denom;
+                    let asset2 = &pool.pool_info.assets[1].denom;
+                    
+                    // Simplify long denominations
+                    let asset1_name = if asset1.len() > 15 {
+                        if let Some(last_part) = asset1.split('/').last() {
+                            last_part.to_string()
+                        } else {
+                            format!("{}...", &asset1[..10])
+                        }
+                    } else {
+                        asset1.clone()
+                    };
+                    
+                    let asset2_name = if asset2.len() > 15 {
+                        if let Some(last_part) = asset2.split('/').last() {
+                            last_part.to_string()
+                        } else {
+                            format!("{}...", &asset2[..10])
+                        }
+                    } else {
+                        asset2.clone()
+                    };
+                    
+                    format!("{} / {}", asset1_name, asset2_name)
+                } else {
+                    "Unknown Pair".to_string()
+                };
+                
+                let display_name = format!("Pool {}: {}", pool_id, asset_pair);
+                (pool_id, display_name)
+            })
+            .collect();
+        
+        // Note: If no pools are available from cache, dropdowns will remain empty
+        // This is normal during initial loading or when no pools exist
+        
+        // Add some test data if no pools are available (for development/testing)
+        if available_pools.is_empty() {
+            available_pools = vec![
+                ("1".to_string(), "Pool 1: USDC / USDT".to_string()),
+                ("2".to_string(), "Pool 2: ATOM / OSMO".to_string()),
+                ("3".to_string(), "Pool 3: MANTRA / USDC".to_string()),
+                ("4".to_string(), "Pool 4: USDT / ATOM".to_string()),
+                ("5".to_string(), "Pool 5: OSMO / MANTRA".to_string()),
+            ];
+        }
+        
+        // Update the pool dropdown with available pools
+        swap_state.update_available_pools(available_pools);
+        
+        // Also update available tokens from the pools
+        let mut available_tokens: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for entry in self.state.pool_cache.values() {
+            for asset in &entry.pool_info.pool_info.assets {
+                let denom = &asset.denom;
+                let token_name = if denom.len() > 15 {
+                    if let Some(last_part) = denom.split('/').last() {
+                        last_part.to_string()
+                    } else {
+                        format!("{}...", &denom[..10])
+                    }
+                } else {
+                    denom.clone()
+                };
+                available_tokens.insert(token_name);
+            }
+        }
+        
+        // Note: If no tokens are available from cache, dropdown will remain empty
+        // This is normal during initial loading or when no pools exist
+        
+        let mut tokens_vec: Vec<String> = available_tokens.into_iter().collect();
+        
+        // Add some test tokens if none are available (for development/testing)
+        if tokens_vec.is_empty() {
+            tokens_vec = vec![
+                "USDC".to_string(),
+                "USDT".to_string(),
+                "ATOM".to_string(),
+                "OSMO".to_string(),
+                "MANTRA".to_string(),
+            ];
+        }
+        
+        swap_state.initialize_tokens(tokens_vec);
+        
+        // Add some sample balance data for testing
+        self.state.balances.insert("USDC".to_string(), "1000.0".to_string());
+        self.state.balances.insert("USDT".to_string(), "500.0".to_string());
+        self.state.balances.insert("ATOM".to_string(), "25.0".to_string());
+        self.state.balances.insert("OSMO".to_string(), "100.0".to_string());
+        self.state.balances.insert("MANTRA".to_string(), "2500.0".to_string());
     }
 
     /// Handle enter key based on current focus
@@ -1060,8 +1236,8 @@ impl App {
                     self.handle_button_activation(&button_id).await?;
                 }
                 crate::tui::events::FocusableComponent::Dropdown(dropdown_id) => {
-                    // Toggle dropdown
-                    self.handle_dropdown_toggle(&dropdown_id);
+                    // Handle dropdown selection or toggle
+                    self.handle_dropdown_selection(&dropdown_id);
                 }
                 _ => {}
             }
@@ -1140,10 +1316,34 @@ impl App {
         Ok(())
     }
 
-    /// Handle dropdown toggle
-    fn handle_dropdown_toggle(&mut self, _dropdown_id: &str) {
-        // Implementation depends on specific dropdown state management
-        // This is a placeholder
+    /// Handle dropdown selection or toggle (legacy method - now handled directly by dropdown components)
+    fn handle_dropdown_selection(&mut self, dropdown_id: &str) {
+        // This method is now mostly a no-op since dropdown handling is done directly
+        // by the SimpleDropdown components in handle_swap_screen_event.
+        // We keep this for compatibility with other screens that might still use it.
+        
+        if self.state.current_screen == Screen::Swap {
+            // For swap screen, dropdown handling is now done directly by SimpleDropdown components
+            // in the handle_swap_screen_event method. No additional handling needed here.
+            return;
+        }
+        
+        // Legacy handling for other screens that might still need it
+        match dropdown_id {
+            "swap_pool" | "swap_from_asset" | "swap_to_asset" => {
+                // These are handled by SimpleDropdown components directly
+            }
+            _ => {
+                // Handle other dropdowns that might still use the old system
+                // This would be implemented for screens that haven't been migrated to SimpleDropdown yet
+            }
+        }
+    }
+
+    /// Handle dropdown toggle (kept for backward compatibility)
+    fn _handle_dropdown_toggle(&mut self, _dropdown_id: &str) {
+        // This method is no longer needed since SimpleList handles its own state
+        // Kept for backward compatibility with other screens that might still use it
     }
 
     /// Handle checkbox toggle
@@ -1153,72 +1353,161 @@ impl App {
     }
 
     /// Handle screen-specific events
-    async fn handle_screen_specific_event(&mut self, event: Event) -> Result<(), Error> {
+    async fn handle_screen_specific_event(&mut self, event: Event) -> Result<bool, Error> {
         match self.state.current_screen {
             Screen::Swap => {
-                self.handle_swap_screen_event(event).await?;
+                self.handle_swap_screen_event(event).await
             }
             Screen::Liquidity => {
-                self.handle_liquidity_screen_event(event).await?;
+                self.handle_liquidity_screen_event(event).await
             }
             Screen::Settings => {
-                self.handle_settings_screen_event(event).await?;
+                self.handle_settings_screen_event(event).await
             }
-            _ => {}
+            _ => Ok(false)
         }
-        Ok(())
     }
 
-    /// Handle swap screen specific events
-    async fn handle_swap_screen_event(&mut self, event: Event) -> Result<(), Error> {
-        match event {
-            Event::Char(c) => {
-                // Handle character input for focused text fields
-                let focused = self.state.focus_manager.current_focus().cloned();
-                if let Some(focused) = focused {
-                    match focused {
-                        crate::tui::events::FocusableComponent::TextInput(field_id) => {
-                            match field_id.as_str() {
-                                "swap_amount" => {
-                                    self.state.swap_state.amount.push(c);
-                                }
-                                "swap_slippage" => {
-                                    self.state.swap_state.slippage.push(c);
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {}
+    /// Handle swap screen specific events. Returns `true` if the event was handled.
+    async fn handle_swap_screen_event(&mut self, event: Event) -> Result<bool, Error> {
+        let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+        
+        // Convert Event to KeyEvent for the new list system
+        let key_event = match &event {
+            Event::MoveFocus(direction) => {
+                // Convert focus events to direct key events for list navigation
+                match direction {
+                    crate::tui::events::FocusDirection::Up => Some(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Up,
+                        crossterm::event::KeyModifiers::NONE,
+                    )),
+                    crate::tui::events::FocusDirection::Down => Some(crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Down,
+                        crossterm::event::KeyModifiers::NONE,
+                    )),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(key) = key_event {
+            // Use the new key event handler
+            if swap_state.handle_key_event(key) {
+                // Update app state with changes from swap screen
+                if let Some(selected_value) = swap_state.pool_dropdown.get_selected_value() {
+                    if let Ok(pool_id) = selected_value.parse::<u64>() {
+                        self.state.swap_state.selected_pool_id = Some(pool_id.to_string());
                     }
+                }
+                if let Some(selected_token) = swap_state.from_token_dropdown.get_selected_value() {
+                    self.state.swap_state.from_asset = Some(selected_token.to_string());
+                }
+                self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
+                self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
+                
+                return Ok(true);
+            }
+        }
+
+        // Handle other swap-specific events
+        match event {
+            Event::Tab => {
+                // Handle Tab navigation between form fields
+                swap_state.next_focus();
+                return Ok(true);
+            }
+            Event::BackTab => {
+                // Handle Shift+Tab (reverse navigation) between form fields
+                swap_state.previous_focus();
+                return Ok(true);
+            }
+            Event::Enter => {
+                // Handle selection for currently focused list
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Enter,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if swap_state.handle_key_event(key_event) {
+                    return Ok(true);
+                }
+            }
+            Event::Escape => {
+                // Clear current selection or return to screen navigation
+                return Ok(false);
+            }
+            Event::Char(c) => {
+                // Handle character input for text fields
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Char(c),
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if swap_state.handle_key_event(key_event) {
+                    return Ok(true);
                 }
             }
             Event::Backspace => {
-                // Handle backspace for focused text fields
-                let focused = self.state.focus_manager.current_focus().cloned();
-                if let Some(focused) = focused {
-                    match focused {
-                        crate::tui::events::FocusableComponent::TextInput(field_id) => {
-                            match field_id.as_str() {
-                                "swap_amount" => {
-                                    self.state.swap_state.amount.pop();
-                                }
-                                "swap_slippage" => {
-                                    self.state.swap_state.slippage.pop();
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {}
-                    }
+                // Handle backspace for text fields
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Backspace,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if swap_state.handle_key_event(key_event) {
+                    return Ok(true);
                 }
             }
-            _ => {}
+            Event::Up => {
+                // Handle up arrow for lists
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Up,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if swap_state.handle_key_event(key_event) {
+                    return Ok(true);
+                }
+            }
+            Event::Down => {
+                // Handle down arrow for lists
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Down,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if swap_state.handle_key_event(key_event) {
+                    return Ok(true);
+                }
+            }
+            Event::TriggerSimulation => {
+                // Only run simulation if we have valid input
+                if !swap_state.from_amount_input.value().is_empty() 
+                    && swap_state.pool_dropdown.get_selected_value().is_some() 
+                    && swap_state.from_token_dropdown.get_selected_value().is_some() {
+                    
+                    // Trigger swap simulation
+                    let from_amount = swap_state.from_amount_input.value();
+                    let from_token = swap_state.from_token_dropdown.get_selected_value().unwrap_or("");
+                    let pool_text = swap_state.pool_dropdown.get_selected_label().unwrap_or("");
+                    
+                    self.set_loading("Running swap simulation...".to_string());
+                    
+                    // For now, just simulate some delay and show success
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                    self.set_success(format!(
+                        "Simulation complete: {} {} via {}", 
+                        from_amount, from_token, pool_text
+                    ));
+                    
+                    swap_state.reset_simulation_timer();
+                }
+                return Ok(true);
+            }
+            _ => return Ok(false),
         }
-        Ok(())
+
+        Ok(false)
     }
 
-    /// Handle liquidity screen specific events
-    async fn handle_liquidity_screen_event(&mut self, event: Event) -> Result<(), Error> {
+    /// Handle liquidity screen specific events. Returns `true` if the event was handled.
+    async fn handle_liquidity_screen_event(&mut self, event: Event) -> Result<bool, Error> {
         match event {
             Event::Char(c) => {
                 let focused = self.state.focus_manager.current_focus().cloned();
@@ -1228,9 +1517,11 @@ impl App {
                             match field_id.as_str() {
                                 "liquidity_amount1" => {
                                     self.state.liquidity_state.first_asset_amount.push(c);
+                                    return Ok(true);
                                 }
                                 "liquidity_amount2" => {
                                     self.state.liquidity_state.second_asset_amount.push(c);
+                                    return Ok(true);
                                 }
                                 _ => {}
                             }
@@ -1247,9 +1538,11 @@ impl App {
                             match field_id.as_str() {
                                 "liquidity_amount1" => {
                                     self.state.liquidity_state.first_asset_amount.pop();
+                                    return Ok(true);
                                 }
                                 "liquidity_amount2" => {
                                     self.state.liquidity_state.second_asset_amount.pop();
+                                    return Ok(true);
                                 }
                                 _ => {}
                             }
@@ -1260,14 +1553,15 @@ impl App {
             }
             _ => {}
         }
-        Ok(())
+        Ok(false)
     }
 
-    /// Handle settings screen specific events
-    async fn handle_settings_screen_event(&mut self, event: Event) -> Result<(), Error> {
+    /// Handle settings screen specific events. Returns `true` if the event was handled.
+    async fn handle_settings_screen_event(&mut self, event: Event) -> Result<bool, Error> {
         match event {
             Event::Char(c) => {
                 self.handle_settings_input(c).await?;
+                return Ok(true);
             }
             Event::MoveFocus(direction) => {
                 // Handle focus movement within settings screen
@@ -1288,6 +1582,7 @@ impl App {
                     }
                     _ => {}
                 }
+                return Ok(true);
             }
             Event::Enter => {
                 // Handle enter key in settings
@@ -1316,6 +1611,7 @@ impl App {
                         _ => {}
                     }
                 }
+                return Ok(true);
             }
             Event::Escape => {
                 // Handle escape key - close confirmation modal or go back
@@ -1324,6 +1620,7 @@ impl App {
                 } else if self.state.settings_state.message.is_some() {
                     self.state.settings_state.clear_message();
                 }
+                return Ok(true);
             }
             Event::Backspace => {
                 // Handle backspace for text input fields
@@ -1340,6 +1637,7 @@ impl App {
                         }
                     }
                 }
+                return Ok(true);
             }
             Event::ContextAction => {
                 // Handle space bar context actions
@@ -1354,10 +1652,11 @@ impl App {
                         self.state.settings_state.toggle_import_mode();
                     }
                 }
+                return Ok(true);
             }
             _ => {}
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Set an error with comprehensive error handling
@@ -1584,6 +1883,15 @@ impl App {
         self.state.current_screen = screen;
         self.state.navigation_mode = NavigationMode::ScreenLevel;
         self.clear_messages();
+        
+        // Update screen-specific data when navigating
+        match screen {
+            Screen::Swap => {
+                // Update swap pools when entering swap screen
+                self.update_swap_screen_pools();
+            }
+            _ => {}
+        }
         // Don't initialize focus here - it will be done when user presses Enter
     }
 
@@ -1591,9 +1899,19 @@ impl App {
     pub fn next_tab(&mut self) {
         let screens = Screen::all();
         self.state.current_tab = (self.state.current_tab + 1) % screens.len();
-        self.state.current_screen = screens[self.state.current_tab];
+        let new_screen = screens[self.state.current_tab];
+        self.state.current_screen = new_screen;
         self.state.navigation_mode = NavigationMode::ScreenLevel;
         self.clear_messages();
+        
+        // Update screen-specific data when navigating
+        match new_screen {
+            Screen::Swap => {
+                // Update swap pools when entering swap screen
+                self.update_swap_screen_pools();
+            }
+            _ => {}
+        }
         // Don't initialize focus here - it will be done when user presses Enter
     }
 
@@ -1605,9 +1923,19 @@ impl App {
         } else {
             self.state.current_tab -= 1;
         }
-        self.state.current_screen = screens[self.state.current_tab];
+        let new_screen = screens[self.state.current_tab];
+        self.state.current_screen = new_screen;
         self.state.navigation_mode = NavigationMode::ScreenLevel;
         self.clear_messages();
+        
+        // Update screen-specific data when navigating
+        match new_screen {
+            Screen::Swap => {
+                // Update swap pools when entering swap screen
+                self.update_swap_screen_pools();
+            }
+            _ => {}
+        }
         // Don't initialize focus here - it will be done when user presses Enter
     }
 
@@ -1651,6 +1979,11 @@ impl App {
                             cached_at: chrono::Utc::now(),
                         };
                         self.state.pool_cache.insert(pool_id, cache_entry);
+                    }
+                    
+                    // Update swap screen pools if currently on swap screen
+                    if self.state.current_screen == Screen::Swap {
+                        self.update_swap_screen_pools();
                     }
                 }
             }
@@ -1822,7 +2155,7 @@ impl App {
 
         // Trigger data refresh after successful operations
         if status == TransactionStatus::Success {
-            let _ = self.refresh_dashboard_data().await;
+            let _ = self.refresh_current_screen_data().await;
         }
     }
 
@@ -2166,12 +2499,9 @@ impl App {
                     match wallet.address() {
                         Ok(address) => {
                             self.set_wallet_address(address.to_string());
+                            // Reconfigure the client so all future calls have the wallet attached
+                            self.configure_client_wallet(wallet).await?;
                             self.set_status("Wallet imported successfully".to_string());
-                            // Trigger initial data refresh after wallet setup
-                            if let Err(e) = self.refresh_dashboard_data().await {
-                                // Don't fail the wizard if refresh fails, just log the error
-                                eprintln!("Warning: Failed to refresh dashboard data: {}", e);
-                            }
                         }
                         Err(e) => {
                             self.set_error(format!("Failed to derive wallet address: {}", e));
@@ -2192,12 +2522,9 @@ impl App {
                         match wallet.address() {
                             Ok(address) => {
                                 self.set_wallet_address(address.to_string());
+                                // Reconfigure the client with the newly generated wallet
+                                self.configure_client_wallet(wallet).await?;
                                 self.set_status("New wallet created successfully".to_string());
-                                // Trigger initial data refresh after wallet setup
-                                if let Err(e) = self.refresh_dashboard_data().await {
-                                    // Don't fail the wizard if refresh fails, just log the error
-                                    eprintln!("Warning: Failed to refresh dashboard data: {}", e);
-                                }
                             }
                             Err(e) => {
                                 self.set_error(format!("Failed to derive wallet address: {}", e));
@@ -2211,6 +2538,31 @@ impl App {
                     }
                 }
             }
+        }
+
+        // Trigger dashboard refresh to reflect new wallet and network state
+        if let Err(e) = self.refresh_dashboard_data().await {
+            eprintln!("Warning: Failed to refresh dashboard data: {}", e);
+        }
+
+        Ok(())
+    }
+
+    /// Update the underlying client with a newly provided wallet and restart background tasks
+    async fn configure_client_wallet(&mut self, wallet: crate::wallet::MantraWallet) -> Result<(), Error> {
+        // Stop any currently running background sync tasks so they don't keep using the stale client
+        self.stop_background_tasks();
+
+        // Re-create a fresh client instance that includes the wallet
+        let mut new_client = MantraDexClient::new(self.config.clone()).await?;
+        new_client = new_client.with_wallet(wallet);
+
+        // Replace the old Arc so all subsequent operations use the updated client
+        self.client = std::sync::Arc::new(new_client);
+
+        // Restart background tasks so they pick up the new client instance
+        if let Some(sender) = self.event_sender.clone() {
+            self.initialize_background_tasks(sender);
         }
 
         Ok(())

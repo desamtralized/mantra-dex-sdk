@@ -21,7 +21,9 @@ pub mod tables; // Data visualization components - implemented in Task 6.3
 
 // Input components - implemented in Task 3.3
 pub mod forms;
+pub mod simple_list;
 
 pub use charts::*;
 pub use forms::*;
+pub use simple_list::*;
 pub use tables::*;
