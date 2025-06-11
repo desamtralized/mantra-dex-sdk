@@ -358,6 +358,11 @@ pub mod component_ids {
         FocusableComponent::Dropdown("swap_to_asset".to_string())
     }
 
+    /// Dropdown for selecting the pool used for the swap
+    pub fn swap_pool_dropdown() -> FocusableComponent {
+        FocusableComponent::Dropdown("swap_pool".to_string())
+    }
+
     pub fn swap_amount_input() -> FocusableComponent {
         FocusableComponent::TextInput("swap_amount".to_string())
     }

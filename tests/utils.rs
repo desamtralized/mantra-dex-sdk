@@ -106,24 +106,6 @@ pub mod test_utils {
         let network_config = create_test_network_config();
         let test_config = load_test_config();
 
-        // Log contract addresses for debugging
-        println!(
-            "Pool Manager Contract: {}",
-            network_config.contracts.pool_manager
-        );
-        println!(
-            "Farm Manager Contract: {:?}",
-            network_config.contracts.farm_manager
-        );
-        println!(
-            "Fee Collector Contract: {:?}",
-            network_config.contracts.fee_collector
-        );
-        println!(
-            "Epoch Manager Contract: {:?}",
-            network_config.contracts.epoch_manager
-        );
-
         // Get the primary wallet mnemonic
         let primary_mnemonic = test_config
             .wallets
@@ -133,8 +115,6 @@ pub mod test_utils {
         // Create wallet
         let wallet = MantraWallet::from_mnemonic(primary_mnemonic, 0)
             .expect("Failed to create wallet from mnemonic");
-
-        println!("Wallet address: {}", wallet.address().unwrap());
 
         // Create client with wallet
         MantraDexClient::new(network_config)
@@ -164,8 +144,7 @@ pub mod test_utils {
         // Try to create or find the test pool
         match create_test_pool_if_needed(client).await {
             Ok(pool_id) => Some(pool_id),
-            Err(e) => {
-                println!("Failed to create or find test pool: {:?}", e);
+            Err(_e) => {
                 None
             }
         }
@@ -192,29 +171,20 @@ pub mod test_utils {
             .clone()
             .unwrap();
 
-        println!(
-            "Looking for pool with assets: {} and {}",
-            uom_denom, uusdc_denom
-        );
-
         // First, try to find an existing pool
         let pools = client.get_pools(Some(100)).await?;
         for pool in pools {
             if pool.pool_info.assets.iter().any(|a| a.denom == uom_denom)
                 && pool.pool_info.assets.iter().any(|a| a.denom == uusdc_denom)
             {
-                println!("Found existing pool: {}", pool.pool_info.pool_identifier);
                 return Ok(pool.pool_info.pool_identifier);
             }
         }
 
         // No pool found, create one by providing initial liquidity
-        println!("No existing pool found, creating new pool...");
-
         // Create a unique pool identifier
         // Generate a simple, valid pool ID (only alphanumeric, dots, and slashes allowed)
         let pool_id = "uom.usdc.pool".to_string();
-        println!("Creating pool with ID: {}", pool_id);
 
         // First create the pool
         let pool_fees = mantra_dex_std::fee::PoolFee {
@@ -232,9 +202,7 @@ pub mod test_utils {
 
         let pool_type = mantra_dex_std::pool_manager::PoolType::ConstantProduct {};
 
-        println!("Creating pool with fees: {:?}", pool_fees);
-
-        let create_result = client
+        let _create_result = client
             .create_pool(
                 vec![uom_denom.clone(), uusdc_denom.clone()],
                 vec![6, 6], // Both tokens have 6 decimals
@@ -244,11 +212,8 @@ pub mod test_utils {
             )
             .await?;
 
-        println!("Pool created successfully: {:?}", create_result.txhash);
-
         // The contract adds "o." prefix to custom pool identifiers
         let actual_pool_id = format!("o.{}", pool_id);
-        println!("Actual pool ID with prefix: {}", actual_pool_id);
 
         // Now provide initial liquidity to the newly created pool
         let initial_assets = vec![
@@ -262,12 +227,7 @@ pub mod test_utils {
             },
         ];
 
-        println!(
-            "Providing initial liquidity with assets: {:?}",
-            initial_assets
-        );
-
-        let tx_result = client
+        let _tx_result = client
             .provide_liquidity_unchecked(
                 &actual_pool_id,
                 initial_assets,
@@ -275,11 +235,6 @@ pub mod test_utils {
                 Some(Decimal::percent(5)), // 5% swap max slippage
             )
             .await?;
-
-        println!(
-            "Pool created successfully! Transaction hash: {}",
-            tx_result.txhash
-        );
         Ok(actual_pool_id)
     }
 

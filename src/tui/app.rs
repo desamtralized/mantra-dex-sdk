@@ -920,17 +920,20 @@ impl App {
                 }
             }
             // Handle focus management events only when in within-screen mode
-            Event::MoveFocus(_)
-            | Event::FocusNext
-            | Event::FocusPrevious
-            | Event::FocusFirst
-            | Event::FocusLast
-            | Event::SetFocus(_)
-            | Event::ClearFocus => {
-                if self.state.navigation_mode == NavigationMode::WithinScreen {
-                    if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
-                        self.update_component_focus(&focused_component);
+            Event::MoveFocus(direction) => {
+                if let Some(crate::tui::events::FocusableComponent::Dropdown(id)) = self.state.focus_manager.current_focus() {
+                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+
+                    match (id.as_str(), direction) {
+                        ("swap_pool", crate::tui::events::FocusDirection::Up) => swap_state.pool_dropdown.move_up(),
+                        ("swap_pool", crate::tui::events::FocusDirection::Down) => swap_state.pool_dropdown.move_down(),
+                        ("swap_to_asset", crate::tui::events::FocusDirection::Up) => swap_state.to_token_dropdown.move_up(),
+                        ("swap_to_asset", crate::tui::events::FocusDirection::Down) => swap_state.to_token_dropdown.move_down(),
+                        _ => {}
                     }
+
+                    // Prevent focus manager from switching components
+                    return Ok(());
                 }
             }
             Event::ContextAction => {
@@ -976,10 +979,44 @@ impl App {
         &mut self,
         focused_component: &crate::tui::events::FocusableComponent,
     ) {
-        // This method can be used to update the focus state of specific components
-        // For now, we just log the focus change
-        #[cfg(debug_assertions)]
-        println!("Focus changed to: {:?}", focused_component);
+        use crate::tui::events::FocusableComponent;
+
+        // Bridge FocusManager focus changes to per-screen component state so that
+        // individual screen modules can visually highlight the focused widget.
+        match self.state.current_screen {
+            Screen::Swap => {
+                let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                // Clear previous internal focus first
+                swap_state.reset_focus();
+
+                match focused_component {
+                    FocusableComponent::TextInput(id) => {
+                        match id.as_str() {
+                            "swap_amount" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::FromAmount,
+                            "swap_slippage" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Slippage,
+                            _ => {}
+                        }
+                    }
+                    FocusableComponent::Dropdown(id) => {
+                        match id.as_str() {
+                            "swap_pool" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Pool,
+                            "swap_to_asset" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::ToToken,
+                            _ => {}
+                        }
+                    }
+                    FocusableComponent::Button(id) => {
+                        if id == "swap_execute" {
+                            swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Execute;
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Ensure internal state knows which widget is focused so that render_* helpers style correctly
+                swap_state.apply_focus();
+            }
+            _ => {}
+        }
     }
 
     /// Initialize focus manager for the current screen
@@ -991,6 +1028,7 @@ impl App {
             Screen::Pools => vec![pools_search_input(), pools_table()],
             Screen::Swap => vec![
                 swap_from_asset_input(),
+                swap_pool_dropdown(),
                 swap_to_asset_dropdown(),
                 swap_amount_input(),
                 swap_slippage_input(),
@@ -1142,8 +1180,19 @@ impl App {
 
     /// Handle dropdown toggle
     fn handle_dropdown_toggle(&mut self, _dropdown_id: &str) {
-        // Implementation depends on specific dropdown state management
-        // This is a placeholder
+        if self.state.current_screen == Screen::Swap {
+            let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+
+            match _dropdown_id {
+                "swap_pool" => {
+                    swap_state.pool_dropdown.toggle();
+                }
+                "swap_to_asset" => {
+                    swap_state.to_token_dropdown.toggle();
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Handle checkbox toggle
@@ -1180,10 +1229,15 @@ impl App {
                         crate::tui::events::FocusableComponent::TextInput(field_id) => {
                             match field_id.as_str() {
                                 "swap_amount" => {
-                                    self.state.swap_state.amount.push(c);
+                                    // Update UI component
+                                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                                    swap_state.handle_input(tui_input::InputRequest::InsertChar(c));
+                                    self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
                                 }
                                 "swap_slippage" => {
-                                    self.state.swap_state.slippage.push(c);
+                                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                                    swap_state.handle_input(tui_input::InputRequest::InsertChar(c));
+                                    self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
                                 }
                                 _ => {}
                             }
@@ -1200,16 +1254,37 @@ impl App {
                         crate::tui::events::FocusableComponent::TextInput(field_id) => {
                             match field_id.as_str() {
                                 "swap_amount" => {
-                                    self.state.swap_state.amount.pop();
+                                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                                    swap_state.handle_input(tui_input::InputRequest::Backspace);
+                                    self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
                                 }
                                 "swap_slippage" => {
-                                    self.state.swap_state.slippage.pop();
+                                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                                    swap_state.handle_input(tui_input::InputRequest::Backspace);
+                                    self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
                                 }
                                 _ => {}
                             }
                         }
                         _ => {}
                     }
+                }
+            }
+            Event::MoveFocus(direction) => {
+                // When a dropdown is focused, repurpose Up/Down keys to navigate within the list instead of shifting focus.
+                if let Some(crate::tui::events::FocusableComponent::Dropdown(id)) = self.state.focus_manager.current_focus() {
+                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+
+                    match (id.as_str(), direction) {
+                        ("swap_pool", crate::tui::events::FocusDirection::Up) => swap_state.pool_dropdown.move_up(),
+                        ("swap_pool", crate::tui::events::FocusDirection::Down) => swap_state.pool_dropdown.move_down(),
+                        ("swap_to_asset", crate::tui::events::FocusDirection::Up) => swap_state.to_token_dropdown.move_up(),
+                        ("swap_to_asset", crate::tui::events::FocusDirection::Down) => swap_state.to_token_dropdown.move_down(),
+                        _ => {}
+                    }
+
+                    // Prevent focus manager from switching components
+                    return Ok(());
                 }
             }
             _ => {}
@@ -1822,7 +1897,7 @@ impl App {
 
         // Trigger data refresh after successful operations
         if status == TransactionStatus::Success {
-            let _ = self.refresh_dashboard_data().await;
+            let _ = self.refresh_current_screen_data().await;
         }
     }
 
@@ -2166,12 +2241,9 @@ impl App {
                     match wallet.address() {
                         Ok(address) => {
                             self.set_wallet_address(address.to_string());
+                            // Reconfigure the client so all future calls have the wallet attached
+                            self.configure_client_wallet(wallet).await?;
                             self.set_status("Wallet imported successfully".to_string());
-                            // Trigger initial data refresh after wallet setup
-                            if let Err(e) = self.refresh_dashboard_data().await {
-                                // Don't fail the wizard if refresh fails, just log the error
-                                eprintln!("Warning: Failed to refresh dashboard data: {}", e);
-                            }
                         }
                         Err(e) => {
                             self.set_error(format!("Failed to derive wallet address: {}", e));
@@ -2192,12 +2264,9 @@ impl App {
                         match wallet.address() {
                             Ok(address) => {
                                 self.set_wallet_address(address.to_string());
+                                // Reconfigure the client with the newly generated wallet
+                                self.configure_client_wallet(wallet).await?;
                                 self.set_status("New wallet created successfully".to_string());
-                                // Trigger initial data refresh after wallet setup
-                                if let Err(e) = self.refresh_dashboard_data().await {
-                                    // Don't fail the wizard if refresh fails, just log the error
-                                    eprintln!("Warning: Failed to refresh dashboard data: {}", e);
-                                }
                             }
                             Err(e) => {
                                 self.set_error(format!("Failed to derive wallet address: {}", e));
@@ -2211,6 +2280,31 @@ impl App {
                     }
                 }
             }
+        }
+
+        // Trigger dashboard refresh to reflect new wallet and network state
+        if let Err(e) = self.refresh_dashboard_data().await {
+            eprintln!("Warning: Failed to refresh dashboard data: {}", e);
+        }
+
+        Ok(())
+    }
+
+    /// Update the underlying client with a newly provided wallet and restart background tasks
+    async fn configure_client_wallet(&mut self, wallet: crate::wallet::MantraWallet) -> Result<(), Error> {
+        // Stop any currently running background sync tasks so they don't keep using the stale client
+        self.stop_background_tasks();
+
+        // Re-create a fresh client instance that includes the wallet
+        let mut new_client = MantraDexClient::new(self.config.clone()).await?;
+        new_client = new_client.with_wallet(wallet);
+
+        // Replace the old Arc so all subsequent operations use the updated client
+        self.client = std::sync::Arc::new(new_client);
+
+        // Restart background tasks so they pick up the new client instance
+        if let Some(sender) = self.event_sender.clone() {
+            self.initialize_background_tasks(sender);
         }
 
         Ok(())

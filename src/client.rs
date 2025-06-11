@@ -231,7 +231,6 @@ impl MantraDexClient {
             msg: serde_json::to_vec(msg)?,
             funds: cosmos_coins,
         };
-        println!("Execute message: {:?}", execute_msg);
 
         self.broadcast_tx(vec![Any {
             type_url: "/cosmwasm.wasm.v1.MsgExecuteContract".to_string(),
@@ -476,8 +475,6 @@ impl MantraDexClient {
                 cosmwasm_std::Decimal::from_str(&decimal_str).unwrap_or_default()
             }),
         };
-
-        println!("Swap message: {:?}", msg);
 
         let pool_manager_address = self.config.contracts.pool_manager.clone();
         self.execute(&pool_manager_address, &msg, vec![offer_asset])

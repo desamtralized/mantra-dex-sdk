@@ -126,9 +126,9 @@ impl SwapScreenState {
     pub fn next_focus(&mut self) {
         self.clear_focus();
         self.input_focus = match self.input_focus {
-            SwapInputFocus::FromAmount => SwapInputFocus::ToToken,
-            SwapInputFocus::ToToken => SwapInputFocus::Pool,
-            SwapInputFocus::Pool => SwapInputFocus::Slippage,
+            SwapInputFocus::FromAmount => SwapInputFocus::Pool,
+            SwapInputFocus::Pool => SwapInputFocus::ToToken,
+            SwapInputFocus::ToToken => SwapInputFocus::Slippage,
             SwapInputFocus::Slippage => SwapInputFocus::Execute,
             SwapInputFocus::Execute => SwapInputFocus::FromAmount,
         };
@@ -140,9 +140,9 @@ impl SwapScreenState {
         self.clear_focus();
         self.input_focus = match self.input_focus {
             SwapInputFocus::FromAmount => SwapInputFocus::Execute,
-            SwapInputFocus::ToToken => SwapInputFocus::FromAmount,
-            SwapInputFocus::Pool => SwapInputFocus::ToToken,
-            SwapInputFocus::Slippage => SwapInputFocus::Pool,
+            SwapInputFocus::Pool => SwapInputFocus::FromAmount,
+            SwapInputFocus::ToToken => SwapInputFocus::Pool,
+            SwapInputFocus::Slippage => SwapInputFocus::ToToken,
             SwapInputFocus::Execute => SwapInputFocus::Slippage,
         };
         self.set_focus();
@@ -156,6 +156,11 @@ impl SwapScreenState {
         self.slippage_input.set_focused(false);
     }
 
+    /// Public wrapper to clear all focus states (used by external modules)
+    pub fn reset_focus(&mut self) {
+        self.clear_focus();
+    }
+
     /// Set focus on current input
     fn set_focus(&mut self) {
         match self.input_focus {
@@ -165,6 +170,11 @@ impl SwapScreenState {
             SwapInputFocus::Slippage => self.slippage_input.set_focused(true),
             SwapInputFocus::Execute => {} // Button focus handled separately
         }
+    }
+
+    /// Public wrapper to apply focus based on `input_focus` value (used by external modules)
+    pub fn apply_focus(&mut self) {
+        self.set_focus();
     }
 
     /// Handle keyboard input
@@ -360,8 +370,8 @@ fn render_swap_interface(f: &mut Frame, area: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4), // From amount + balance
-            Constraint::Length(4), // To token selection
             Constraint::Length(4), // Pool selection
+            Constraint::Length(4), // To token selection
             Constraint::Length(4), // Slippage tolerance
         ])
         .split(block.inner(area));
@@ -370,8 +380,8 @@ fn render_swap_interface(f: &mut Frame, area: Rect, app: &App) {
 
     // Render form inputs
     render_from_amount_input(f, input_chunks[0], app, swap_state);
-    render_to_token_input(f, input_chunks[1], app, swap_state);
-    render_pool_selection(f, input_chunks[2], app, swap_state);
+    render_pool_selection(f, input_chunks[1], app, swap_state);
+    render_to_token_input(f, input_chunks[2], app, swap_state);
     render_slippage_input(f, input_chunks[3], app, swap_state);
 
     f.render_widget(block, area);
@@ -464,14 +474,14 @@ fn render_execute_button(f: &mut Frame, area: Rect, app: &App) {
                     .fg(Color::Black)
                     .bg(Color::Green)
                     .add_modifier(Modifier::BOLD),
-                "► Execute Swap ◄",
+                "► Swap ◄",
             )
         } else {
             (
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
-                "Execute Swap",
+                "Swap",
             )
         };
 
@@ -761,10 +771,10 @@ mod tests {
         assert_eq!(state.input_focus, SwapInputFocus::FromAmount);
 
         state.next_focus();
-        assert_eq!(state.input_focus, SwapInputFocus::ToToken);
+        assert_eq!(state.input_focus, SwapInputFocus::Pool);
 
         state.next_focus();
-        assert_eq!(state.input_focus, SwapInputFocus::Pool);
+        assert_eq!(state.input_focus, SwapInputFocus::ToToken);
     }
 
     #[test]
