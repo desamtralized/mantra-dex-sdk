@@ -540,6 +540,30 @@ impl SettingsState {
     }
 }
 
+/// Render the settings screen with standard layout
+pub fn render_settings_screen(frame: &mut Frame, app: &crate::tui::app::App) {
+    let size = frame.area();
+
+    // Create main layout: header, navigation, content, status
+    let main_chunks = ratatui::layout::Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Header
+            Constraint::Length(3), // Navigation
+            Constraint::Min(10),   // Content
+            Constraint::Length(3), // Status bar
+        ])
+        .split(size);
+
+    // Render header, navigation, and status bar
+    crate::tui::components::header::render_header(frame, &app.state, main_chunks[0]);
+    crate::tui::components::navigation::render_navigation(frame, &app.state, main_chunks[1]);
+    crate::tui::components::status_bar::render_status_bar(frame, &app.state, main_chunks[3]);
+
+    // Render settings content
+    render_settings(frame, main_chunks[2], &mut app.state.settings_state.clone());
+}
+
 /// Render the settings screen
 pub fn render_settings(frame: &mut Frame, area: Rect, state: &mut SettingsState) {
     let chunks = Layout::default()
@@ -575,15 +599,28 @@ fn render_section_navigation(frame: &mut Frame, area: Rect, state: &mut Settings
         .iter()
         .enumerate()
         .map(|(i, section)| {
-            let style = if Some(i) == state.section_list_state.selected() {
+            let is_selected = Some(i) == state.section_list_state.selected();
+            let is_current = *section == state.current_section;
+
+            let style = if is_current && is_selected {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_current {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_selected {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default()
+                Style::default().fg(Color::White)
             };
 
-            ListItem::new(section.display_name()).style(style)
+            let prefix = if is_current { "→ " } else { "  " };
+            ListItem::new(format!("{}{}", prefix, section.display_name())).style(style)
         })
         .collect();
 
@@ -591,7 +628,7 @@ fn render_section_navigation(frame: &mut Frame, area: Rect, state: &mut Settings
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Settings")
+                .title("Settings Sections")
                 .border_style(Style::default().fg(Color::White)),
         )
         .style(Style::default().fg(Color::White))
@@ -603,18 +640,21 @@ fn render_section_navigation(frame: &mut Frame, area: Rect, state: &mut Settings
 
     frame.render_stateful_widget(list, area, &mut state.section_list_state);
 
-    // Add help text at the bottom
+    // Add enhanced help text at the bottom
     let help_area = Rect {
         x: area.x,
-        y: area.y + area.height - 3,
+        y: area.y + area.height.saturating_sub(5),
         width: area.width,
-        height: 3,
+        height: 5,
     };
 
-    let help_text = Paragraph::new("↑/↓: Navigate\nEnter: Select\nEsc: Back")
-        .block(Block::default().borders(Borders::TOP))
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
+    let help_text = Paragraph::new(
+        "Navigation:\n↑/↓: Change Section\nEnter: Select\n→/←: Move Focus\nSpace: Toggle",
+    )
+    .block(Block::default().borders(Borders::TOP))
+    .style(Style::default().fg(Color::DarkGray))
+    .alignment(Alignment::Left)
+    .wrap(Wrap { trim: true });
 
     frame.render_widget(help_text, help_area);
 }
@@ -642,7 +682,7 @@ fn render_network_settings(frame: &mut Frame, area: Rect, state: &mut SettingsSt
         .alignment(Alignment::Center);
     frame.render_widget(title, chunks[0]);
 
-    // Environment selection
+    // Environment selection - check if focused by global focus manager
     let env_text = format!(
         "Environment: {} (Press 'e' to toggle)",
         state.network_form.environment.display_name()
@@ -669,7 +709,7 @@ fn render_network_settings(frame: &mut Frame, area: Rect, state: &mut SettingsSt
             ])
             .split(chunks[2]);
 
-        // Render input fields
+        // Render input fields - note: these will be rendered by global focus system later
         render_input_field(
             frame,
             form_chunks[0],
@@ -733,22 +773,29 @@ fn render_network_settings(frame: &mut Frame, area: Rect, state: &mut SettingsSt
     }
 
     // Actions
-    let actions = if state.has_changes {
-        "Ctrl+S: Save Changes | Ctrl+R: Reset | Changes pending..."
+    let actions_text = if state.has_changes {
+        "Actions: Ctrl+S: Save Changes | Ctrl+R: Reset | Tab: Navigate | Changes pending..."
     } else {
-        "Ctrl+S: Save Changes | Ctrl+R: Reset"
+        "Actions: Ctrl+S: Save Changes | Ctrl+R: Reset | Tab: Navigate Fields"
     };
 
     let actions_style = if state.has_changes {
-        Style::default().fg(Color::Yellow)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(Color::Cyan)
     };
 
-    let actions_paragraph = Paragraph::new(actions)
-        .block(Block::default().borders(Borders::ALL))
+    let actions_paragraph = Paragraph::new(actions_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Keyboard Shortcuts"),
+        )
         .style(actions_style)
-        .alignment(Alignment::Center);
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
     frame.render_widget(actions_paragraph, chunks[3]);
 }
 
@@ -860,22 +907,29 @@ fn render_wallet_settings(frame: &mut Frame, area: Rect, state: &mut SettingsSta
     }
 
     // Actions
-    let actions = if state.has_changes {
-        "Ctrl+S: Save Changes | Ctrl+R: Reset | Changes pending..."
+    let actions_text = if state.has_changes {
+        "Actions: Ctrl+S: Save Changes | Ctrl+R: Reset | Tab: Navigate | Changes pending..."
     } else {
-        "Ctrl+S: Save Changes | Ctrl+R: Reset"
+        "Actions: Ctrl+S: Save Changes | Ctrl+R: Reset | i: Import | m: Show Mnemonic"
     };
 
     let actions_style = if state.has_changes {
-        Style::default().fg(Color::Yellow)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(Color::Cyan)
     };
 
-    let actions_paragraph = Paragraph::new(actions)
-        .block(Block::default().borders(Borders::ALL))
+    let actions_paragraph = Paragraph::new(actions_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Keyboard Shortcuts"),
+        )
         .style(actions_style)
-        .alignment(Alignment::Center);
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
     frame.render_widget(actions_paragraph, chunks[4]);
 }
 
@@ -962,22 +1016,29 @@ fn render_display_settings(frame: &mut Frame, area: Rect, state: &mut SettingsSt
     );
 
     // Actions
-    let actions = if state.has_changes {
-        "Ctrl+S: Save Changes | Ctrl+R: Reset | Changes pending..."
+    let actions_text = if state.has_changes {
+        "Actions: Ctrl+S: Save Changes | Ctrl+R: Reset | Tab: Navigate | Changes pending..."
     } else {
-        "Ctrl+S: Save Changes | Ctrl+R: Reset"
+        "Actions: Ctrl+S: Save Changes | Ctrl+R: Reset | t: Theme | a: Auto-refresh"
     };
 
     let actions_style = if state.has_changes {
-        Style::default().fg(Color::Yellow)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(Color::Cyan)
     };
 
-    let actions_paragraph = Paragraph::new(actions)
-        .block(Block::default().borders(Borders::ALL))
+    let actions_paragraph = Paragraph::new(actions_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Keyboard Shortcuts"),
+        )
         .style(actions_style)
-        .alignment(Alignment::Center);
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
     frame.render_widget(actions_paragraph, chunks[4]);
 }
 
@@ -1097,6 +1158,152 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+/// Enhanced render settings screen that integrates with global focus manager
+pub fn render_settings_screen_with_focus(frame: &mut Frame, app: &crate::tui::app::App) {
+    // Use the existing settings rendering
+    let size = frame.area();
+
+    // Create main layout: header, nav, content, status
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Header
+            Constraint::Length(3), // Navigation
+            Constraint::Min(0),    // Content
+            Constraint::Length(3), // Status bar
+        ])
+        .split(size);
+
+    // Import the necessary components
+    use crate::tui::components::{
+        header::render_header, navigation::render_navigation, status_bar::render_status_bar,
+    };
+
+    // Render header and navigation
+    render_header(frame, &app.state, chunks[0]);
+    render_navigation(frame, &app.state, chunks[1]);
+
+    // Render settings content
+    render_settings(frame, chunks[2], &mut app.state.settings_state.clone());
+
+    // Render global focus indicators when in content mode
+    if app.state.navigation_mode == crate::tui::app::NavigationMode::WithinScreen {
+        render_settings_focus_indicators(frame, chunks[2], app);
+    }
+
+    // Render status bar
+    render_status_bar(frame, &app.state, chunks[3]);
+}
+
+/// Render focus indicators for settings elements using global focus manager
+fn render_settings_focus_indicators(frame: &mut Frame, area: Rect, app: &crate::tui::app::App) {
+    if let Some(focused) = app.state.focus_manager.current_focus() {
+        match focused {
+            crate::tui::events::FocusableComponent::Dropdown(dropdown_id) => {
+                if dropdown_id == "settings_network" {
+                    // Highlight the network dropdown area
+                    let network_area = Rect {
+                        x: area.x + area.width / 3,
+                        y: area.y + 8,
+                        width: area.width * 2 / 3 - 2,
+                        height: 5,
+                    };
+
+                    let highlight = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .title("[ FOCUSED: NETWORK SETTINGS ]");
+
+                    frame.render_widget(highlight, network_area);
+                }
+            }
+            crate::tui::events::FocusableComponent::TextInput(input_id) => {
+                if input_id == "settings_rpc" {
+                    // Highlight the RPC input area
+                    let rpc_area = Rect {
+                        x: area.x + area.width / 3,
+                        y: area.y + 14,
+                        width: area.width * 2 / 3 - 2,
+                        height: 3,
+                    };
+
+                    let highlight = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .title("[ FOCUSED: RPC ENDPOINT ]");
+
+                    frame.render_widget(highlight, rpc_area);
+                } else if input_id == "settings_wallet" {
+                    // Highlight the wallet input area
+                    let wallet_area = Rect {
+                        x: area.x + area.width / 3,
+                        y: area.y + 18,
+                        width: area.width * 2 / 3 - 2,
+                        height: 3,
+                    };
+
+                    let highlight = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .title("[ FOCUSED: WALLET SETTINGS ]");
+
+                    frame.render_widget(highlight, wallet_area);
+                }
+            }
+            crate::tui::events::FocusableComponent::Button(button_id) => {
+                if button_id == "settings_save" {
+                    // Highlight the save button area
+                    let save_area = Rect {
+                        x: area.x + area.width / 3,
+                        y: area.y + area.height - 8,
+                        width: 15,
+                        height: 3,
+                    };
+
+                    let highlight = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .title("[ SAVE ]");
+
+                    frame.render_widget(highlight, save_area);
+                } else if button_id == "settings_reset" {
+                    // Highlight the reset button area
+                    let reset_area = Rect {
+                        x: area.x + area.width / 3 + 16,
+                        y: area.y + area.height - 8,
+                        width: 15,
+                        height: 3,
+                    };
+
+                    let highlight = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+                        .title("[ RESET ]");
+
+                    frame.render_widget(highlight, reset_area);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Settings screen implementation for MANTRA DEX SDK TUI

@@ -90,6 +90,9 @@ pub struct MantraNetworkConfig {
 impl MantraNetworkConfig {
     /// Create a new network config from network constants
     pub fn from_constants(constants: &NetworkConstants) -> Self {
+        // Attempt to load contract addresses for this network from `config/contracts.toml`
+        let contracts = Self::load_contract_addresses(&constants.network_name);
+
         Self {
             network_name: constants.network_name.clone(),
             network_id: constants.network_id.clone(),
@@ -97,7 +100,39 @@ impl MantraNetworkConfig {
             gas_price: constants.default_gas_price,
             gas_adjustment: constants.default_gas_adjustment,
             native_denom: constants.native_denom.clone(),
-            contracts: ContractAddresses::default(),
+            contracts,
+        }
+    }
+
+    /// Load contract addresses for the given network from the contracts configuration file.
+    /// If the file or the specific addresses cannot be read, this will return default (empty) addresses
+    /// so the caller can still proceed without panicking.
+    fn load_contract_addresses(network: &str) -> ContractAddresses {
+        // Determine configuration directory – fall back to local `config` directory inside the project
+        let config_dir = env::var("MANTRA_CONFIG_DIR").unwrap_or_else(|_| "config".to_string());
+
+        // Build configuration loader for `contracts.toml`
+        let settings = ConfigLoader::builder()
+            .add_source(File::with_name(&format!("{}/contracts", config_dir)))
+            .build();
+
+        match settings {
+            Ok(settings) => {
+                let pool_manager_key = format!("{}.pool_manager.address", network);
+                let farm_manager_key = format!("{}.farm_manager.address", network);
+                let fee_collector_key = format!("{}.fee_collector.address", network);
+                let epoch_manager_key = format!("{}.epoch_manager.address", network);
+
+                ContractAddresses {
+                    pool_manager: settings
+                        .get::<String>(&pool_manager_key)
+                        .unwrap_or_default(),
+                    farm_manager: settings.get::<String>(&farm_manager_key).ok(),
+                    fee_collector: settings.get::<String>(&fee_collector_key).ok(),
+                    epoch_manager: settings.get::<String>(&epoch_manager_key).ok(),
+                }
+            }
+            Err(_) => ContractAddresses::default(),
         }
     }
 }

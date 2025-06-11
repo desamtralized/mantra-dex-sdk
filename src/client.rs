@@ -115,7 +115,6 @@ impl MantraDexClient {
             .latest_block()
             .await
             .map_err(|e| Error::Rpc(format!("Failed to get last block height: {}", e)))?;
-        println!("Last block height: {:?}", height.block.header.height);
         Ok(height.block.header.height.value() as u64)
     }
 
@@ -243,17 +242,13 @@ impl MantraDexClient {
 
     /// Broadcast a transaction to the network
     async fn broadcast_tx(&self, msgs: Vec<Any>) -> Result<TxResponse, Error> {
-        println!("Getting last block height");
-        let height = self.get_last_block_height().await?;
+        let _height = self.get_last_block_height().await?;
         let wallet = self.wallet()?;
         let rpc_client = self.rpc_client.lock().await;
 
-        println!("Last block height: {:?}", height);
         let tx_body = Body::new(msgs, String::new(), 0u32);
-        println!("Tx body: {:?}", tx_body);
 
         // Get account info for signing
-        println!("Getting account info for {}", wallet.address().unwrap());
         let addr = wallet.address().unwrap().to_string();
 
         // Create request using the proper protobuf type
@@ -272,8 +267,6 @@ impl MantraDexClient {
             .await
             .map_err(|e| Error::Rpc(format!("Failed to get account info: {}", e)))?;
 
-        println!("Account info: {:?}", account_info);
-
         if !account_info.code.is_ok() {
             return Err(Error::Rpc(format!(
                 "Account query failed: {}",
@@ -287,18 +280,13 @@ impl MantraDexClient {
 
         // Extract the account data - account.value contains a serialized BaseAccount
         let account_any = account_response.account.unwrap();
-        println!("Account type_url: {}", account_any.type_url);
 
         // Decode the BaseAccount from the Any object's value
         let base_account = BaseAccount::decode(account_any.value.as_slice())
             .map_err(|e| Error::Rpc(format!("Failed to decode BaseAccount: {}", e)))?;
 
-        println!("Base account: {:?}", base_account);
-
         let account_number = base_account.account_number;
-        println!("Account number: {:?}", account_number);
         let sequence = base_account.sequence;
-        println!("Sequence: {:?}", sequence);
         // Create the fee
         let fee = wallet.create_default_fee(2_000_000)?;
 
@@ -318,13 +306,11 @@ impl MantraDexClient {
         let tx_raw = sign_doc
             .sign(wallet.signing_key())
             .map_err(|e| Error::Tx(format!("Failed to sign transaction: {}", e)))?;
-        println!("Tx raw: {:?}", tx_raw);
         // Broadcast the transaction
         let response = rpc_client
             .broadcast_tx_commit(tx_raw.to_bytes().unwrap())
             .await
             .map_err(|e| Error::Rpc(format!("Failed to broadcast transaction: {}", e)))?;
-        println!("Response: {:?}", response);
         // Get the transaction response
         let tx_response = if response.check_tx.code.is_err() {
             return Err(Error::Contract(format!(
@@ -346,8 +332,6 @@ impl MantraDexClient {
                 )
                 .await
                 .map_err(|e| Error::Rpc(format!("Failed to get transaction: {}", e)))?;
-
-            println!("Transaction result: {:?}", tx_result);
 
             // Transform the response to TxResponse
             TxResponse {

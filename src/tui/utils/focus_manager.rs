@@ -443,6 +443,14 @@ pub mod component_ids {
         FocusableComponent::TextInput("settings_wallet".to_string())
     }
 
+    pub fn settings_save_button() -> FocusableComponent {
+        FocusableComponent::Button("settings_save".to_string())
+    }
+
+    pub fn settings_reset_button() -> FocusableComponent {
+        FocusableComponent::Button("settings_reset".to_string())
+    }
+
     // Modal components
     pub fn modal_confirm_button() -> FocusableComponent {
         FocusableComponent::Button("modal_confirm".to_string())

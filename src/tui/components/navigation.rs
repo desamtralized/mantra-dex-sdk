@@ -42,12 +42,29 @@ fn create_navigation_tabs(app_state: &AppState) -> Tabs {
         .position(|&screen| screen == app_state.current_screen)
         .unwrap_or(0);
 
+    let border_style = match app_state.navigation_mode {
+        crate::tui::app::NavigationMode::ScreenLevel => Style::default().fg(Color::Blue),
+        crate::tui::app::NavigationMode::WithinScreen => Style::default().fg(Color::Green),
+    };
+
+    // Create title based on navigation mode
+    let title = match app_state.navigation_mode {
+        crate::tui::app::NavigationMode::ScreenLevel => "Navigation [TAB MODE]",
+        crate::tui::app::NavigationMode::WithinScreen => {
+            if app_state.focus_manager.current_focus().is_some() {
+                "Navigation [CONTENT MODE]"
+            } else {
+                "Navigation [CONTENT MODE]"
+            }
+        }
+    };
+
     Tabs::new(titles)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Blue))
-                .title("Navigation"),
+                .border_style(border_style)
+                .title(title),
         )
         .style(Style::default().fg(Color::White))
         .highlight_style(
@@ -92,6 +109,7 @@ pub fn number_key_to_screen(key: char) -> Option<Screen> {
         '6' => Some(Screen::Rewards),
         '7' => Some(Screen::Admin),
         '8' => Some(Screen::Settings),
+        '9' => Some(Screen::TransactionDetails),
         _ => None,
     }
 }

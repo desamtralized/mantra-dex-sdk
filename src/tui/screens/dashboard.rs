@@ -68,11 +68,75 @@ fn render_dashboard_content(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(main_chunks[1]);
 
-    // Render components
+    // Render components with focus awareness
     render_overview_panel(f, top_chunks[0], app);
     render_quick_stats(f, top_chunks[1], app);
     render_recent_transactions(f, bottom_chunks[0], app);
     render_network_health(f, bottom_chunks[1], app);
+
+    // Render focus indicators for dashboard elements
+    if app.state.navigation_mode == crate::tui::app::NavigationMode::WithinScreen {
+        render_dashboard_focus_indicators(f, area, app);
+    }
+}
+
+/// Render focus indicators for dashboard elements when in content mode
+fn render_dashboard_focus_indicators(f: &mut Frame, area: Rect, app: &App) {
+    if let Some(focused) = app.state.focus_manager.current_focus() {
+        match focused {
+            crate::tui::events::FocusableComponent::Button(button_id) => {
+                if button_id == "dashboard_refresh" {
+                    // Show a focused refresh button overlay
+                    let button_area = Rect {
+                        x: area.x + 2,
+                        y: area.y + 2,
+                        width: 20,
+                        height: 3,
+                    };
+
+                    let button = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Yellow))
+                        .title("[ REFRESH ]")
+                        .title_style(
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        );
+
+                    f.render_widget(button, button_area);
+                }
+            }
+            crate::tui::events::FocusableComponent::Table(table_id) => {
+                if table_id == "dashboard_transactions" {
+                    // Highlight the transactions area
+                    let tx_area = Rect {
+                        x: area.x + area.width / 2,
+                        y: area.y + area.height * 2 / 5,
+                        width: area.width / 2 - 2,
+                        height: area.height * 3 / 5 - 2,
+                    };
+
+                    let highlight = Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                        .title("[ FOCUSED: TRANSACTIONS ]")
+                        .title_style(
+                            Style::default()
+                                .fg(Color::Yellow)
+                                .add_modifier(Modifier::BOLD),
+                        );
+
+                    f.render_widget(highlight, tx_area);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Render the portfolio overview panel

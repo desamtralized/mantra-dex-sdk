@@ -10,6 +10,7 @@ use crate::tui::{
         forms::{Dropdown, DropdownOption, InputType, TextInput},
         header::render_header,
         modals::{render_modal, ModalState},
+        navigation::render_navigation,
         status_bar::render_status_bar,
     },
     events::SwapOperation,
@@ -570,24 +571,26 @@ fn get_multihop_screen_state() -> &'static mut MultiHopScreenState {
 pub fn render_multihop(f: &mut Frame, app: &App) {
     let size = f.area();
 
-    // Create main layout
+    // Create main layout: header, nav, content, status
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // Header
+            Constraint::Length(3), // Navigation
             Constraint::Min(0),    // Main content
             Constraint::Length(3), // Status bar
         ])
         .split(size);
 
-    // Render header
+    // Render header and navigation
     render_header(f, &app.state, chunks[0]);
+    render_navigation(f, &app.state, chunks[1]);
 
     // Render main content
-    render_multihop_content(f, chunks[1], app);
+    render_multihop_content(f, chunks[2], app);
 
     // Render status bar
-    render_status_bar(f, &app.state, chunks[2]);
+    render_status_bar(f, &app.state, chunks[3]);
 
     // Render modal if shown
     let state = get_multihop_screen_state();

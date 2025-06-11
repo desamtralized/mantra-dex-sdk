@@ -18,7 +18,7 @@ use crate::tui::screens::pools::render_pools;
 #[cfg(feature = "tui")]
 use crate::tui::screens::rewards::render_rewards;
 #[cfg(feature = "tui")]
-use crate::tui::screens::settings::render_settings;
+use crate::tui::screens::settings::render_settings_screen;
 #[cfg(feature = "tui")]
 use crate::tui::screens::swap::render_swap;
 #[cfg(feature = "tui")]
@@ -31,9 +31,11 @@ use ratatui::{prelude::*, widgets::*};
 /// Main UI rendering function with responsive layout support
 pub fn render_ui(frame: &mut Frame, app: &mut App) -> Result<(), Error> {
     let size = frame.area();
+
+    // Responsive layout config (still used for size warning)
     let layout_config = LayoutConfig::new(size);
 
-    // Check if terminal is too small and show warning
+    // Show size warning if terminal is too small
     if layout_config.is_too_small() {
         let (popup_area, clear_widget, warning_widget) = create_size_warning_popup(size);
         frame.render_widget(clear_widget, popup_area);
@@ -41,23 +43,36 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) -> Result<(), Error> {
         return Ok(());
     }
 
-    // Create responsive main layout
-    let constraints = layout_config.main_layout_constraints();
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(size);
+    // Check if wizard should be shown (first time setup or no wallet configured)
+    if app.state.wizard_state.show_wizard {
+        crate::tui::screens::wizard::render_wizard(frame, app);
+        return Ok(());
+    }
 
-    // Render header with responsive sizing
-    render_header(frame, chunks[0], app, &layout_config);
+    // Render the active screen. Screens are responsible for drawing header, navigation,
+    // content, and status bar, so we simply delegate rendering here.
+    match app.state.current_screen {
+        crate::tui::app::Screen::Dashboard => render_dashboard(frame, app),
+        crate::tui::app::Screen::Pools => render_pools(frame, app),
+        crate::tui::app::Screen::Swap => render_swap(frame, app),
+        crate::tui::app::Screen::MultiHop => render_multihop(frame, app),
+        crate::tui::app::Screen::Liquidity => render_liquidity(frame, app),
+        crate::tui::app::Screen::Rewards => render_rewards(frame, app),
+        crate::tui::app::Screen::Admin => crate::tui::screens::admin::render_admin(frame, app),
+        crate::tui::app::Screen::Settings => {
+            // Use enhanced settings screen with focus indicators
+            crate::tui::screens::settings::render_settings_screen_with_focus(frame, app);
+        }
+        crate::tui::app::Screen::TransactionDetails => {
+            crate::tui::screens::transaction::render_transaction_screen(
+                frame,
+                app,
+                &app.state.transaction_state,
+            );
+        }
+    }
 
-    // Render main content based on current screen with layout config
-    render_main_content(frame, chunks[1], app, &layout_config)?;
-
-    // Render status bar with responsive sizing
-    render_status_bar(frame, chunks[2], app, &layout_config);
-
-    // Render modal overlay if visible
+    // Render modal overlay if present
     if let Some(ref modal_state) = app.state.modal_state {
         render_modal(frame, modal_state, size);
     }
@@ -240,7 +255,7 @@ fn render_main_content(
         }
         crate::tui::app::Screen::Settings => {
             // Pass layout config to settings (will need updating)
-            render_settings(frame, main_area, &mut app.state.settings_state);
+            render_settings_screen(frame, app);
         }
         crate::tui::app::Screen::TransactionDetails => {
             // Pass layout config to transaction (will need updating)
@@ -338,7 +353,14 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App, layout_config: &L
         layout_config.mode,
         crate::tui::utils::responsive::LayoutMode::Expanded
     ) {
-        let help_text = "Tab: Next | Shift+Tab: Prev | Enter: Action | Esc: Back | q: Quit";
+        let help_text = match app.state.navigation_mode {
+            crate::tui::app::NavigationMode::ScreenLevel => {
+                "TAB MODE: 1-8: Jump to Tab | Tab/Shift+Tab: Navigate | Enter: Enter Content | q: Quit"
+            }
+            crate::tui::app::NavigationMode::WithinScreen => {
+                "CONTENT MODE: Tab/Shift+Tab: Focus | Enter: Activate | Esc: Back to Tab Mode | q: Quit"
+            }
+        };
         let help = Paragraph::new(help_text)
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center)
@@ -405,10 +427,21 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App, _layout_config: &Lay
     frame.render_widget(transactions, sidebar_chunks[1]);
 
     // Additional info
-    let help_text = "Keyboard Shortcuts:\n\n• Tab/Shift+Tab: Navigate\n• Enter: Activate\n• Esc: Back\n• q: Quit\n• F1: Help";
+    let help_text = match app.state.navigation_mode {
+        crate::tui::app::NavigationMode::ScreenLevel => {
+            "TAB MODE:\n\n• 1-8: Jump to Screen\n• Tab/Shift+Tab: Navigate\n• Enter: Enter Content\n• q: Quit\n• F1: Help"
+        }
+        crate::tui::app::NavigationMode::WithinScreen => {
+            "CONTENT MODE:\n\n• Tab/Shift+Tab: Focus\n• Enter: Activate\n• Esc: Back to Tab Mode\n• Space: Context Action\n• q: Quit"
+        }
+    };
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::Yellow))
-        .block(Block::default().borders(Borders::ALL).title("Help"))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Navigation Help"),
+        )
         .wrap(Wrap { trim: true });
     frame.render_widget(help, sidebar_chunks[2]);
 }

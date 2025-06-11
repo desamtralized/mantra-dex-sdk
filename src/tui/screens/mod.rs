@@ -13,6 +13,7 @@ pub mod rewards;
 pub mod settings;
 pub mod swap;
 pub mod transaction;
+pub mod wizard;
 
 pub use admin::*;
 pub use dashboard::*;

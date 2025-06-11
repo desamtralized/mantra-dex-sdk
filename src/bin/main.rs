@@ -166,6 +166,14 @@ async fn run_tui_app(args: Args) -> Result<(), Error> {
     // Create application
     let config = client.config().clone();
     let mut app = App::new(client, config);
+
+    // Extract wallet address from client and set it in app state
+    if let Ok(wallet) = app.client.wallet() {
+        if let Ok(address) = wallet.address() {
+            app.set_wallet_address(address.to_string());
+        }
+    }
+
     app.initialize_background_tasks(event_tx.clone());
 
     // Configure sync settings

@@ -93,6 +93,8 @@ pub enum Event {
     Help,
     /// Mouse events (placeholder for future implementation)
     Mouse,
+    /// Pasted text (bracketed paste)
+    Paste(String),
     /// Custom application events
     Custom(String),
 
@@ -477,6 +479,7 @@ impl EventHandler {
             event::Event::Key(key_event) => Self::convert_key_event(key_event),
             event::Event::Mouse(_) => Some(Event::Mouse),
             event::Event::Resize(_, _) => None, // Handle resize events if needed
+            event::Event::Paste(data) => Some(Event::Paste(data)),
             _ => None,
         }
     }
@@ -502,13 +505,13 @@ impl EventHandler {
                 code: KeyCode::Tab,
                 modifiers: KeyModifiers::NONE,
                 ..
-            } => Some(Event::FocusNext), // Changed from Event::Tab for better focus handling
+            } => Some(Event::Tab), // Screen navigation
 
             KeyEvent {
                 code: KeyCode::BackTab,
                 modifiers: KeyModifiers::SHIFT,
                 ..
-            } => Some(Event::FocusPrevious), // Changed from Event::BackTab
+            } => Some(Event::BackTab), // Reverse screen navigation
 
             // Action keys
             KeyEvent {
@@ -623,19 +626,6 @@ impl EventHandler {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => Some(Event::FocusLast),
-
-            // Alt+Tab for screen navigation (preserve Tab for internal navigation)
-            KeyEvent {
-                code: KeyCode::Tab,
-                modifiers: KeyModifiers::ALT,
-                ..
-            } => Some(Event::Tab),
-
-            KeyEvent {
-                code: KeyCode::BackTab,
-                modifiers: KeyModifiers::ALT,
-                ..
-            } => Some(Event::BackTab),
 
             // Character input
             KeyEvent {
@@ -827,7 +817,7 @@ mod tests {
             kind: event::KeyEventKind::Press,
             state: event::KeyEventState::NONE,
         };
-        assert_eq!(EventHandler::convert_key_event(tab), Some(Event::FocusNext));
+        assert_eq!(EventHandler::convert_key_event(tab), Some(Event::Tab));
 
         // Test character input
         let char_a = KeyEvent {

@@ -43,6 +43,15 @@ pub enum Screen {
     TransactionDetails,
 }
 
+/// Navigation mode for keyboard handling
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavigationMode {
+    /// Navigating between main screen tabs
+    ScreenLevel,
+    /// Navigating within the current screen
+    WithinScreen,
+}
+
 impl Screen {
     /// Get the display name for the screen
     pub fn display_name(&self) -> &'static str {
@@ -302,11 +311,12 @@ impl Default for LiquidityState {
     }
 }
 
-/// Application state structure
-#[derive(Debug)]
+/// Global application state
 pub struct AppState {
     /// Current active screen
     pub current_screen: Screen,
+    /// Navigation mode (screen-level vs within-screen)
+    pub navigation_mode: NavigationMode,
     /// Enhanced loading state for async operations
     pub loading_state: LoadingState,
     /// Error messages to display (deprecated in favor of modal_state)
@@ -353,6 +363,8 @@ pub struct AppState {
     pub pending_operations: HashMap<String, PendingOperation>,
     /// Focus management for keyboard navigation
     pub focus_manager: FocusManager,
+    /// Wallet setup wizard state
+    pub wizard_state: crate::tui::screens::wizard::WizardState,
 }
 
 /// Pending operation tracking for comprehensive loading states
@@ -396,6 +408,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             current_screen: Screen::Dashboard,
+            navigation_mode: NavigationMode::ScreenLevel,
             loading_state: LoadingState::Idle,
             error_message: None,
             status_message: None,
@@ -419,6 +432,12 @@ impl Default for AppState {
             network_info: NetworkInfo::default(),
             pending_operations: HashMap::new(),
             focus_manager: FocusManager::new(),
+            wizard_state: {
+                let mut wizard = crate::tui::screens::wizard::WizardState::new();
+                // Show wizard on first run if no wallet is configured
+                wizard.show_wizard = true; // Always show for now; in real app, check wallet config
+                wizard
+            },
         }
     }
 }
@@ -823,6 +842,11 @@ impl App {
             self.update_component_focus(&focused_component);
         }
 
+        // Handle wizard events first if wizard is active
+        if self.state.wizard_state.show_wizard {
+            return self.handle_wizard_event(event).await;
+        }
+
         // Handle standard navigation events
         match event {
             Event::Quit => {
@@ -830,17 +854,45 @@ impl App {
                 return Ok(true);
             }
             Event::Tab => {
-                // Alt+Tab for screen navigation
-                self.next_tab();
+                match self.state.navigation_mode {
+                    NavigationMode::ScreenLevel => {
+                        // Navigate to next screen tab
+                        self.next_tab();
+                    }
+                    NavigationMode::WithinScreen => {
+                        // Handle within-screen tab navigation
+                        if let Some(focused_component) =
+                            self.state.focus_manager.handle_event(&Event::FocusNext)
+                        {
+                            self.update_component_focus(&focused_component);
+                        }
+                    }
+                }
             }
             Event::BackTab => {
-                // Alt+Shift+Tab for reverse screen navigation
-                self.previous_tab();
+                match self.state.navigation_mode {
+                    NavigationMode::ScreenLevel => {
+                        // Navigate to previous screen tab
+                        self.previous_tab();
+                    }
+                    NavigationMode::WithinScreen => {
+                        // Handle within-screen reverse tab navigation
+                        if let Some(focused_component) =
+                            self.state.focus_manager.handle_event(&Event::FocusPrevious)
+                        {
+                            self.update_component_focus(&focused_component);
+                        }
+                    }
+                }
             }
             Event::Escape => {
-                // Handle escape key - close modals or return to previous focus
+                // Handle escape key - close modals or return to screen-level navigation
                 if self.state.modal_state.is_some() {
                     self.state.modal_state = None;
+                } else if self.state.navigation_mode == NavigationMode::WithinScreen {
+                    // Exit within-screen navigation mode
+                    self.state.navigation_mode = NavigationMode::ScreenLevel;
+                    self.state.focus_manager.clear_focus();
                 } else {
                     self.state.focus_manager.return_to_previous();
                 }
@@ -852,14 +904,33 @@ impl App {
                 self.refresh_current_screen_data().await?;
             }
             Event::Enter => {
-                // Handle enter key based on current focus
+                // Handle enter key based on navigation mode
                 if let Some(modal) = &self.state.modal_state {
                     if modal.is_confirmed() {
                         self.handle_confirmation();
                         self.state.modal_state = None;
                     }
+                } else if self.state.navigation_mode == NavigationMode::ScreenLevel {
+                    // Enter within-screen navigation mode
+                    self.state.navigation_mode = NavigationMode::WithinScreen;
+                    self.initialize_focus_for_screen(self.state.current_screen);
                 } else {
+                    // Handle enter within screen
                     self.handle_enter_key().await?;
+                }
+            }
+            // Handle focus management events only when in within-screen mode
+            Event::MoveFocus(_)
+            | Event::FocusNext
+            | Event::FocusPrevious
+            | Event::FocusFirst
+            | Event::FocusLast
+            | Event::SetFocus(_)
+            | Event::ClearFocus => {
+                if self.state.navigation_mode == NavigationMode::WithinScreen {
+                    if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
+                        self.update_component_focus(&focused_component);
+                    }
                 }
             }
             Event::ContextAction => {
@@ -877,6 +948,18 @@ impl App {
                 if self.state.modal_state.is_some() {
                     if self.handle_modal_event(&event) {
                         return Ok(false);
+                    }
+                }
+
+                // Handle number key navigation for tab switching (1-8) when in ScreenLevel mode
+                if let Event::Char(c) = &event {
+                    if self.state.navigation_mode == NavigationMode::ScreenLevel {
+                        if let Some(screen) =
+                            crate::tui::components::navigation::number_key_to_screen(*c)
+                        {
+                            self.navigate_to(screen);
+                            return Ok(false);
+                        }
                     }
                 }
 
@@ -935,6 +1018,8 @@ impl App {
                 settings_network_dropdown(),
                 settings_rpc_input(),
                 settings_wallet_input(),
+                settings_save_button(),
+                settings_reset_button(),
             ],
             _ => vec![],
         };
@@ -949,13 +1034,7 @@ impl App {
         match self.state.current_screen {
             Screen::Dashboard => {
                 // Refresh dashboard data
-                if let Some(sender) = &self.event_sender {
-                    let _ = sender.send(Event::DataRefresh {
-                        data_type: "dashboard".to_string(),
-                        success: true,
-                        error: None,
-                    });
-                }
+                self.refresh_dashboard_data().await?;
             }
             Screen::Pools => {
                 // Refresh pool data
@@ -1190,6 +1269,92 @@ impl App {
             Event::Char(c) => {
                 self.handle_settings_input(c).await?;
             }
+            Event::MoveFocus(direction) => {
+                // Handle focus movement within settings screen
+                match direction {
+                    crate::tui::events::FocusDirection::Next => {
+                        self.state.focus_manager.focus_next();
+                    }
+                    crate::tui::events::FocusDirection::Previous => {
+                        self.state.focus_manager.focus_previous();
+                    }
+                    crate::tui::events::FocusDirection::Up => {
+                        // Navigate to previous section
+                        self.state.settings_state.previous_section();
+                    }
+                    crate::tui::events::FocusDirection::Down => {
+                        // Navigate to next section
+                        self.state.settings_state.next_section();
+                    }
+                    _ => {}
+                }
+            }
+            Event::Enter => {
+                // Handle enter key in settings
+                if let Some(focused) = self.state.focus_manager.current_focus() {
+                    match focused {
+                        crate::tui::events::FocusableComponent::Button(button_id) => {
+                            match button_id.as_str() {
+                                "settings_save" => {
+                                    self.handle_settings_action().await?;
+                                }
+                                "settings_reset" => {
+                                    self.state.settings_state.reset_to_defaults();
+                                }
+                                _ => {}
+                            }
+                        }
+                        crate::tui::events::FocusableComponent::Dropdown(dropdown_id) => {
+                            // Toggle dropdown or handle selection
+                            match dropdown_id.as_str() {
+                                "settings_network" => {
+                                    self.state.settings_state.toggle_network_environment();
+                                }
+                                _ => {}
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Event::Escape => {
+                // Handle escape key - close confirmation modal or go back
+                if self.state.settings_state.show_confirmation {
+                    self.state.settings_state.show_confirmation = false;
+                } else if self.state.settings_state.message.is_some() {
+                    self.state.settings_state.clear_message();
+                }
+            }
+            Event::Backspace => {
+                // Handle backspace for text input fields
+                if let Some(focused) = self.state.focus_manager.current_focus() {
+                    if let crate::tui::events::FocusableComponent::TextInput(field_id) = focused {
+                        match field_id.as_str() {
+                            "settings_rpc" => {
+                                let _ = self.state.settings_state.handle_backspace();
+                            }
+                            "settings_wallet" => {
+                                let _ = self.state.settings_state.handle_backspace();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            Event::ContextAction => {
+                // Handle space bar context actions
+                match self.state.settings_state.current_section {
+                    crate::tui::screens::settings::SettingsSection::Network => {
+                        self.state.settings_state.toggle_network_environment();
+                    }
+                    crate::tui::screens::settings::SettingsSection::Display => {
+                        self.state.settings_state.toggle_theme();
+                    }
+                    crate::tui::screens::settings::SettingsSection::Wallet => {
+                        self.state.settings_state.toggle_import_mode();
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -1417,9 +1582,9 @@ impl App {
     /// Navigate to a specific screen
     pub fn navigate_to(&mut self, screen: Screen) {
         self.state.current_screen = screen;
+        self.state.navigation_mode = NavigationMode::ScreenLevel;
         self.clear_messages();
-        // Initialize focus for the new screen
-        self.initialize_focus_for_screen(screen);
+        // Don't initialize focus here - it will be done when user presses Enter
     }
 
     /// Navigate to the next tab
@@ -1427,9 +1592,9 @@ impl App {
         let screens = Screen::all();
         self.state.current_tab = (self.state.current_tab + 1) % screens.len();
         self.state.current_screen = screens[self.state.current_tab];
+        self.state.navigation_mode = NavigationMode::ScreenLevel;
         self.clear_messages();
-        // Initialize focus for the new screen
-        self.initialize_focus_for_screen(self.state.current_screen);
+        // Don't initialize focus here - it will be done when user presses Enter
     }
 
     /// Navigate to the previous tab
@@ -1441,9 +1606,9 @@ impl App {
             self.state.current_tab -= 1;
         }
         self.state.current_screen = screens[self.state.current_tab];
+        self.state.navigation_mode = NavigationMode::ScreenLevel;
         self.clear_messages();
-        // Initialize focus for the new screen
-        self.initialize_focus_for_screen(self.state.current_screen);
+        // Don't initialize focus here - it will be done when user presses Enter
     }
 
     /// Handle background data refresh events
@@ -1666,11 +1831,81 @@ impl App {
         // Refresh balances, network info, and other dashboard data
         self.set_loading("Refreshing dashboard data...".to_string());
 
-        // Add actual refresh logic here
-        // For now, just simulate a refresh
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        let mut errors = Vec::new();
 
-        self.set_success("Dashboard refreshed".to_string());
+        // Refresh balances if wallet is connected
+        if let Some(address) = &self.state.wallet_address.clone() {
+            match self.client.get_balances().await {
+                Ok(balances) => {
+                    // Clear existing balances
+                    self.state.balances.clear();
+                    // Update with new balances
+                    for balance in balances {
+                        self.state
+                            .balances
+                            .insert(balance.denom, balance.amount.to_string());
+                    }
+                }
+                Err(e) => {
+                    errors.push(format!("Failed to fetch balances: {}", e));
+                }
+            }
+        }
+
+        // Refresh network info
+        match self.client.get_last_block_height().await {
+            Ok(height) => {
+                self.state.block_height = Some(height);
+                self.state.network_info.last_sync_time = Some(chrono::Utc::now());
+                self.state.network_info.is_syncing = false;
+            }
+            Err(e) => {
+                errors.push(format!("Failed to fetch block height: {}", e));
+            }
+        }
+
+        // Refresh pool data (limited to avoid overwhelming)
+        match self.client.get_pools(Some(20)).await {
+            Ok(pools) => {
+                for pool in pools {
+                    let pool_id = pool.pool_info.pool_identifier.clone();
+                    let cache_entry = PoolCacheEntry {
+                        pool_info: pool,
+                        cached_at: chrono::Utc::now(),
+                    };
+                    self.state.pool_cache.insert(pool_id, cache_entry);
+                }
+            }
+            Err(e) => {
+                errors.push(format!("Failed to fetch pools: {}", e));
+            }
+        }
+
+        // Update background coordinator with wallet address for future syncing
+        if let Some(address) = &self.state.wallet_address {
+            if let Some(coordinator) = &mut self.background_coordinator {
+                coordinator.set_wallet_address(address.clone());
+            }
+        }
+
+        if errors.is_empty() {
+            self.set_success("Dashboard refreshed successfully".to_string());
+        } else {
+            // Show partial success with warnings
+            let error_summary = if errors.len() == 1 {
+                errors[0].clone()
+            } else {
+                format!("Multiple errors occurred: {}", errors.join("; "))
+            };
+            self.set_error_with_type(
+                format!(
+                    "Dashboard refresh completed with warnings: {}",
+                    error_summary
+                ),
+                crate::tui::components::modals::ErrorType::Network,
+            );
+        }
+
         Ok(())
     }
 
@@ -1756,13 +1991,6 @@ impl App {
             }
             'a' => {
                 if self.state.settings_state.current_section
-                    == crate::tui::screens::settings::SettingsSection::Display
-                {
-                    self.state.settings_state.toggle_auto_refresh();
-                }
-            }
-            'i' => {
-                if self.state.settings_state.current_section
                     == crate::tui::screens::settings::SettingsSection::Wallet
                 {
                     self.state.settings_state.toggle_import_mode();
@@ -1794,6 +2022,197 @@ impl App {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Handle wizard-specific events
+    async fn handle_wizard_event(&mut self, event: Event) -> Result<bool, Error> {
+        match event {
+            Event::Quit => {
+                // If we're in mnemonic input mode, treat 'q' as a regular character
+                if self.state.wizard_state.current_step
+                    == crate::tui::screens::wizard::WizardStep::WalletSetup
+                    && self.state.wizard_state.import_existing
+                {
+                    self.state.wizard_state.mnemonic_input.push('q');
+                } else {
+                    self.state.should_quit = true;
+                    return Ok(true);
+                }
+            }
+            Event::Escape => {
+                // Go back a step or exit wizard
+                if self.state.wizard_state.current_step
+                    == crate::tui::screens::wizard::WizardStep::Welcome
+                {
+                    // Skip wizard (not recommended)
+                    self.state.wizard_state.finish_wizard();
+                } else {
+                    self.state.wizard_state.previous_step();
+                }
+            }
+            Event::Enter => {
+                // Proceed to next step or finish wizard
+                if self.state.wizard_state.can_proceed() {
+                    if self.state.wizard_state.current_step
+                        == crate::tui::screens::wizard::WizardStep::Complete
+                    {
+                        // Finish wizard and apply settings
+                        self.apply_wizard_settings().await?;
+                        self.state.wizard_state.finish_wizard();
+                    } else {
+                        self.state.wizard_state.next_step();
+                    }
+                }
+            }
+            Event::Tab => {
+                // Navigate between options in current step
+                match self.state.wizard_state.current_step {
+                    crate::tui::screens::wizard::WizardStep::NetworkSelection => {
+                        self.state.wizard_state.toggle_network();
+                    }
+                    crate::tui::screens::wizard::WizardStep::WalletSetup => {
+                        self.state.wizard_state.toggle_wallet_mode();
+                    }
+                    _ => {}
+                }
+            }
+            Event::BackTab => {
+                // Navigate between options in current step (reverse)
+                match self.state.wizard_state.current_step {
+                    crate::tui::screens::wizard::WizardStep::NetworkSelection => {
+                        self.state.wizard_state.toggle_network();
+                    }
+                    crate::tui::screens::wizard::WizardStep::WalletSetup => {
+                        self.state.wizard_state.toggle_wallet_mode();
+                    }
+                    _ => {}
+                }
+            }
+            Event::Char(c) => {
+                // Handle character input for mnemonic or other text fields
+                match self.state.wizard_state.current_step {
+                    crate::tui::screens::wizard::WizardStep::WalletSetup => {
+                        if self.state.wizard_state.import_existing {
+                            self.state.wizard_state.mnemonic_input.push(c);
+                        }
+                    }
+                    crate::tui::screens::wizard::WizardStep::SecurityWarning => {
+                        if c == 'y' || c == 'Y' {
+                            self.state.wizard_state.security_acknowledged = true;
+                        } else if c == 'n' || c == 'N' {
+                            self.state.wizard_state.security_acknowledged = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Event::Backspace => {
+                // Handle backspace for text input
+                match self.state.wizard_state.current_step {
+                    crate::tui::screens::wizard::WizardStep::WalletSetup => {
+                        if self.state.wizard_state.import_existing {
+                            self.state.wizard_state.mnemonic_input.pop();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            // Treat context action (space bar) as a space character when typing mnemonic
+            Event::ContextAction => {
+                if self.state.wizard_state.current_step
+                    == crate::tui::screens::wizard::WizardStep::WalletSetup
+                    && self.state.wizard_state.import_existing
+                {
+                    self.state.wizard_state.mnemonic_input.push(' ');
+                }
+            }
+            // Handle paste events (bracketed paste) for mnemonic field
+            Event::Paste(text) => {
+                if self.state.wizard_state.current_step
+                    == crate::tui::screens::wizard::WizardStep::WalletSetup
+                    && self.state.wizard_state.import_existing
+                {
+                    self.state.wizard_state.mnemonic_input.push_str(&text);
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    /// Apply wizard settings to the app configuration
+    async fn apply_wizard_settings(&mut self) -> Result<(), Error> {
+        // Apply network settings
+        match self.state.wizard_state.selected_network {
+            crate::tui::screens::wizard::NetworkEnvironment::Mainnet => {
+                self.set_status("Connected to Mainnet".to_string());
+            }
+            crate::tui::screens::wizard::NetworkEnvironment::Testnet => {
+                self.set_status("Connected to Testnet".to_string());
+            }
+        }
+
+        // Apply wallet settings
+        if self.state.wizard_state.import_existing
+            && !self.state.wizard_state.mnemonic_input.is_empty()
+        {
+            // Import wallet from mnemonic
+            match crate::wallet::MantraWallet::from_mnemonic(
+                &self.state.wizard_state.mnemonic_input,
+                0,
+            ) {
+                Ok(wallet) => {
+                    match wallet.address() {
+                        Ok(address) => {
+                            self.set_wallet_address(address.to_string());
+                            self.set_status("Wallet imported successfully".to_string());
+                            // Trigger initial data refresh after wallet setup
+                            if let Err(e) = self.refresh_dashboard_data().await {
+                                // Don't fail the wizard if refresh fails, just log the error
+                                eprintln!("Warning: Failed to refresh dashboard data: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            self.set_error(format!("Failed to derive wallet address: {}", e));
+                            return Err(e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    self.set_error(format!("Failed to import wallet: {}", e));
+                    return Err(e);
+                }
+            }
+        } else if !self.state.wizard_state.import_existing {
+            // Create new wallet
+            if let Some(mnemonic) = &self.state.wizard_state.generated_mnemonic {
+                match crate::wallet::MantraWallet::from_mnemonic(mnemonic, 0) {
+                    Ok(wallet) => {
+                        match wallet.address() {
+                            Ok(address) => {
+                                self.set_wallet_address(address.to_string());
+                                self.set_status("New wallet created successfully".to_string());
+                                // Trigger initial data refresh after wallet setup
+                                if let Err(e) = self.refresh_dashboard_data().await {
+                                    // Don't fail the wizard if refresh fails, just log the error
+                                    eprintln!("Warning: Failed to refresh dashboard data: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                self.set_error(format!("Failed to derive wallet address: {}", e));
+                                return Err(e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.set_error(format!("Failed to create wallet: {}", e));
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }
