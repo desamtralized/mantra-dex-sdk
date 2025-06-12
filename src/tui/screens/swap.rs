@@ -8,10 +8,10 @@ use crate::tui::{
     app::{App, LoadingState, SwapState},
     components::{
         forms::{InputType, TextInput},
-        simple_list::{ListEvent, SimpleList, SimpleListOption},
         header::render_header,
         modals::{render_modal, ModalState},
         navigation::render_navigation,
+        simple_list::{ListEvent, SimpleList, SimpleListOption},
         status_bar::render_status_bar,
     },
 };
@@ -65,7 +65,7 @@ pub struct SwapScreenState {
 impl Default for SwapScreenState {
     fn default() -> Self {
         let mut pool_dropdown = SimpleList::new("Available Pools");
-        
+
         // Initialize with test data immediately (for development/testing)
         let test_pools = vec![
             ("1".to_string(), "Pool 1: USDC / USDT".to_string()),
@@ -74,7 +74,7 @@ impl Default for SwapScreenState {
             ("4".to_string(), "Pool 4: USDT / ATOM".to_string()),
             ("5".to_string(), "Pool 5: OSMO / MANTRA".to_string()),
         ];
-        
+
         let pool_options: Vec<SimpleListOption> = test_pools
             .iter()
             .map(|(pool_id, display_name)| {
@@ -112,7 +112,7 @@ impl Default for SwapScreenState {
             simulation_timer: None,
             last_input_change: None,
         };
-        
+
         // Apply initial focus
         instance.apply_focus();
         instance
@@ -156,33 +156,60 @@ impl SwapScreenState {
 
     /// Update token list based on selected pool
     pub fn update_tokens_for_pool(&mut self, pool_id: &str) {
-        // Extract tokens for the selected pool
-        let tokens_for_pool = match pool_id {
-            "1" => vec!["USDC".to_string(), "USDT".to_string()],
-            "2" => vec!["ATOM".to_string(), "OSMO".to_string()],
-            "3" => vec!["MANTRA".to_string(), "USDC".to_string()],
-            "4" => vec!["USDT".to_string(), "ATOM".to_string()],
-            "5" => vec!["OSMO".to_string(), "MANTRA".to_string()],
-            _ => vec![], // Unknown pool
+        // Attempt to derive the token pair for the selected pool using the cached `available_pools`.
+        // `available_pools` entries are (pool_id, display_name) where display_name was created as
+        // "<token_a> / <token_b>" in `App::update_swap_screen_pools`.  We can therefore recover the
+        // two asset symbols by splitting on "/".
+
+        let tokens_for_pool: Vec<String> = self
+            .available_pools
+            .iter()
+            .find(|(id, _)| id == pool_id)
+            .and_then(|(_, name)| {
+                // Expected format: "Pool <num>: TOKEN_A / TOKEN_B"
+                let after_colon = name
+                    .split(':')
+                    .nth(1) // take text after the first ':'
+                    .map(|s| s.trim())?; // remove leading/trailing spaces
+
+                let parts: Vec<String> = after_colon
+                    .split('/')
+                    .map(|s| s.trim().to_string())
+                    .collect();
+
+                if parts.len() == 2 {
+                    Some(parts)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(Vec::new);
+
+        // Fallback: if we could not determine tokens from the pool name, keep the full list of
+        // available tokens so the user is not left with an empty dropdown.
+        let tokens_for_pool = if tokens_for_pool.is_empty() {
+            self.available_tokens.clone()
+        } else {
+            tokens_for_pool
         };
 
         // Preserve current state
         let was_active = self.from_token_dropdown.is_active;
         let was_editing = self.from_token_dropdown.is_editing;
-        
+
         // Update the options while preserving state
         let options: Vec<SimpleListOption> = tokens_for_pool
             .iter()
             .map(|token| SimpleListOption::new(token.clone(), token.clone()))
             .collect();
-        
+
         self.from_token_dropdown.options = options;
         self.from_token_dropdown.label = "Pool Tokens".to_string();
-        
+
         // Restore state
         self.from_token_dropdown.is_active = was_active;
         self.from_token_dropdown.is_editing = was_editing;
-        
+
         // Reset selection and list state
         self.from_token_dropdown.selected_index = None;
         if !tokens_for_pool.is_empty() {
@@ -239,7 +266,7 @@ impl SwapScreenState {
             false
         }
     }
-    
+
     /// Reset the simulation timer
     pub fn reset_simulation_timer(&mut self) {
         self.last_input_change = None;
@@ -252,14 +279,18 @@ impl SwapScreenState {
     }
 
     /// Handle keyboard input using direct key events
-    pub fn handle_key_event(&mut self, key: crossterm::event::KeyEvent, navigation_mode: crate::tui::app::NavigationMode) -> bool {
+    pub fn handle_key_event(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        navigation_mode: crate::tui::app::NavigationMode,
+    ) -> bool {
         use crossterm::event::KeyCode;
 
         // Only handle events when in WithinScreen mode
         if navigation_mode != crate::tui::app::NavigationMode::WithinScreen {
             return false;
         }
-        
+
         // Handle regular input focus
         match self.input_focus {
             SwapInputFocus::Pool => {
@@ -268,8 +299,10 @@ impl SwapScreenState {
 
                 // Only update tokens when selection is confirmed, not during navigation
                 if list_event == ListEvent::SelectionMade {
-                    if let Some(selected_pool_value) =
-                        self.pool_dropdown.get_selected_value().map(|v| v.to_string())
+                    if let Some(selected_pool_value) = self
+                        .pool_dropdown
+                        .get_selected_value()
+                        .map(|v| v.to_string())
                     {
                         self.update_tokens_for_pool(&selected_pool_value);
                     }
@@ -296,7 +329,7 @@ impl SwapScreenState {
                     || list_event == ListEvent::SelectionCancelled
                 {
                     self.next_focus();
-                    }
+                }
 
                 list_event != ListEvent::Ignored
             }
@@ -530,7 +563,7 @@ fn render_swap_interface(f: &mut Frame, area: Rect, app: &App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(8), // Pool selection list
-            Constraint::Length(8), // Token selection list 
+            Constraint::Length(8), // Token selection list
             Constraint::Length(5), // From amount input (increased for better visibility)
             Constraint::Length(5), // Slippage tolerance (increased for better visibility)
         ])
@@ -553,7 +586,12 @@ fn render_pool_selection(f: &mut Frame, area: Rect, _app: &App, swap_state: &mut
 }
 
 /// Render from token selection list
-fn render_from_token_input(f: &mut Frame, area: Rect, _app: &App, swap_state: &mut SwapScreenState) {
+fn render_from_token_input(
+    f: &mut Frame,
+    area: Rect,
+    _app: &App,
+    swap_state: &mut SwapScreenState,
+) {
     swap_state.from_token_dropdown.render(f, area);
 }
 
@@ -577,7 +615,7 @@ fn render_from_amount_input(
         .from_token_dropdown
         .get_selected_label()
         .unwrap_or("Select Token");
-    
+
     let balance_text = if from_token == "Select Token" {
         vec![
             Line::from(vec![Span::styled(
@@ -692,62 +730,63 @@ fn _render_swap_preview(f: &mut Frame, area: Rect, app: &App) {
         .unwrap_or("Select Pool");
     let slippage = swap_state.slippage_input.value();
 
-    let content = if from_amount.is_empty() || from_token == "Select Token" || pool_info == "Select Pool" {
-        vec![Line::from(vec![Span::styled(
-            "Complete all fields to see preview",
-            Style::default().fg(Color::Gray),
-        )])]
-    } else {
-        // Determine the "to token" from the selected pool
-        let to_token = determine_to_token_from_pool(&pool_info, &from_token);
-        let estimated_output = _calculate_estimated_output(from_amount, &app.state.swap_state);
-        let price_impact = _calculate_price_impact(from_amount, &app.state.swap_state);
+    let content =
+        if from_amount.is_empty() || from_token == "Select Token" || pool_info == "Select Pool" {
+            vec![Line::from(vec![Span::styled(
+                "Complete all fields to see preview",
+                Style::default().fg(Color::Gray),
+            )])]
+        } else {
+            // Determine the "to token" from the selected pool
+            let to_token = determine_to_token_from_pool(&pool_info, &from_token);
+            let estimated_output = _calculate_estimated_output(from_amount, &app.state.swap_state);
+            let price_impact = _calculate_price_impact(from_amount, &app.state.swap_state);
 
-        vec![
-            Line::from(vec![
-                Span::styled("From: ", Style::default().fg(Color::White)),
-                Span::styled(
-                    format!("{} {}", from_amount, from_token),
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled("To: ", Style::default().fg(Color::White)),
-                Span::styled(
-                    format!("≈ {} {}", estimated_output, to_token),
-                    Style::default()
-                        .fg(Color::Green)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Pool: ", Style::default().fg(Color::White)),
-                Span::styled(pool_info, Style::default().fg(Color::Cyan)),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Slippage Tolerance: ", Style::default().fg(Color::White)),
-                Span::styled(format!("{}%", slippage), Style::default().fg(Color::Yellow)),
-            ]),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("Price Impact: ", Style::default().fg(Color::White)),
-                Span::styled(
-                    format!("{:.2}%", price_impact),
-                    if price_impact > 5.0 {
-                        Style::default().fg(Color::Red)
-                    } else if price_impact > 1.0 {
-                        Style::default().fg(Color::Yellow)
-                    } else {
-                        Style::default().fg(Color::Green)
-                    },
-                ),
-            ]),
-        ]
-    };
+            vec![
+                Line::from(vec![
+                    Span::styled("From: ", Style::default().fg(Color::White)),
+                    Span::styled(
+                        format!("{} {}", from_amount, from_token),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("To: ", Style::default().fg(Color::White)),
+                    Span::styled(
+                        format!("≈ {} {}", estimated_output, to_token),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Pool: ", Style::default().fg(Color::White)),
+                    Span::styled(pool_info, Style::default().fg(Color::Cyan)),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Slippage Tolerance: ", Style::default().fg(Color::White)),
+                    Span::styled(format!("{}%", slippage), Style::default().fg(Color::Yellow)),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Price Impact: ", Style::default().fg(Color::White)),
+                    Span::styled(
+                        format!("{:.2}%", price_impact),
+                        if price_impact > 5.0 {
+                            Style::default().fg(Color::Red)
+                        } else if price_impact > 1.0 {
+                            Style::default().fg(Color::Yellow)
+                        } else {
+                            Style::default().fg(Color::Green)
+                        },
+                    ),
+                ]),
+            ]
+        };
 
     let paragraph = Paragraph::new(Text::from(content))
         .block(block)
@@ -782,7 +821,7 @@ fn render_simulation_results(f: &mut Frame, area: Rect, app: &App) {
         .padding(Padding::uniform(1));
 
     let swap_state = get_swap_screen_state();
-    
+
     let content = if let Some(ref simulation) = app.state.swap_state.simulation_result {
         render_simulation_details(simulation)
     } else if matches!(app.state.loading_state, LoadingState::Loading { .. }) {
@@ -927,20 +966,20 @@ pub fn execute_swap_with_confirmation() {
         .get_selected_label()
         .unwrap_or("Unknown")
         .to_string();
-    
+
     let pool_info = swap_state
         .pool_dropdown
         .get_selected_label()
         .unwrap_or("Unknown Pool")
         .to_string();
-    
+
     let to_token = determine_to_token_from_pool(&pool_info, &from_token);
 
     // Create swap details for confirmation
     let swap_details = SwapDetails {
         from_amount: swap_state.from_amount_input.value().to_string(),
         from_token,
-        to_amount: "0.0".to_string(),   // Would calculate
+        to_amount: "0.0".to_string(), // Would calculate
         to_token,
         pool_name: pool_info,
         slippage: swap_state.slippage_input.value().to_string(),
