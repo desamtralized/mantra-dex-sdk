@@ -9,6 +9,14 @@ use ratatui::{
 };
 use crossterm::event::{KeyCode, KeyEvent};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ListEvent {
+    Handled,
+    Ignored,
+    SelectionMade,
+    SelectionCancelled,
+}
+
 #[derive(Debug, Clone)]
 pub struct SimpleListOption {
     pub label: String,
@@ -93,9 +101,9 @@ impl SimpleList {
     }
 
     /// Handle key events directly - returns true if the event was handled
-    pub fn handle_key_event(&mut self, key: KeyEvent) -> bool {
+    pub fn handle_key_event(&mut self, key: KeyEvent) -> ListEvent {
         if !self.is_active {
-            return false;
+            return ListEvent::Ignored;
         }
 
         if self.is_editing {
@@ -107,11 +115,11 @@ impl SimpleList {
                         }
                     }
                     self.is_editing = false;
-                    true
+                    ListEvent::SelectionMade
                 }
                 KeyCode::Esc => {
                     self.is_editing = false;
-                    true
+                    ListEvent::SelectionCancelled
                 }
                 KeyCode::Up => {
                     if !self.options.is_empty() {
@@ -122,7 +130,7 @@ impl SimpleList {
                             self.list_state.select(Some(self.options.len() - 1));
                         }
                     }
-                    true
+                    ListEvent::Handled
                 }
                 KeyCode::Down => {
                     if !self.options.is_empty() {
@@ -133,18 +141,19 @@ impl SimpleList {
                             self.list_state.select(Some(0));
                         }
                     }
-                    true
+                    ListEvent::Handled
                 }
-                _ => true, // Absorb other keys to prevent them from propagating
+                _ => ListEvent::Handled, // Absorb other keys to prevent them from propagating
             }
         } else {
             match key.code {
                 KeyCode::Enter => {
-                    if !self.options.is_empty() {
+                    if !self.options.is_empty() && self.is_active {
                         self.is_editing = true;
-                        return true;
+                        ListEvent::Handled
+                    } else {
+                        ListEvent::Ignored
                     }
-                    false
                 }
                 // Allow up/down to work even when not in edit mode for quick navigation
                 KeyCode::Up => {
@@ -156,7 +165,7 @@ impl SimpleList {
                             self.list_state.select(Some(self.options.len() - 1));
                         }
                     }
-                    true
+                    ListEvent::Handled
                 }
                 KeyCode::Down => {
                     if !self.options.is_empty() {
@@ -167,9 +176,9 @@ impl SimpleList {
                             self.list_state.select(Some(0));
                         }
                     }
-                    true
+                    ListEvent::Handled
                 }
-                _ => false, // Let the parent handle other keys like Tab
+                _ => ListEvent::Ignored, // Let the parent handle other keys like Tab
             }
         }
     }
@@ -206,18 +215,26 @@ impl SimpleList {
 
         // Create and render the list
         let border_color = if self.is_editing {
-            Color::Green
+            Color::Green  // Green when in editing/selection mode
         } else if self.is_active {
-            Color::Yellow
+            Color::Yellow // Yellow when focused but not editing
         } else {
-            Color::Gray
+            Color::Gray   // Gray when not focused
+        };
+
+        let title = if self.is_editing {
+            format!("{} [SELECTING]", self.label)
+        } else if self.is_active {
+            format!("{} [FOCUSED]", self.label)
+        } else {
+            self.label.clone()
         };
 
         let list = List::new(items)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(self.label.as_str())
+                    .title(title.as_str())
                     .border_style(Style::default().fg(border_color))
             )
             .highlight_style(

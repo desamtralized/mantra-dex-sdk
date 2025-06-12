@@ -8,7 +8,7 @@ use crate::tui::{
     app::{App, LoadingState, SwapState},
     components::{
         forms::{InputType, TextInput},
-        simple_list::{SimpleList, SimpleListOption},
+        simple_list::{ListEvent, SimpleList, SimpleListOption},
         header::render_header,
         modals::{render_modal, ModalState},
         navigation::render_navigation,
@@ -166,21 +166,29 @@ impl SwapScreenState {
             _ => vec![], // Unknown pool
         };
 
-        // Update the token list
+        // Preserve current state
         let was_active = self.from_token_dropdown.is_active;
-        let mut token_list = SimpleList::new("Pool Tokens");
+        let was_editing = self.from_token_dropdown.is_editing;
+        
+        // Update the options while preserving state
         let options: Vec<SimpleListOption> = tokens_for_pool
             .iter()
             .map(|token| SimpleListOption::new(token.clone(), token.clone()))
             .collect();
-        token_list = token_list.with_options(options);
-        token_list.set_active(was_active);
-        self.from_token_dropdown = token_list;
         
-        // Clear token selection when pool changes
+        self.from_token_dropdown.options = options;
+        self.from_token_dropdown.label = "Pool Tokens".to_string();
+        
+        // Restore state
+        self.from_token_dropdown.is_active = was_active;
+        self.from_token_dropdown.is_editing = was_editing;
+        
+        // Reset selection and list state
         self.from_token_dropdown.selected_index = None;
         if !tokens_for_pool.is_empty() {
             self.from_token_dropdown.list_state.select(Some(0));
+        } else {
+            self.from_token_dropdown.list_state.select(None);
         }
     }
 
@@ -238,50 +246,61 @@ impl SwapScreenState {
         self.simulation_timer = None;
     }
 
+    /// Check if any list is currently in editing mode
+    pub fn is_any_list_editing(&self) -> bool {
+        self.pool_dropdown.is_editing || self.from_token_dropdown.is_editing
+    }
+
     /// Handle keyboard input using direct key events
-    pub fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> bool {
+    pub fn handle_key_event(&mut self, key: crossterm::event::KeyEvent, navigation_mode: crate::tui::app::NavigationMode) -> bool {
         use crossterm::event::KeyCode;
+
+        // Only handle events when in WithinScreen mode
+        if navigation_mode != crate::tui::app::NavigationMode::WithinScreen {
+            return false;
+        }
         
         // Handle regular input focus
         match self.input_focus {
             SwapInputFocus::Pool => {
                 let old_selection = self.pool_dropdown.selected_index;
-                let handled = self.pool_dropdown.handle_key_event(key);
+                let list_event = self.pool_dropdown.handle_key_event(key);
 
-                // If the list is in editing mode, it captures all input.
-                if self.pool_dropdown.is_editing {
-                    return true;
-                }
-
-                // If selection changed, trigger updates.
-                if handled && self.pool_dropdown.selected_index != old_selection {
-                    if let Some(selected_pool_id) = self.pool_dropdown.get_selected_value() {
-                        // Clone the pool ID to avoid borrowing issues
-                        let pool_id = selected_pool_id.to_string();
-                        // Update token list for the selected pool
-                        self.update_tokens_for_pool(&pool_id);
-                        self.mark_input_change();
+                // Only update tokens when selection is confirmed, not during navigation
+                if list_event == ListEvent::SelectionMade {
+                    if let Some(selected_pool_value) =
+                        self.pool_dropdown.get_selected_value().map(|v| v.to_string())
+                    {
+                        self.update_tokens_for_pool(&selected_pool_value);
                     }
+                    self.mark_input_change();
                 }
-                handled
+
+                if list_event == ListEvent::SelectionMade
+                    || list_event == ListEvent::SelectionCancelled
+                {
+                    self.next_focus();
+                }
+
+                list_event != ListEvent::Ignored
             }
             SwapInputFocus::FromToken => {
                 let old_selection = self.from_token_dropdown.selected_index;
-                let handled = self.from_token_dropdown.handle_key_event(key);
+                let list_event = self.from_token_dropdown.handle_key_event(key);
 
-                if self.from_token_dropdown.is_editing {
-                    return true;
+                if self.from_token_dropdown.selected_index != old_selection {
+                    self.mark_input_change();
                 }
-                
-                if handled && self.from_token_dropdown.selected_index != old_selection {
-                    if self.from_token_dropdown.get_selected_value().is_some() {
-                        self.mark_input_change();
+
+                if list_event == ListEvent::SelectionMade
+                    || list_event == ListEvent::SelectionCancelled
+                {
+                    self.next_focus();
                     }
-                }
-                handled
+
+                list_event != ListEvent::Ignored
             }
             SwapInputFocus::FromAmount => {
-                // Convert key event to InputRequest for text input
                 let input_request = match key.code {
                     KeyCode::Char(c) => Some(InputRequest::InsertChar(c)),
                     KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
@@ -294,8 +313,7 @@ impl SwapScreenState {
                 };
 
                 if let Some(request) = input_request {
-                    let result = self.from_amount_input.handle_input(request);
-                    if result.is_some() {
+                    if self.from_amount_input.handle_input(request).is_some() {
                         self.mark_input_change();
                         return true;
                     }
@@ -303,7 +321,6 @@ impl SwapScreenState {
                 false
             }
             SwapInputFocus::Slippage => {
-                // Convert key event to InputRequest for text input
                 let input_request = match key.code {
                     KeyCode::Char(c) => Some(InputRequest::InsertChar(c)),
                     KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
@@ -316,8 +333,7 @@ impl SwapScreenState {
                 };
 
                 if let Some(request) = input_request {
-                    let result = self.slippage_input.handle_input(request);
-                    if result.is_some() {
+                    if self.slippage_input.handle_input(request).is_some() {
                         self.mark_input_change();
                         return true;
                     }

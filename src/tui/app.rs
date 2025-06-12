@@ -918,15 +918,39 @@ impl App {
                     self.state.navigation_mode = NavigationMode::WithinScreen;
                     self.initialize_focus_for_screen(self.state.current_screen);
                 } else {
-                    // Handle enter within screen
+                    // Handle enter within screen - try general handler first, then screen-specific
                     self.handle_enter_key().await?;
+                    
+                    // If the general handler didn't handle it, try screen-specific handler
+                    if !self.handle_screen_specific_event(Event::Enter).await? {
+                        // Event wasn't handled by either
+                    }
                 }
             }
             // Handle focus management events only when in within-screen mode
             Event::MoveFocus(direction) => {
                 if self.state.navigation_mode == NavigationMode::WithinScreen {
-                    if let Some(focused_component) = self.state.focus_manager.handle_event(&Event::MoveFocus(direction)) {
-                        self.update_component_focus(&focused_component);
+                    // Check if any list is in editing mode - if so, let screen handle the event
+                    let should_handle_as_focus = match self.state.current_screen {
+                        Screen::Swap => {
+                            let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                            !swap_state.is_any_list_editing()
+                        }
+                        _ => true, // Other screens use normal focus management
+                    };
+
+                    if should_handle_as_focus {
+                        if let Some(focused_component) = self.state.focus_manager.handle_event(&Event::MoveFocus(direction)) {
+                            self.update_component_focus(&focused_component);
+                        }
+                    } else {
+                        // Let the screen-specific handler deal with it
+                        if !self.handle_screen_specific_event(Event::MoveFocus(direction.clone())).await? {
+                            // If screen didn't handle it, fall back to focus management
+                            if let Some(focused_component) = self.state.focus_manager.handle_event(&Event::MoveFocus(direction)) {
+                                self.update_component_focus(&focused_component);
+                            }
+                        }
                     }
                 }
             }
@@ -1393,7 +1417,7 @@ impl App {
 
         if let Some(key) = key_event {
             // Use the new key event handler
-            if swap_state.handle_key_event(key) {
+            if swap_state.handle_key_event(key, self.state.navigation_mode) {
                 // Update app state with changes from swap screen
                 if let Some(selected_value) = swap_state.pool_dropdown.get_selected_value() {
                     if let Ok(pool_id) = selected_value.parse::<u64>() {
@@ -1428,7 +1452,7 @@ impl App {
                     crossterm::event::KeyCode::Enter,
                     crossterm::event::KeyModifiers::NONE,
                 );
-                if swap_state.handle_key_event(key_event) {
+                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
                     return Ok(true);
                 }
             }
@@ -1442,7 +1466,7 @@ impl App {
                     crossterm::event::KeyCode::Char(c),
                     crossterm::event::KeyModifiers::NONE,
                 );
-                if swap_state.handle_key_event(key_event) {
+                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
                     return Ok(true);
                 }
             }
@@ -1452,7 +1476,7 @@ impl App {
                     crossterm::event::KeyCode::Backspace,
                     crossterm::event::KeyModifiers::NONE,
                 );
-                if swap_state.handle_key_event(key_event) {
+                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
                     return Ok(true);
                 }
             }
@@ -1462,7 +1486,7 @@ impl App {
                     crossterm::event::KeyCode::Up,
                     crossterm::event::KeyModifiers::NONE,
                 );
-                if swap_state.handle_key_event(key_event) {
+                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
                     return Ok(true);
                 }
             }
@@ -1472,7 +1496,7 @@ impl App {
                     crossterm::event::KeyCode::Down,
                     crossterm::event::KeyModifiers::NONE,
                 );
-                if swap_state.handle_key_event(key_event) {
+                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
                     return Ok(true);
                 }
             }
