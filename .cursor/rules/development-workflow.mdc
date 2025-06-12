@@ -1,0 +1,152 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Development Workflow and Best Practices
+
+This guide outlines the development workflow, build commands, and coding standards for the Mantra DEX SDK project.
+
+## Build and Run Commands
+
+### TUI Development
+```bash
+# Primary TUI build command
+cargo run --bin mantra-dex-tui --features tui
+
+# Alternative TUI entry point
+cargo run --bin tui --features tui
+
+# Release build for testing
+cargo build --release --bin tui --features tui
+./target/release/tui
+```
+
+### Testing Commands
+```bash
+# Run all tests
+cargo test
+
+# Run tests with TUI features
+cargo test --features tui
+
+# Run specific test module
+cargo test --features tui tui::tests
+```
+
+### Library Development
+```bash
+# Build SDK only (no TUI)
+cargo build
+
+# Check without building
+cargo check
+
+# Check with all features
+cargo check --all-features
+```
+
+## Project Configuration
+
+The project uses feature flags defined in [Cargo.toml](mdc:Cargo.toml):
+
+- **Default**: Core SDK functionality only
+- **tui**: Enables the Terminal User Interface with ratatui dependencies
+
+## Code Organization Standards
+
+### Core SDK Files
+- **[src/client.rs](mdc:src/client.rs)** - Main DEX client (1183 lines)
+- **[src/config.rs](mdc:src/config.rs)** - Network configuration
+- **[src/wallet.rs](mdc:src/wallet.rs)** - Wallet operations
+- **[src/error.rs](mdc:src/error.rs)** - Error definitions
+
+### TUI Module Structure
+When working with TUI components, follow this structure:
+
+1. **State Management**: Add new state to [src/tui/app.rs](mdc:src/tui/app.rs)
+2. **Event Handling**: Extend [src/tui/events.rs](mdc:src/tui/events.rs)
+3. **UI Components**: Create reusable components in `src/tui/components/`
+4. **Screen Logic**: Implement screens in `src/tui/screens/`
+
+## Development Tasks and Priorities
+
+### Current Focus Areas
+1. **Navigation System**: See [FOCUS_FIXES.md](mdc:FOCUS_FIXES.md) for recent improvements
+2. **TUI Features**: Track progress in [RATATUI_TASKS.md](mdc:RATATUI_TASKS.md)
+3. **Wallet Persistence**: Follow [WALLET_PERSISTENCE_TASKS.md](mdc:WALLET_PERSISTENCE_TASKS.md)
+
+### Code Style Guidelines
+
+#### Rust Standards
+- Use `cargo fmt` for formatting
+- Run `cargo clippy` for linting
+- Follow Rust naming conventions (snake_case for functions/variables, PascalCase for types)
+
+#### TUI-Specific Patterns
+- **Focus Management**: Use the unified focus system across all screens
+- **Event Handling**: Implement async-aware event processing
+- **Visual Feedback**: Provide clear focus indicators and loading states
+- **Error Handling**: Use the centralized error system from [src/error.rs](mdc:src/error.rs)
+
+#### State Management
+- Keep state centralized in `AppState`
+- Use enum patterns for screen navigation
+- Implement proper state transitions
+
+## Dependencies Management
+
+### Core Dependencies
+- **mantra-dex-std**: DEX standard library
+- **cosmrs**: Cosmos SDK integration
+- **tokio**: Async runtime
+
+### TUI Dependencies (feature-gated)
+- **ratatui**: Terminal UI framework
+- **crossterm**: Cross-platform terminal control
+- **tui-input**: Text input handling
+
+## Testing Strategy
+
+### Unit Tests
+- Test business logic in isolation
+- Mock blockchain interactions
+- Validate state transitions
+
+### Integration Tests
+- Test complete workflows
+- Validate TUI navigation flows
+- Test error handling paths
+
+## Debugging and Logging
+
+The project uses `env_logger` for debugging:
+
+```bash
+# Enable debug logging
+RUST_LOG=debug cargo run --bin tui --features tui
+
+# Enable trace logging for specific modules
+RUST_LOG=mantra_dex_sdk::tui=trace cargo run --bin tui --features tui
+```
+
+## Common Development Tasks
+
+### Adding New TUI Screens
+1. Create screen module in `src/tui/screens/`
+2. Add screen enum variant in [src/tui/app.rs](mdc:src/tui/app.rs)
+3. Implement event handling in [src/tui/events.rs](mdc:src/tui/events.rs)
+4. Add navigation entry point
+5. Update help text in [src/tui/ui.rs](mdc:src/tui/ui.rs)
+
+### Extending SDK Functionality
+1. Add new methods to [src/client.rs](mdc:src/client.rs)
+2. Define error types in [src/error.rs](mdc:src/error.rs)
+3. Add configuration options in [src/config.rs](mdc:src/config.rs)
+4. Update [src/lib.rs](mdc:src/lib.rs) exports
+
+### Performance Considerations
+- Use async operations for blockchain calls
+- Implement proper loading states
+- Cache frequently accessed data
+- Minimize UI redraws

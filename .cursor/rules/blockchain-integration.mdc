@@ -1,0 +1,176 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Blockchain Integration and Mantra DEX SDK
+
+This project integrates with the Mantra DEX on the Mantra Dukong Network using CosmWasm smart contracts and the Cosmos SDK.
+
+## Core Integration Architecture
+
+### Main Client
+The **[src/client.rs](mdc:src/client.rs)** file (1183 lines) contains the primary `MantraDexClient` implementation:
+
+- **Connection Management**: RPC client connection to Mantra nodes
+- **Transaction Building**: CosmWasm message construction
+- **Query Operations**: Read-only blockchain queries
+- **Wallet Integration**: Private key management and signing
+
+### Network Configuration
+**[src/config.rs](mdc:src/config.rs)** defines network constants and configuration:
+
+- **Mainnet/Testnet** configurations
+- **RPC Endpoints** and network parameters
+- **Contract Addresses** for DEX components
+- **Fee Structures** and gas limits
+
+### Wallet Management
+**[src/wallet.rs](mdc:src/wallet.rs)** handles cryptographic operations:
+
+- **Mnemonic Generation**: BIP39 seed phrase creation
+- **Key Derivation**: BIP32 hierarchical deterministic keys
+- **Address Generation**: Mantra-compatible address formats
+- **Transaction Signing**: ECDSA signature creation
+
+## DEX Operations
+
+### Core DEX Functionality
+The SDK supports complete DEX operations through smart contract interactions:
+
+1. **Pool Management**:
+   - Query pool information and liquidity
+   - Create new liquidity pools (admin)
+   - Enable/disable pool features
+
+2. **Swapping**:
+   - Single-hop token swaps
+   - Multi-hop routing through multiple pools
+   - Slippage protection and price impact calculation
+
+3. **Liquidity Provision**:
+   - Add liquidity to pools
+   - Remove liquidity and claim LP tokens
+   - Calculate impermanent loss
+
+4. **Rewards System**:
+   - Claim accumulated rewards
+   - Query rewards by epoch
+   - Epoch-based reward distribution
+
+### Smart Contract Integration
+The project integrates with Mantra DEX smart contracts using:
+
+- **mantra-dex-std**: Standard library for DEX operations
+- **cosmwasm-std**: CosmWasm contract interaction
+- **cosmos-sdk-proto**: Protocol buffer definitions
+
+Key dependencies from [Cargo.toml](mdc:Cargo.toml):
+```toml
+mantra-dex-std = "3.0.0"
+mantrachain-std = "0.2.0"
+cosmrs = { version = "0.21.1", features = ["rpc", "bip32", "cosmwasm"] }
+cosmwasm-std = "2.2.2"
+```
+
+## Message Types and Operations
+
+### Pool Operations
+```rust
+// Examples of operations available through the client
+pub enum PoolOperation {
+    Swap { /* token amounts and pool info */ },
+    ProvideLiquidity { /* dual asset amounts */ },
+    WithdrawLiquidity { /* LP token amount */ },
+    ClaimRewards { /* epoch information */ },
+}
+```
+
+### Admin Operations
+```rust
+// Pool creation and management (admin only)
+pub enum AdminOperation {
+    CreatePool { /* asset configuration */ },
+    UpdatePoolFeatures { /* feature toggles */ },
+    SetFeeStructure { /* fee parameters */ },
+}
+```
+
+## Async Architecture
+
+### Non-Blocking Operations
+All blockchain operations are implemented asynchronously to prevent UI blocking:
+
+- **Query Operations**: Real-time pool data and balance updates
+- **Transaction Broadcasting**: Non-blocking transaction submission
+- **Event Listening**: Real-time blockchain event monitoring
+
+### Error Handling
+The **[src/error.rs](mdc:src/error.rs)** module defines comprehensive error types:
+
+- **Network Errors**: RPC connection and timeout issues
+- **Transaction Errors**: Gas estimation and execution failures
+- **Validation Errors**: Input validation and constraint checking
+- **Contract Errors**: Smart contract execution errors
+
+## Testing Blockchain Integration
+
+### Mock Testing
+For unit tests, mock the blockchain interactions:
+
+```bash
+# Run tests without actual blockchain calls
+cargo test --features mock-blockchain
+```
+
+### Integration Testing
+For integration tests with real blockchain:
+
+```bash
+# Test against testnet
+RUST_LOG=debug cargo test --features tui -- --ignored testnet
+
+# Test specific blockchain operations
+cargo test blockchain::integration::swap_operations
+```
+
+## Development Environment Setup
+
+### Network Configuration
+Configure the client for different networks:
+
+```bash
+# Testnet development
+cargo run --bin tui --features tui -- --network testnet
+
+# Mainnet (production)
+cargo run --bin tui --features tui -- --network mainnet
+
+# Custom RPC endpoint
+cargo run --bin tui --features tui -- --rpc-url "https://custom-rpc.mantra.com"
+```
+
+### Environment Variables
+Set up development environment variables:
+
+```bash
+# Optional: Override default RPC endpoints
+export MANTRA_TESTNET_RPC="https://rpc.testnet.mantra.com"
+export MANTRA_MAINNET_RPC="https://rpc.mainnet.mantra.com"
+
+# Development mode logging
+export RUST_LOG="mantra_dex_sdk=debug,cosmrs=debug"
+```
+
+## Security Considerations
+
+### Private Key Management
+- Never log or expose private keys
+- Use secure key derivation (BIP32/BIP39)
+- Implement proper key storage patterns
+
+### Transaction Safety
+- Always validate transaction parameters
+- Implement slippage protection
+- Use proper gas estimation
+- Verify contract addresses before interaction
