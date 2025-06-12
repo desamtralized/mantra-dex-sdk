@@ -258,7 +258,7 @@ async fn test_client_get_balances() {
 async fn test_pool_creation_if_needed() {
     // Only run this test if EXECUTE_WRITES is enabled
     let should_execute = std::env::var("EXECUTE_WRITES")
-        .unwrap_or_else(|_| "false".to_string())
+        .unwrap_or_else(|_| "true".to_string())
         .to_lowercase()
         == "true";
 

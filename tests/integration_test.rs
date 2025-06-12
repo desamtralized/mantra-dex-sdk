@@ -326,7 +326,17 @@ async fn test_epoch_validation_and_rewards() {
 #[tokio::test]
 async fn test_feature_toggle_with_pool_identifiers() {
     let client = create_test_client().await;
-    let pool_identifier = "test_pool_features";
+    let pool_identifier = "o.uom.usdc.pool";
+    // Test disabling all operations
+    let disable_result = client.disable_all_pool_operations(pool_identifier).await;
+
+    match disable_result {
+        Ok(_) => println!("Disable all pool operations succeeded"),
+        Err(Error::Contract(_)) => {
+            // Expected in mock environment
+        }
+        Err(e) => panic!("Unexpected error disabling pool operations: {:?}", e),
+    }
 
     // Test enabling specific pool features
     let enable_result = client
@@ -346,15 +356,17 @@ async fn test_feature_toggle_with_pool_identifiers() {
         Err(e) => panic!("Unexpected error in feature toggle: {:?}", e),
     }
 
-    // Test disabling all operations
-    let disable_result = client.disable_all_pool_operations(pool_identifier).await;
+    // Re-enable all pool features
+    let enable_result = client
+        .update_pool_features(pool_identifier, Some(true), Some(true), Some(true))
+        .await;
 
-    match disable_result {
-        Ok(_) => println!("Disable all pool operations succeeded"),
+    match enable_result {
+        Ok(_) => println!("Re-enabled all pool features succeeded"),
         Err(Error::Contract(_)) => {
-            // Expected in mock environment
+            println!("Re-enabled all pool features failed");
         }
-        Err(e) => panic!("Unexpected error disabling pool operations: {:?}", e),
+        Err(e) => panic!("Unexpected error in feature toggle: {:?}", e),
     }
 }
 

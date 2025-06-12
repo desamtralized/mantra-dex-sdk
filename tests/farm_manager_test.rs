@@ -1,6 +1,7 @@
 mod utils;
 
 use utils::test_utils::create_test_client;
+use utils::GLOBAL_TEST_MUTEX;
 
 /// Test if farm manager functionality is properly accessible
 #[tokio::test]
@@ -32,6 +33,7 @@ async fn test_farm_manager_configuration() {
 /// Test basic claim functionality (backward compatibility)
 #[tokio::test]
 async fn test_claim_rewards_backward_compatibility() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     let client = create_test_client().await;
 
     // Only run this test if we should execute writes
@@ -62,6 +64,7 @@ async fn test_claim_rewards_backward_compatibility() {
 /// Test enhanced claim functionality with epoch parameter
 #[tokio::test]
 async fn test_claim_rewards_with_epoch() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     let client = create_test_client().await;
 
     // Only run this test if we should execute writes

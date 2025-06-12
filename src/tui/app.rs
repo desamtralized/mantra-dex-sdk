@@ -921,14 +921,24 @@ impl App {
             }
             // Handle focus management events only when in within-screen mode
             Event::MoveFocus(direction) => {
-                if let Some(crate::tui::events::FocusableComponent::Dropdown(id)) = self.state.focus_manager.current_focus() {
+                if let Some(crate::tui::events::FocusableComponent::Dropdown(id)) =
+                    self.state.focus_manager.current_focus()
+                {
                     let swap_state = crate::tui::screens::swap::get_swap_screen_state();
 
                     match (id.as_str(), direction) {
-                        ("swap_pool", crate::tui::events::FocusDirection::Up) => swap_state.pool_dropdown.move_up(),
-                        ("swap_pool", crate::tui::events::FocusDirection::Down) => swap_state.pool_dropdown.move_down(),
-                        ("swap_to_asset", crate::tui::events::FocusDirection::Up) => swap_state.to_token_dropdown.move_up(),
-                        ("swap_to_asset", crate::tui::events::FocusDirection::Down) => swap_state.to_token_dropdown.move_down(),
+                        ("swap_pool", crate::tui::events::FocusDirection::Up) => {
+                            swap_state.pool_dropdown.move_up()
+                        }
+                        ("swap_pool", crate::tui::events::FocusDirection::Down) => {
+                            swap_state.pool_dropdown.move_down()
+                        }
+                        ("swap_to_asset", crate::tui::events::FocusDirection::Up) => {
+                            swap_state.to_token_dropdown.move_up()
+                        }
+                        ("swap_to_asset", crate::tui::events::FocusDirection::Down) => {
+                            swap_state.to_token_dropdown.move_down()
+                        }
                         _ => {}
                     }
 
@@ -990,23 +1000,31 @@ impl App {
                 swap_state.reset_focus();
 
                 match focused_component {
-                    FocusableComponent::TextInput(id) => {
-                        match id.as_str() {
-                            "swap_amount" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::FromAmount,
-                            "swap_slippage" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Slippage,
-                            _ => {}
+                    FocusableComponent::TextInput(id) => match id.as_str() {
+                        "swap_amount" => {
+                            swap_state.input_focus =
+                                crate::tui::screens::swap::SwapInputFocus::FromAmount
                         }
-                    }
-                    FocusableComponent::Dropdown(id) => {
-                        match id.as_str() {
-                            "swap_pool" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Pool,
-                            "swap_to_asset" => swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::ToToken,
-                            _ => {}
+                        "swap_slippage" => {
+                            swap_state.input_focus =
+                                crate::tui::screens::swap::SwapInputFocus::Slippage
                         }
-                    }
+                        _ => {}
+                    },
+                    FocusableComponent::Dropdown(id) => match id.as_str() {
+                        "swap_pool" => {
+                            swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Pool
+                        }
+                        "swap_to_asset" => {
+                            swap_state.input_focus =
+                                crate::tui::screens::swap::SwapInputFocus::ToToken
+                        }
+                        _ => {}
+                    },
                     FocusableComponent::Button(id) => {
                         if id == "swap_execute" {
-                            swap_state.input_focus = crate::tui::screens::swap::SwapInputFocus::Execute;
+                            swap_state.input_focus =
+                                crate::tui::screens::swap::SwapInputFocus::Execute;
                         }
                     }
                     _ => {}
@@ -1230,14 +1248,18 @@ impl App {
                             match field_id.as_str() {
                                 "swap_amount" => {
                                     // Update UI component
-                                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                                    let swap_state =
+                                        crate::tui::screens::swap::get_swap_screen_state();
                                     swap_state.handle_input(tui_input::InputRequest::InsertChar(c));
-                                    self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
+                                    self.state.swap_state.amount =
+                                        swap_state.from_amount_input.value().to_string();
                                 }
                                 "swap_slippage" => {
-                                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                                    let swap_state =
+                                        crate::tui::screens::swap::get_swap_screen_state();
                                     swap_state.handle_input(tui_input::InputRequest::InsertChar(c));
-                                    self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
+                                    self.state.swap_state.slippage =
+                                        swap_state.slippage_input.value().to_string();
                                 }
                                 _ => {}
                             }
@@ -1254,14 +1276,18 @@ impl App {
                         crate::tui::events::FocusableComponent::TextInput(field_id) => {
                             match field_id.as_str() {
                                 "swap_amount" => {
-                                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                                    let swap_state =
+                                        crate::tui::screens::swap::get_swap_screen_state();
                                     swap_state.handle_input(tui_input::InputRequest::Backspace);
-                                    self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
+                                    self.state.swap_state.amount =
+                                        swap_state.from_amount_input.value().to_string();
                                 }
                                 "swap_slippage" => {
-                                    let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+                                    let swap_state =
+                                        crate::tui::screens::swap::get_swap_screen_state();
                                     swap_state.handle_input(tui_input::InputRequest::Backspace);
-                                    self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
+                                    self.state.swap_state.slippage =
+                                        swap_state.slippage_input.value().to_string();
                                 }
                                 _ => {}
                             }
@@ -1272,14 +1298,24 @@ impl App {
             }
             Event::MoveFocus(direction) => {
                 // When a dropdown is focused, repurpose Up/Down keys to navigate within the list instead of shifting focus.
-                if let Some(crate::tui::events::FocusableComponent::Dropdown(id)) = self.state.focus_manager.current_focus() {
+                if let Some(crate::tui::events::FocusableComponent::Dropdown(id)) =
+                    self.state.focus_manager.current_focus()
+                {
                     let swap_state = crate::tui::screens::swap::get_swap_screen_state();
 
                     match (id.as_str(), direction) {
-                        ("swap_pool", crate::tui::events::FocusDirection::Up) => swap_state.pool_dropdown.move_up(),
-                        ("swap_pool", crate::tui::events::FocusDirection::Down) => swap_state.pool_dropdown.move_down(),
-                        ("swap_to_asset", crate::tui::events::FocusDirection::Up) => swap_state.to_token_dropdown.move_up(),
-                        ("swap_to_asset", crate::tui::events::FocusDirection::Down) => swap_state.to_token_dropdown.move_down(),
+                        ("swap_pool", crate::tui::events::FocusDirection::Up) => {
+                            swap_state.pool_dropdown.move_up()
+                        }
+                        ("swap_pool", crate::tui::events::FocusDirection::Down) => {
+                            swap_state.pool_dropdown.move_down()
+                        }
+                        ("swap_to_asset", crate::tui::events::FocusDirection::Up) => {
+                            swap_state.to_token_dropdown.move_up()
+                        }
+                        ("swap_to_asset", crate::tui::events::FocusDirection::Down) => {
+                            swap_state.to_token_dropdown.move_down()
+                        }
                         _ => {}
                     }
 
@@ -2291,7 +2327,10 @@ impl App {
     }
 
     /// Update the underlying client with a newly provided wallet and restart background tasks
-    async fn configure_client_wallet(&mut self, wallet: crate::wallet::MantraWallet) -> Result<(), Error> {
+    async fn configure_client_wallet(
+        &mut self,
+        wallet: crate::wallet::MantraWallet,
+    ) -> Result<(), Error> {
         // Stop any currently running background sync tasks so they don't keep using the stale client
         self.stop_background_tasks();
 

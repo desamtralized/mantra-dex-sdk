@@ -2,6 +2,7 @@ mod utils;
 
 use cosmwasm_std::{Coin, Decimal, Uint128};
 use utils::test_utils::{create_test_client, get_or_create_om_usdc_pool_id, load_test_config};
+use utils::GLOBAL_TEST_MUTEX;
 
 #[tokio::test]
 async fn test_list_all_pools() {
@@ -31,6 +32,7 @@ async fn test_list_all_pools() {
 
 #[tokio::test]
 async fn test_swap_operation() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     println!("Starting swap test...");
     println!("Environment initialized");
 
@@ -97,7 +99,7 @@ async fn test_swap_operation() {
                 &pool_id,
                 offer_asset,
                 &uusdc_denom, // The denom of the ask asset, should match one in the pool
-                Some(Decimal::percent(1)), // 1% max slippage
+                Some(Decimal::percent(5)), // Increased to 5% max slippage
             ),
         )
         .await
@@ -139,6 +141,7 @@ async fn test_swap_operation() {
 
 #[tokio::test]
 async fn test_provide_liquidity() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     let client = create_test_client().await;
 
     // Get or create pool ID

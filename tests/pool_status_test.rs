@@ -2,6 +2,7 @@ mod utils;
 
 use mantra_dex_sdk::{client::PoolStatus, Error};
 use utils::test_utils::{create_test_client, get_or_create_om_usdc_pool_id};
+use utils::GLOBAL_TEST_MUTEX;
 
 /// Test pool status enum functionality
 #[tokio::test]
@@ -105,6 +106,7 @@ async fn test_validate_pool_status() {
 /// Test that swap operations check pool status
 #[tokio::test]
 async fn test_swap_with_pool_status_validation() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     let client = create_test_client().await;
 
     // Get a test pool
@@ -166,6 +168,7 @@ async fn test_swap_with_pool_status_validation() {
 /// Test that provide liquidity operations check pool status
 #[tokio::test]
 async fn test_provide_liquidity_with_pool_status_validation() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     let client = create_test_client().await;
 
     // Get a test pool
@@ -235,6 +238,7 @@ async fn test_provide_liquidity_with_pool_status_validation() {
 /// Test that withdraw liquidity operations check pool status
 #[tokio::test]
 async fn test_withdraw_liquidity_with_pool_status_validation() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     let client = create_test_client().await;
 
     // Get a test pool
@@ -363,6 +367,7 @@ async fn test_multiple_pools_status() {
 /// Test that unchecked operations bypass status validation
 #[tokio::test]
 async fn test_unchecked_operations_bypass_status() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     let client = create_test_client().await;
 
     // Get a test pool

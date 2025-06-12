@@ -1,11 +1,18 @@
 use config::{Config as ConfigLoader, File};
 use cosmwasm_std::{Coin, Decimal, Uint128};
+use lazy_static::lazy_static;
 use mantra_dex_sdk::{
     config::{ContractAddresses, MantraNetworkConfig, NetworkConstants},
     MantraDexClient, MantraWallet,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tokio::sync::Mutex as TokioMutex;
+
+lazy_static! {
+    /// Global mutex to ensure that tests that perform writes run sequentially.
+    pub static ref GLOBAL_TEST_MUTEX: TokioMutex<()> = TokioMutex::new(());
+}
 
 #[cfg(test)]
 pub mod test_utils {
@@ -144,9 +151,7 @@ pub mod test_utils {
         // Try to create or find the test pool
         match create_test_pool_if_needed(client).await {
             Ok(pool_id) => Some(pool_id),
-            Err(_e) => {
-                None
-            }
+            Err(_e) => None,
         }
     }
 
@@ -172,70 +177,105 @@ pub mod test_utils {
             .unwrap();
 
         // First, try to find an existing pool
-        let pools = client.get_pools(Some(100)).await?;
-        for pool in pools {
-            if pool.pool_info.assets.iter().any(|a| a.denom == uom_denom)
-                && pool.pool_info.assets.iter().any(|a| a.denom == uusdc_denom)
-            {
-                return Ok(pool.pool_info.pool_identifier);
+        if let Ok(pools) = client.get_pools(Some(100)).await {
+            for pool in pools {
+                if pool.pool_info.assets.iter().any(|a| a.denom == uom_denom)
+                    && pool.pool_info.assets.iter().any(|a| a.denom == uusdc_denom)
+                {
+                    return Ok(pool.pool_info.pool_identifier);
+                }
             }
         }
 
         // No pool found, create one by providing initial liquidity
-        // Create a unique pool identifier
-        // Generate a simple, valid pool ID (only alphanumeric, dots, and slashes allowed)
         let pool_id = "uom.usdc.pool".to_string();
+        let actual_pool_id = format!("o.{}", pool_id);
 
-        // First create the pool
+        // Attempt to create the pool. If it already exists, that's fine.
         let pool_fees = mantra_dex_std::fee::PoolFee {
             protocol_fee: mantra_dex_std::fee::Fee {
-                share: cosmwasm_std::Decimal::percent(1), // 1% protocol fee
+                share: cosmwasm_std::Decimal::percent(1),
             },
             swap_fee: mantra_dex_std::fee::Fee {
-                share: cosmwasm_std::Decimal::percent(2), // 2% swap fee
+                share: cosmwasm_std::Decimal::percent(2),
             },
             burn_fee: mantra_dex_std::fee::Fee {
-                share: cosmwasm_std::Decimal::zero(), // 0% burn fee
+                share: cosmwasm_std::Decimal::zero(),
             },
-            extra_fees: vec![], // No extra fees
+            extra_fees: vec![],
         };
-
         let pool_type = mantra_dex_std::pool_manager::PoolType::ConstantProduct {};
 
-        let _create_result = client
+        match client
             .create_pool(
                 vec![uom_denom.clone(), uusdc_denom.clone()],
-                vec![6, 6], // Both tokens have 6 decimals
+                vec![6, 6],
                 pool_fees,
                 pool_type,
                 Some(pool_id.clone()),
             )
-            .await?;
+            .await
+        {
+            Ok(res) => println!("Pool creation tx successful: {}", res.txhash),
+            Err(e) => {
+                let err_msg = e.to_string();
+                if !err_msg.contains("pool already exists") {
+                    return Err(Box::new(e));
+                }
+                println!("Pool already exists, which is fine.");
+            }
+        }
 
-        // The contract adds "o." prefix to custom pool identifiers
-        let actual_pool_id = format!("o.{}", pool_id);
-
-        // Now provide initial liquidity to the newly created pool
+        // Now, attempt to provide liquidity with retries.
         let initial_assets = vec![
             Coin {
                 denom: uom_denom.clone(),
-                amount: Uint128::new(100_000_000), // 100 OM (6 decimals)
+                amount: Uint128::new(100_000_000), // 100 OM
             },
             Coin {
                 denom: uusdc_denom.clone(),
-                amount: Uint128::new(100_000_000), // 100 USDC (6 decimals)
+                amount: Uint128::new(100_000_000), // 100 USDC
             },
         ];
 
-        let _tx_result = client
-            .provide_liquidity_unchecked(
-                &actual_pool_id,
-                initial_assets,
-                Some(Decimal::percent(5)), // 5% liquidity max slippage
-                Some(Decimal::percent(5)), // 5% swap max slippage
-            )
-            .await?;
-        Ok(actual_pool_id)
+        for i in 0..5 {
+            match client
+                .provide_liquidity_unchecked(
+                    &actual_pool_id,
+                    initial_assets.clone(),
+                    Some(Decimal::percent(5)),
+                    Some(Decimal::percent(5)),
+                )
+                .await
+            {
+                Ok(res) => {
+                    println!(
+                        "Liquidity provision tx successful after {} retries: {}",
+                        i, res.txhash
+                    );
+                    return Ok(actual_pool_id);
+                }
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    if err_msg.contains("pool does not have enough liquidity")
+                        || err_msg.contains("share is not found")
+                    {
+                        // This might happen if the pool was just created and the node hasn't processed it fully.
+                        println!(
+                            "Liquidity provision failed (retry {}/5): {}. Retrying in 2s...",
+                            i + 1,
+                            e
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    } else {
+                        // For other errors (like sequence mismatch), fail immediately.
+                        return Err(Box::new(e));
+                    }
+                }
+            }
+        }
+
+        Err("Failed to provide liquidity after 5 retries.".into())
     }
 
     /// Check if we should execute write operations (create pools, swaps, etc.)

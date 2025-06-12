@@ -1,9 +1,11 @@
 mod utils;
 
 use utils::test_utils::{create_test_client, get_or_create_om_usdc_pool_id, should_execute_writes};
+use utils::GLOBAL_TEST_MUTEX;
 
 #[tokio::test]
 async fn test_update_pool_features() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -36,6 +38,7 @@ async fn test_update_pool_features() {
 
 #[tokio::test]
 async fn test_enable_pool_withdrawals() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -65,6 +68,7 @@ async fn test_enable_pool_withdrawals() {
 
 #[tokio::test]
 async fn test_disable_pool_withdrawals() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -94,6 +98,7 @@ async fn test_disable_pool_withdrawals() {
 
 #[tokio::test]
 async fn test_enable_pool_deposits() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -123,6 +128,7 @@ async fn test_enable_pool_deposits() {
 
 #[tokio::test]
 async fn test_disable_pool_deposits() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -152,6 +158,7 @@ async fn test_disable_pool_deposits() {
 
 #[tokio::test]
 async fn test_enable_pool_swaps() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -181,6 +188,7 @@ async fn test_enable_pool_swaps() {
 
 #[tokio::test]
 async fn test_disable_pool_swaps() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -210,6 +218,7 @@ async fn test_disable_pool_swaps() {
 
 #[tokio::test]
 async fn test_enable_all_pool_operations() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -239,6 +248,7 @@ async fn test_enable_all_pool_operations() {
 
 #[tokio::test]
 async fn test_disable_all_pool_operations() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");
@@ -268,6 +278,7 @@ async fn test_disable_all_pool_operations() {
 
 #[tokio::test]
 async fn test_backward_compatibility_global_features() {
+    let _lock = GLOBAL_TEST_MUTEX.lock().await;
     // Only run this test if we should execute writes
     if !should_execute_writes() {
         println!("Skipping write test (EXECUTE_WRITES=false)");

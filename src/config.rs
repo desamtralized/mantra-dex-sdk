@@ -83,6 +83,8 @@ pub struct MantraNetworkConfig {
     pub gas_adjustment: f64,
     /// Native token denom
     pub native_denom: String,
+    /// Time to wait in ms after a transaction is broadcast
+    pub tx_delay_ms: u64,
     /// Contract addresses
     pub contracts: ContractAddresses,
 }
@@ -100,6 +102,7 @@ impl MantraNetworkConfig {
             gas_price: constants.default_gas_price,
             gas_adjustment: constants.default_gas_adjustment,
             native_denom: constants.native_denom.clone(),
+            tx_delay_ms: 2000,
             contracts,
         }
     }
@@ -148,6 +151,7 @@ impl Default for MantraNetworkConfig {
                 gas_price: 0.025,
                 gas_adjustment: 1.3,
                 native_denom: "uom".to_string(),
+                tx_delay_ms: 2000,
                 contracts: ContractAddresses::default(),
             },
         }

@@ -1,7 +1,9 @@
+use hex;
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::time::{sleep, Duration};
 
-use base64::{engine::general_purpose, Engine};
 use cosmos_sdk_proto::{
     cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest, QueryAccountResponse},
     cosmos::bank::v1beta1::{QueryAllBalancesRequest, QueryAllBalancesResponse},
@@ -13,7 +15,7 @@ use cosmrs::{
         cosmwasm::wasm::v1::{MsgExecuteContract, QuerySmartContractStateRequest},
     },
     rpc::{Client as RpcClient, HttpClient},
-    tendermint::{chain::Id, Hash},
+    tendermint::chain::Id,
     tx::{Body, MessageExt, SignDoc, SignerInfo},
     Any,
 };
@@ -60,6 +62,12 @@ pub struct MantraDexClient {
     config: MantraNetworkConfig,
     /// Wallet for signing transactions
     wallet: Option<MantraWallet>,
+    /// Sequence cache for transaction signing
+    sequence_cache: Arc<Mutex<HashMap<String, u64>>>,
+    /// Account number cache for transaction signing
+    account_number_cache: Arc<Mutex<HashMap<String, u64>>>,
+    /// Mutex to ensure sequential transaction processing
+    tx_mutex: Arc<Mutex<()>>,
 }
 
 impl MantraDexClient {
@@ -84,6 +92,9 @@ impl MantraDexClient {
             rpc_client: Arc::new(Mutex::new(rpc_client)),
             config,
             wallet: None,
+            sequence_cache: Arc::new(Mutex::new(HashMap::new())),
+            account_number_cache: Arc::new(Mutex::new(HashMap::new())),
+            tx_mutex: Arc::new(Mutex::new(())),
         })
     }
 
@@ -106,6 +117,60 @@ impl MantraDexClient {
         self.wallet
             .as_ref()
             .ok_or_else(|| Error::Wallet("No wallet configured".to_string()))
+    }
+
+    /// Gets the current account number and sequence from cache or network.
+    async fn get_current_account_details(&self, address: &str) -> Result<(u64, u64), Error> {
+        let seq_cache = self.sequence_cache.lock().await;
+        let acc_num_cache = self.account_number_cache.lock().await;
+
+        if let (Some(seq), Some(acc_num)) = (seq_cache.get(address), acc_num_cache.get(address)) {
+            return Ok((*acc_num, *seq));
+        }
+
+        // Not in cache, query the network.
+        drop(seq_cache);
+        drop(acc_num_cache);
+
+        let rpc_client = self.rpc_client.lock().await;
+        let query_account_request = QueryAccountRequest {
+            address: address.to_string(),
+        };
+
+        let query_account_response = rpc_client
+            .abci_query(
+                Some("/cosmos.auth.v1beta1.Query/Account".to_string()),
+                query_account_request.encode_to_vec(),
+                None,
+                false,
+            )
+            .await
+            .map_err(|e| Error::Rpc(format!("Failed to query account for signing: {}", e)))?;
+
+        if !query_account_response.code.is_ok() {
+            return Err(Error::Contract(format!(
+                "Account query failed: {}",
+                query_account_response.log
+            )));
+        }
+
+        let query_account_response =
+            QueryAccountResponse::decode(query_account_response.value.as_slice())
+                .map_err(|e| Error::Rpc(format!("Failed to decode account response: {}", e)))?;
+
+        let base_account =
+            BaseAccount::decode(query_account_response.account.unwrap().value.as_slice())
+                .map_err(|e| Error::Rpc(format!("Failed to decode base account: {}", e)))?;
+
+        let acc_num = base_account.account_number;
+        let seq = base_account.sequence;
+
+        let mut seq_cache = self.sequence_cache.lock().await;
+        let mut acc_num_cache = self.account_number_cache.lock().await;
+        acc_num_cache.insert(address.to_string(), acc_num);
+        seq_cache.insert(address.to_string(), seq);
+
+        Ok((acc_num, seq))
     }
 
     /// Get last block height
@@ -241,116 +306,119 @@ impl MantraDexClient {
 
     /// Broadcast a transaction to the network
     async fn broadcast_tx(&self, msgs: Vec<Any>) -> Result<TxResponse, Error> {
-        let _height = self.get_last_block_height().await?;
+        const MAX_RETRIES: u8 = 3;
+
+        let _tx_lock = self.tx_mutex.lock().await;
+
         let wallet = self.wallet()?;
-        let rpc_client = self.rpc_client.lock().await;
+        let address = wallet.address()?.to_string();
 
-        let tx_body = Body::new(msgs, String::new(), 0u32);
+        for attempt in 0..MAX_RETRIES {
+            // Small delay before each attempt to respect configured cool-down period
+            sleep(Duration::from_millis(self.config.tx_delay_ms)).await;
 
-        // Get account info for signing
-        let addr = wallet.address().unwrap().to_string();
+            // (Re)fetch account details every attempt because the sequence might have been reset
+            let (account_number, sequence) = self.get_current_account_details(&address).await?;
 
-        // Create request using the proper protobuf type
-        let request = QueryAccountRequest { address: addr };
+            // Build the tx
+            let tx_body = Body::new(msgs.clone(), String::new(), 0u32);
+            let signer_info = SignerInfo::single_direct(Some(wallet.public_key()), sequence);
+            let fee = wallet.create_default_fee(2_000_000)?;
+            let auth_info = signer_info.auth_info(fee);
+            let chain_id: Id = self.config.network_id.parse().unwrap();
+            let sign_doc = SignDoc::new(&tx_body, &auth_info, &chain_id, account_number)
+                .map_err(|e| Error::Rpc(format!("Failed to create sign doc: {}", e)))?;
+            let tx_raw = sign_doc
+                .sign(wallet.signing_key())
+                .map_err(|e| Error::Wallet(format!("Failed to sign transaction: {}", e)))?;
 
-        // Encode the request to protobuf
-        let encoded_request = request.encode_to_vec();
+            let rpc_client = self.rpc_client.lock().await;
+            let response = rpc_client
+                .broadcast_tx_commit(tx_raw.to_bytes().unwrap())
+                .await;
 
-        let account_info = rpc_client
-            .abci_query(
-                Some("/cosmos.auth.v1beta1.Query/Account".to_string()),
-                encoded_request,
-                None,
-                false,
-            )
-            .await
-            .map_err(|e| Error::Rpc(format!("Failed to get account info: {}", e)))?;
+            // Handle ABCI response success path first
+            if let Ok(tx_response) = response {
+                let check_tx_log = tx_response.check_tx.log.to_lowercase();
+                let deliver_tx_log = tx_response.tx_result.log.to_lowercase();
 
-        if !account_info.code.is_ok() {
-            return Err(Error::Rpc(format!(
-                "Account query failed: {}",
-                account_info.log
-            )));
+                // Handle CheckTx errors
+                if tx_response.check_tx.code.is_err() {
+                    if check_tx_log.contains("account sequence mismatch") {
+                        self.sequence_cache.lock().await.remove(&address);
+                        if attempt + 1 < MAX_RETRIES {
+                            continue; // Retry with fresh sequence
+                        }
+                    }
+
+                    return Err(Error::Contract(format!(
+                        "Transaction check failed: {}",
+                        tx_response.check_tx.log
+                    )));
+                }
+
+                // Handle DeliverTx errors
+                if tx_response.tx_result.code.is_err() {
+                    if deliver_tx_log.contains("account sequence mismatch") {
+                        self.sequence_cache.lock().await.remove(&address);
+                        if attempt + 1 < MAX_RETRIES {
+                            continue; // Retry
+                        }
+                    }
+
+                    return Err(Error::Contract(format!(
+                        "Transaction execution failed: {}",
+                        tx_response.tx_result.log
+                    )));
+                }
+
+                // Success ➜ update cache and return
+                self.sequence_cache
+                    .lock()
+                    .await
+                    .insert(address.clone(), sequence + 1);
+
+                return Ok(TxResponse {
+                    height: tx_response.height.value() as i64,
+                    txhash: tx_response.hash.to_string(),
+                    codespace: tx_response.tx_result.codespace.clone(),
+                    code: tx_response.tx_result.code.value(),
+                    data: hex::encode(tx_response.tx_result.data.clone()),
+                    raw_log: tx_response.tx_result.log.clone(),
+                    logs: vec![],
+                    info: tx_response.tx_result.info.clone(),
+                    gas_wanted: tx_response.tx_result.gas_wanted,
+                    gas_used: tx_response.tx_result.gas_used,
+                    tx: None,
+                    timestamp: "".to_string(),
+                    events: vec![],
+                });
+            }
+
+            // Handle network/RPC errors
+            if let Err(e) = response {
+                let error_log = e.to_string().to_lowercase();
+
+                if error_log.contains("account sequence mismatch")
+                    || error_log.contains("incorrect account sequence")
+                    || error_log.contains("tx already exists")
+                {
+                    self.sequence_cache.lock().await.remove(&address);
+                    if attempt + 1 < MAX_RETRIES {
+                        continue; // Retry
+                    }
+                }
+
+                return Err(Error::Rpc(format!(
+                    "Failed to broadcast transaction: {}",
+                    e
+                )));
+            }
         }
 
-        // Decode the response using the correct protobuf type
-        let account_response = QueryAccountResponse::decode(account_info.value.as_slice())
-            .map_err(|e| Error::Rpc(format!("Failed to decode account response: {}", e)))?;
-
-        // Extract the account data - account.value contains a serialized BaseAccount
-        let account_any = account_response.account.unwrap();
-
-        // Decode the BaseAccount from the Any object's value
-        let base_account = BaseAccount::decode(account_any.value.as_slice())
-            .map_err(|e| Error::Rpc(format!("Failed to decode BaseAccount: {}", e)))?;
-
-        let account_number = base_account.account_number;
-        let sequence = base_account.sequence;
-        // Create the fee
-        let fee = wallet.create_default_fee(2_000_000)?;
-
-        // Create signer info with sequence number
-        let signer_info = SignerInfo::single_direct(Some(wallet.public_key()), sequence);
-
-        // Create auth info with fee
-        let auth_info = signer_info.auth_info(fee);
-
-        let chain_id = Id::try_from(self.config.network_id.as_str())
-            .map_err(|e| Error::Tx(format!("Invalid chain ID: {}", e)))?;
-
-        let sign_doc = SignDoc::new(&tx_body, &auth_info, &chain_id, account_number)
-            .map_err(|e| Error::Tx(format!("Failed to create sign doc: {}", e)))?;
-
-        // Sign the transaction
-        let tx_raw = sign_doc
-            .sign(wallet.signing_key())
-            .map_err(|e| Error::Tx(format!("Failed to sign transaction: {}", e)))?;
-        // Broadcast the transaction
-        let response = rpc_client
-            .broadcast_tx_commit(tx_raw.to_bytes().unwrap())
-            .await
-            .map_err(|e| Error::Rpc(format!("Failed to broadcast transaction: {}", e)))?;
-        // Get the transaction response
-        let tx_response = if response.check_tx.code.is_err() {
-            return Err(Error::Contract(format!(
-                "Transaction check failed: {}",
-                response.check_tx.log
-            )));
-        } else if response.tx_result.code.is_err() {
-            return Err(Error::Contract(format!(
-                "Transaction execution failed: {}",
-                response.tx_result.log
-            )));
-        } else {
-            // Query the tx
-            let tx_result = rpc_client
-                .tx(
-                    Hash::try_from(response.hash.as_bytes().to_vec())
-                        .map_err(|e| Error::Tx(format!("Invalid tx hash: {}", e)))?,
-                    false,
-                )
-                .await
-                .map_err(|e| Error::Rpc(format!("Failed to get transaction: {}", e)))?;
-
-            // Transform the response to TxResponse
-            TxResponse {
-                height: tx_result.height.value() as i64,
-                txhash: hex::encode(response.hash.as_bytes()),
-                codespace: "".to_string(),
-                code: 0,
-                data: general_purpose::STANDARD.encode(tx_result.tx_result.data),
-                raw_log: tx_result.tx_result.log.to_string(),
-                logs: vec![],
-                info: "".to_string(),
-                gas_wanted: tx_result.tx_result.gas_wanted,
-                gas_used: tx_result.tx_result.gas_used,
-                tx: None,
-                timestamp: "".to_string(),
-                events: vec![],
-            }
-        };
-
-        Ok(tx_response)
+        Err(Error::Other(
+            "Max retries exceeded while broadcasting transaction".into(),
+        ))
     }
 
     /// Get pool information by ID
