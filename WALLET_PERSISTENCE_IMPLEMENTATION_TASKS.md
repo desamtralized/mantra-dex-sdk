@@ -198,73 +198,21 @@ This document contains a comprehensive task list for implementing wallet persist
   - Add recovery suggestions for each error type
   - Ensure error messages are consistent across components
 
-### Task 7.2: Add Corrupted Wallet Handling
-- [ ] **Implement graceful handling of corrupted wallet files**
-  - Detect and handle corrupted wallet files gracefully
-  - Offer to delete corrupted files with user confirmation
-  - Provide manual recovery options
-  - Add wallet file integrity checking
+## Phase 8: Documentation & Polish (Low Priority)
 
-### Task 7.3: Implement Backup/Export Features
-- [ ] **Add wallet metadata export**
-  - Add "Export Wallet Info" option in settings
-  - Export wallet metadata (name, address, created date) to JSON
-  - Exclude sensitive data from exports
-  - Add import functionality for wallet metadata
-
----
-
-## Phase 8: Testing & Integration (Low Priority)
-
-### Task 8.1: Add Unit Tests
-- [ ] **Create comprehensive unit tests**
-  - Test wallet storage encryption/decryption
-  - Test password validation functions
-  - Test UI component behavior
-  - Test error handling paths
-  - Add tests to `tests/wallet_persistence_test.rs`
-
-### Task 8.2: Add Integration Tests
-- [ ] **Create end-to-end integration tests**
-  - Test complete wallet save flow
-  - Test complete wallet load flow
-  - Test multiple wallet management
-  - Test error recovery scenarios
-  - Add to `tests/integration/wallet_flow_test.rs`
-
-### Task 8.3: Performance Testing
-- [ ] **Verify performance requirements**
-  - Measure encryption/decryption times
-  - Test with multiple saved wallets
-  - Verify startup time with saved wallets
-  - Test memory usage during crypto operations
-  - Document performance benchmarks
-
----
-
-## Phase 9: Documentation & Polish (Low Priority)
-
-### Task 9.1: Update Documentation
+### Task 8.1: Update Documentation
 - [ ] **Update project documentation**
   - Update README.md with wallet persistence feature
   - Add security considerations section
   - Document new keyboard shortcuts
   - Add troubleshooting guide for wallet issues
 
-### Task 9.2: Add Help Text
+### Task 8.2: Add Help Text
 - [ ] **Implement contextual help**
   - Add help text to wallet selection screen
   - Add help text to password creation modal
   - Update existing help system with new shortcuts
   - Add tooltips for password strength requirements
-
-### Task 9.3: Final Testing & Bug Fixes
-- [ ] **Comprehensive testing and polish**
-  - Test all user flows end-to-end
-  - Verify cross-platform compatibility
-  - Fix any remaining UI/UX issues
-  - Perform security audit of implementation
-  - Test with different terminal sizes and themes
 
 ---
 
@@ -274,14 +222,6 @@ This document contains a comprehensive task list for implementing wallet persist
 1. **Security First**: Never compromise on security for user experience
 2. **Backward Compatibility**: Ensure existing users can still use the application
 3. **Error Recovery**: Always provide users a way to recover from errors
-4. **Cross-Platform**: Test on Linux, macOS, and Windows
-5. **Performance**: Keep crypto operations non-blocking where possible
-
-### Testing Strategy:
-- Test each phase thoroughly before moving to the next
-- Use both unit tests and manual testing
-- Test error conditions and edge cases
-- Verify security properties of crypto implementation
 
 ### Key Files to Monitor:
 - `src/tui/app.rs` - Main application state and event handling
@@ -293,6 +233,4 @@ This document contains a comprehensive task list for implementing wallet persist
 ---
 
 **Implementation Status**: Not Started  
-**Estimated Total Time**: 3-4 weeks  
 **Priority**: High (User Experience Critical)  
-**Security Review Required**: Yes (Before Production Release) 
