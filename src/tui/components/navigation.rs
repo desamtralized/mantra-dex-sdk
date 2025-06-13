@@ -23,6 +23,7 @@ fn create_navigation_tabs(app_state: &AppState) -> Tabs {
         .map(|screen| {
             // Add keyboard shortcut indicators
             let shortcut_name = match screen {
+                Screen::WalletSelection => "0:Wallet",
                 Screen::Dashboard => "1:Dashboard",
                 Screen::Pools => "2:Pools",
                 Screen::Swap => "3:Swap",

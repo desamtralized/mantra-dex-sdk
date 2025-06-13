@@ -194,9 +194,26 @@ async fn run_tui_app(args: Args) -> Result<(), Error> {
     // Setup event handler
     let event_handler = EventHandler::new();
 
-    // Welcome message
-    app.set_status("Welcome to MANTRA DEX TUI! Use Tab/Shift+Tab to navigate, Enter to activate, Esc to go back.".to_string());
-    app.navigate_to(Screen::Dashboard);
+    // Check for saved wallets and set initial screen
+    let wallet_storage = mantra_dex_sdk::wallet::WalletStorage::new()?;
+    if wallet_storage.has_saved_wallets()? {
+        // Initialize wallet selection screen with available wallets
+        if let Err(e) = app.state.wallet_selection_state.initialize() {
+            eprintln!("Warning: Failed to load saved wallets: {}", e);
+            // Fall back to dashboard if we can't load wallets
+            app.set_status("Welcome to MANTRA DEX TUI! Use Tab/Shift+Tab to navigate, Enter to activate, Esc to go back.".to_string());
+            app.navigate_to(Screen::Dashboard);
+        } else {
+            // Show wallet selection screen
+            app.state.current_screen = Screen::WalletSelection;
+            app.state.wizard_state.show_wizard = false; // Don't show wizard when wallets exist
+            app.set_status("Select a wallet or create a new one. Use ↑/↓ to navigate, Enter to select, N for new, R to recover.".to_string());
+        }
+    } else {
+        // No saved wallets - show wizard for first-time setup
+        app.state.wizard_state.show_wizard = true;
+        app.set_status("Welcome to MANTRA DEX! Let's set up your wallet.".to_string());
+    }
 
     // Main application loop
     let mut tick_interval = interval(Duration::from_millis(250));

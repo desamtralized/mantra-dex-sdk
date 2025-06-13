@@ -13,6 +13,7 @@ pub mod rewards;
 pub mod settings;
 pub mod swap;
 pub mod transaction;
+pub mod wallet_selection;
 pub mod wizard;
 
 pub use admin::*;
@@ -24,5 +25,6 @@ pub use rewards::*;
 pub use settings::*;
 pub use swap::*;
 pub use transaction::*;
+pub use wallet_selection::*;
 
 // Placeholder - screens will be implemented in future tasks

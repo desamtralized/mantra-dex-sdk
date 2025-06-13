@@ -161,6 +161,7 @@ fn get_context_help(app_state: &AppState) -> String {
     let base_help = "Tab:Next | Shift+Tab:Prev | q:Quit | ?:Help";
 
     let screen_help = match app_state.current_screen {
+        crate::tui::app::Screen::WalletSelection => "↑↓:Select | Enter:Load | n:New | r:Recover",
         crate::tui::app::Screen::Dashboard => "Enter:Refresh",
         crate::tui::app::Screen::Pools => "↑↓:Select | Enter:Details | r:Refresh",
         crate::tui::app::Screen::Swap => "Enter:Execute | s:Simulate | r:Reset",

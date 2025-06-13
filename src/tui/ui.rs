@@ -52,6 +52,10 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) -> Result<(), Error> {
     // Render the active screen. Screens are responsible for drawing header, navigation,
     // content, and status bar, so we simply delegate rendering here.
     match app.state.current_screen {
+        crate::tui::app::Screen::WalletSelection => {
+            // Render wallet selection screen
+            app.state.wallet_selection_state.render(frame.area(), frame.buffer_mut());
+        }
         crate::tui::app::Screen::Dashboard => render_dashboard(frame, app),
         crate::tui::app::Screen::Pools => render_pools(frame, app),
         crate::tui::app::Screen::Swap => render_swap(frame, app),
@@ -225,6 +229,10 @@ fn render_main_content(
 
     // Render based on current screen
     match app.state.current_screen {
+        crate::tui::app::Screen::WalletSelection => {
+            // Pass layout config to wallet selection (will need updating)
+            crate::tui::screens::wallet_selection::render_wallet_selection(frame, app);
+        }
         crate::tui::app::Screen::Dashboard => {
             // Pass layout config to dashboard (will need updating)
             render_dashboard(frame, app);

@@ -49,6 +49,17 @@ pub enum ModalType {
         error_message: String,
         suggestions: Vec<String>,
     },
+    WalletSave {
+        title: String,
+        message: String,
+        mnemonic: String,
+        address: String,
+        wallet_name: String,
+        password: String,
+        confirm_password: String,
+        current_field: WalletSaveField,
+        show_password: bool,
+    },
 }
 
 /// Error types for better error categorization and handling
@@ -143,6 +154,16 @@ impl ErrorType {
             ],
         }
     }
+}
+
+/// Fields in wallet save modal
+#[derive(Debug, Clone, PartialEq)]
+pub enum WalletSaveField {
+    WalletName,
+    Password,
+    ConfirmPassword,
+    SaveButton,
+    CancelButton,
 }
 
 /// Help section for help modal
@@ -275,6 +296,26 @@ impl ModalState {
                 message,
                 progress,
                 can_cancel,
+            },
+            is_visible: true,
+            selected_option: 0,
+            scroll_offset: 0,
+        }
+    }
+
+    /// Create a new wallet save modal
+    pub fn wallet_save(title: String, message: String, mnemonic: String, address: String) -> Self {
+        Self {
+            modal_type: ModalType::WalletSave {
+                title,
+                message,
+                mnemonic,
+                address,
+                wallet_name: String::new(),
+                password: String::new(),
+                confirm_password: String::new(),
+                current_field: WalletSaveField::WalletName,
+                show_password: false,
             },
             is_visible: true,
             selected_option: 0,
@@ -528,6 +569,27 @@ pub fn render_modal(f: &mut Frame, modal_state: &ModalState, area: Rect) {
             progress,
             can_cancel,
         } => render_loading_modal(f, title, message, progress, *can_cancel, modal_area),
+
+        ModalType::WalletSave {
+            title,
+            message,
+            wallet_name,
+            password,
+            confirm_password,
+            current_field,
+            show_password,
+            ..
+        } => render_wallet_save_modal(
+            f,
+            title,
+            message,
+            wallet_name,
+            password,
+            confirm_password,
+            current_field,
+            *show_password,
+            modal_area,
+        ),
     }
 }
 
@@ -995,6 +1057,144 @@ fn render_comprehensive_help_modal(
 }
 
 /// Helper function to create a centered rectangle
+/// Render wallet save modal with form fields
+fn render_wallet_save_modal(
+    f: &mut Frame,
+    title: &str,
+    message: &str,
+    wallet_name: &str,
+    password: &str,
+    confirm_password: &str,
+    current_field: &WalletSaveField,
+    show_password: bool,
+    area: Rect,
+) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5), // Message
+            Constraint::Length(3), // Wallet name input
+            Constraint::Length(3), // Password input
+            Constraint::Length(3), // Confirm password input
+            Constraint::Length(3), // Buttons
+        ])
+        .split(area);
+
+    // Message
+    let message_paragraph = Paragraph::new(message)
+        .style(Style::default().fg(Color::White))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Blue))
+                .title(title)
+                .padding(Padding::uniform(1)),
+        )
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(message_paragraph, chunks[0]);
+
+    // Wallet name input
+    let name_style = if *current_field == WalletSaveField::WalletName {
+        Style::default().bg(Color::Blue).fg(Color::White)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let name_input = Paragraph::new(wallet_name)
+        .style(name_style)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Wallet Name")
+                .padding(Padding::uniform(1)),
+        );
+
+    f.render_widget(name_input, chunks[1]);
+
+    // Password input
+    let password_style = if *current_field == WalletSaveField::Password {
+        Style::default().bg(Color::Blue).fg(Color::White)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let password_display = if show_password {
+        password.to_string()
+    } else {
+        "*".repeat(password.len())
+    };
+
+    let password_input = Paragraph::new(password_display)
+        .style(password_style)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Password (12+ chars, mixed case, numbers, symbols)")
+                .padding(Padding::uniform(1)),
+        );
+
+    f.render_widget(password_input, chunks[2]);
+
+    // Confirm password input
+    let confirm_style = if *current_field == WalletSaveField::ConfirmPassword {
+        Style::default().bg(Color::Blue).fg(Color::White)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let confirm_display = if show_password {
+        confirm_password.to_string()
+    } else {
+        "*".repeat(confirm_password.len())
+    };
+
+    let confirm_input = Paragraph::new(confirm_display)
+        .style(confirm_style)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Confirm Password")
+                .padding(Padding::uniform(1)),
+        );
+
+    f.render_widget(confirm_input, chunks[3]);
+
+    // Buttons
+    let button_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(chunks[4]);
+
+    // Save button
+    let save_style = if *current_field == WalletSaveField::SaveButton {
+        Style::default().bg(Color::Green).fg(Color::Black)
+    } else {
+        Style::default().fg(Color::Green)
+    };
+
+    let save_button = Paragraph::new("Save Wallet")
+        .style(save_style)
+        .block(Block::default().borders(Borders::ALL))
+        .alignment(Alignment::Center);
+
+    f.render_widget(save_button, button_chunks[0]);
+
+    // Cancel button
+    let cancel_style = if *current_field == WalletSaveField::CancelButton {
+        Style::default().bg(Color::Red).fg(Color::Black)
+    } else {
+        Style::default().fg(Color::Red)
+    };
+
+    let cancel_button = Paragraph::new("Skip")
+        .style(cancel_style)
+        .block(Block::default().borders(Borders::ALL))
+        .alignment(Alignment::Center);
+
+    f.render_widget(cancel_button, button_chunks[1]);
+}
+
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()
         .direction(Direction::Vertical)

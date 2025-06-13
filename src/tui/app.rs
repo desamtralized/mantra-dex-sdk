@@ -30,6 +30,7 @@ use tokio::sync::mpsc;
 /// Available screens in the TUI application
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
+    WalletSelection,
     Dashboard,
     Pools,
     Swap,
@@ -54,6 +55,7 @@ impl Screen {
     /// Get the display name for the screen
     pub fn display_name(&self) -> &'static str {
         match self {
+            Screen::WalletSelection => "Wallet Selection",
             Screen::Dashboard => "Dashboard",
             Screen::Pools => "Pools",
             Screen::Swap => "Swap",
@@ -361,6 +363,8 @@ pub struct AppState {
     pub pending_operations: HashMap<String, PendingOperation>,
     /// Focus management for keyboard navigation
     pub focus_manager: FocusManager,
+    /// Wallet selection screen state
+    pub wallet_selection_state: crate::tui::screens::wallet_selection::WalletSelectionScreen,
     /// Wallet setup wizard state
     pub wizard_state: crate::tui::screens::wizard::WizardState,
 }
@@ -405,7 +409,7 @@ impl Default for NetworkInfo {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            current_screen: Screen::Dashboard,
+            current_screen: Screen::WalletSelection,
             navigation_mode: NavigationMode::ScreenLevel,
             loading_state: LoadingState::Idle,
             error_message: None,
@@ -430,6 +434,7 @@ impl Default for AppState {
             network_info: NetworkInfo::default(),
             pending_operations: HashMap::new(),
             focus_manager: FocusManager::new(),
+            wallet_selection_state: crate::tui::screens::wallet_selection::WalletSelectionScreen::default(),
             wizard_state: {
                 let mut wizard = crate::tui::screens::wizard::WizardState::new();
                 // Show wizard on first run if no wallet is configured
@@ -999,6 +1004,10 @@ impl App {
                             }
                         }
                     }
+                } else if self.state.current_screen == Screen::WalletSelection {
+                    // Special case: Allow wallet selection screen to handle MoveFocus events even in ScreenLevel mode
+                    // This is needed because wallet selection is often the first screen and needs arrow key navigation
+                    self.handle_screen_specific_event(Event::MoveFocus(direction)).await?;
                 }
             }
             Event::ContextAction => {
@@ -1457,10 +1466,147 @@ impl App {
     /// Handle screen-specific events
     async fn handle_screen_specific_event(&mut self, event: Event) -> Result<bool, Error> {
         match self.state.current_screen {
+            Screen::WalletSelection => self.handle_wallet_selection_event(event).await,
             Screen::Swap => self.handle_swap_screen_event(event).await,
             Screen::Liquidity => self.handle_liquidity_screen_event(event).await,
             Screen::Settings => self.handle_settings_screen_event(event).await,
             _ => Ok(false),
+        }
+    }
+
+    /// Handle wallet selection screen specific events. Returns `true` if the event was handled.
+    async fn handle_wallet_selection_event(&mut self, event: Event) -> Result<bool, Error> {
+        use crate::tui::screens::wallet_selection::{WalletSelectionAction, WalletSelectionState};
+
+        match event {
+            Event::Up | Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
+                if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet {
+                    self.state.wallet_selection_state.move_selection_up();
+                    return Ok(true);
+                }
+            }
+            Event::Down | Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
+                if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet {
+                    self.state.wallet_selection_state.move_selection_down();
+                    return Ok(true);
+                }
+            }
+            Event::Enter => {
+                let action = self.state.wallet_selection_state.handle_selection();
+                return self.handle_wallet_selection_action(action).await;
+            }
+            Event::Escape => {
+                let action = self.state.wallet_selection_state.handle_escape();
+                return self.handle_wallet_selection_action(action).await;
+            }
+            Event::Char(c) => {
+                if self.state.wallet_selection_state.state == WalletSelectionState::EnteringPassword {
+                    self.state.wallet_selection_state.handle_char(c);
+                    return Ok(true);
+                } else if c == 'n' || c == 'N' {
+                    // Quick shortcut to create new wallet
+                    if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet {
+                        return self.handle_wallet_selection_action(WalletSelectionAction::CreateNewWallet).await;
+                    }
+                } else if c == 'r' || c == 'R' {
+                    // Quick shortcut to recover wallet
+                    if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet {
+                        return self.handle_wallet_selection_action(WalletSelectionAction::RecoverWallet).await;
+                    }
+                }
+            }
+            Event::Backspace => {
+                if self.state.wallet_selection_state.state == WalletSelectionState::EnteringPassword {
+                    self.state.wallet_selection_state.handle_backspace();
+                    return Ok(true);
+                }
+            }
+            Event::F(1) => {
+                // Toggle password visibility
+                self.state.wallet_selection_state.toggle_password_visibility();
+                return Ok(true);
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    /// Handle wallet selection actions
+    async fn handle_wallet_selection_action(&mut self, action: crate::tui::screens::wallet_selection::WalletSelectionAction) -> Result<bool, Error> {
+        use crate::tui::screens::wallet_selection::WalletSelectionAction;
+
+        match action {
+            WalletSelectionAction::None => Ok(true),
+            WalletSelectionAction::CreateNewWallet => {
+                // Go to wizard for creating new wallet
+                self.state.wizard_state.show_wizard = true;
+                self.state.wizard_state.import_existing = false;
+                self.state.wizard_state.reset();
+                Ok(true)
+            }
+            WalletSelectionAction::RecoverWallet => {
+                // Go to wizard for recovering existing wallet
+                self.state.wizard_state.show_wizard = true;
+                self.state.wizard_state.import_existing = true;
+                self.state.wizard_state.reset();
+                Ok(true)
+            }
+            WalletSelectionAction::AuthenticateWallet { wallet_name, password } => {
+                // Attempt to load and decrypt the wallet
+                self.set_loading(format!("Loading wallet '{}'...", wallet_name));
+                
+                let storage = crate::wallet::WalletStorage::new()
+                    .map_err(|e| Error::Wallet(format!("Failed to initialize wallet storage: {}", e)))?;
+                
+                match storage.load_wallet(&wallet_name, &password) {
+                    Ok(mnemonic) => {
+                        self.state.wallet_selection_state.handle_authentication_success(wallet_name.clone(), mnemonic.clone());
+                        
+                        // Load the wallet into the application
+                        match crate::wallet::MantraWallet::from_mnemonic(&mnemonic, 0) {
+                            Ok(wallet) => {
+                                match wallet.address() {
+                                    Ok(address) => {
+                                        self.set_wallet_address(address.to_string());
+                                        // Reconfigure the client with the loaded wallet
+                                        self.configure_client_wallet(wallet).await?;
+                                        
+                                        // Navigate to dashboard and hide wizard
+                                        self.state.wizard_state.show_wizard = false;
+                                        self.navigate_to(Screen::Dashboard);
+                                        
+                                        self.set_success(format!("Wallet '{}' loaded successfully!", wallet_name));
+                                    }
+                                    Err(e) => {
+                                        self.state.wallet_selection_state.handle_authentication_failure(
+                                            format!("Failed to derive wallet address: {}", e)
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                self.state.wallet_selection_state.handle_authentication_failure(
+                                    format!("Failed to load wallet: {}", e)
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.state.wallet_selection_state.handle_authentication_failure(
+                            format!("Authentication failed: {}", e)
+                        );
+                    }
+                }
+                Ok(true)
+            }
+            WalletSelectionAction::WalletLoaded { wallet_name: _, mnemonic: _ } => {
+                // This case is handled in AuthenticateWallet above
+                Ok(true)
+            }
+            WalletSelectionAction::Quit => {
+                self.state.should_quit = true;
+                Ok(true)
+            }
         }
     }
 
@@ -2267,7 +2413,60 @@ impl App {
 
     /// Refresh settings data
     async fn refresh_dashboard_data(&mut self) -> Result<(), Error> {
-        // Refresh balances, network info, and other dashboard data
+        // Only refresh data if we have a connected wallet, otherwise just refresh network info
+        if self.state.wallet_address.is_none() {
+            // No wallet connected - only refresh basic network info
+            self.set_loading("Refreshing network data...".to_string());
+            
+            let mut errors = Vec::new();
+            
+            // Refresh network info only
+            match self.client.get_last_block_height().await {
+                Ok(height) => {
+                    self.state.block_height = Some(height);
+                    self.state.network_info.last_sync_time = Some(chrono::Utc::now());
+                    self.state.network_info.is_syncing = false;
+                }
+                Err(e) => {
+                    errors.push(format!("Failed to fetch block height: {}", e));
+                }
+            }
+            
+            // Refresh pool data (limited to avoid overwhelming)
+            match self.client.get_pools(Some(20)).await {
+                Ok(pools) => {
+                    for pool in pools {
+                        let pool_id = pool.pool_info.pool_identifier.clone();
+                        let cache_entry = PoolCacheEntry {
+                            pool_info: pool,
+                            cached_at: chrono::Utc::now(),
+                        };
+                        self.state.pool_cache.insert(pool_id, cache_entry);
+                    }
+                }
+                Err(e) => {
+                    errors.push(format!("Failed to fetch pools: {}", e));
+                }
+            }
+            
+            if errors.is_empty() {
+                self.set_success("Network data refreshed successfully".to_string());
+            } else {
+                let error_summary = if errors.len() == 1 {
+                    errors[0].clone()
+                } else {
+                    format!("Multiple errors occurred: {}", errors.join("; "))
+                };
+                self.set_error_with_type(
+                    format!("Network refresh completed with warnings: {}", error_summary),
+                    crate::tui::components::modals::ErrorType::Network,
+                );
+            }
+            
+            return Ok(());
+        }
+        
+        // Refresh balances, network info, and other dashboard data (wallet connected)
         self.set_loading("Refreshing dashboard data...".to_string());
 
         let mut errors = Vec::new();
@@ -2484,8 +2683,10 @@ impl App {
                 if self.state.wizard_state.current_step
                     == crate::tui::screens::wizard::WizardStep::Welcome
                 {
-                    // Skip wizard (not recommended)
+                    // Skip wizard (not recommended) - stay on wallet selection since no wallet was set up
                     self.state.wizard_state.finish_wizard();
+                    // Note: We don't navigate anywhere since the user skipped wallet setup
+                    // They'll remain on the wallet selection screen to choose/create a wallet later
                 } else {
                     self.state.wizard_state.previous_step();
                 }
@@ -2499,6 +2700,9 @@ impl App {
                         // Finish wizard and apply settings
                         self.apply_wizard_settings().await?;
                         self.state.wizard_state.finish_wizard();
+                        
+                        // Navigate to dashboard with the newly created/imported wallet
+                        self.navigate_to(Screen::Dashboard);
                     } else {
                         self.state.wizard_state.next_step();
                     }
@@ -2513,6 +2717,9 @@ impl App {
                     crate::tui::screens::wizard::WizardStep::WalletSetup => {
                         self.state.wizard_state.toggle_wallet_mode();
                     }
+                    crate::tui::screens::wizard::WizardStep::WalletSave => {
+                        self.state.wizard_state.wallet_save_focus_next();
+                    }
                     _ => {}
                 }
             }
@@ -2524,6 +2731,9 @@ impl App {
                     }
                     crate::tui::screens::wizard::WizardStep::WalletSetup => {
                         self.state.wizard_state.toggle_wallet_mode();
+                    }
+                    crate::tui::screens::wizard::WizardStep::WalletSave => {
+                        self.state.wizard_state.wallet_save_focus_previous();
                     }
                     _ => {}
                 }
@@ -2543,6 +2753,9 @@ impl App {
                             self.state.wizard_state.security_acknowledged = false;
                         }
                     }
+                    crate::tui::screens::wizard::WizardStep::WalletSave => {
+                        self.state.wizard_state.wallet_save_handle_char(c);
+                    }
                     _ => {}
                 }
             }
@@ -2554,6 +2767,9 @@ impl App {
                             self.state.wizard_state.mnemonic_input.pop();
                         }
                     }
+                    crate::tui::screens::wizard::WizardStep::WalletSave => {
+                        self.state.wizard_state.wallet_save_handle_backspace();
+                    }
                     _ => {}
                 }
             }
@@ -2564,6 +2780,11 @@ impl App {
                     && self.state.wizard_state.import_existing
                 {
                     self.state.wizard_state.mnemonic_input.push(' ');
+                } else if self.state.wizard_state.current_step
+                    == crate::tui::screens::wizard::WizardStep::WalletSave
+                {
+                    // Handle space bar for the currently focused field
+                    self.state.wizard_state.wallet_save_handle_char(' ');
                 }
             }
             // Handle paste events (bracketed paste) for mnemonic field
@@ -2646,12 +2867,86 @@ impl App {
             }
         }
 
+        // Save wallet if user chose to do so
+        if self.state.wizard_state.save_wallet {
+            if let Some(mnemonic) = self.get_current_wallet_mnemonic() {
+                if let Some(address) = &self.state.wallet_address {
+                    self.save_wallet_from_wizard(mnemonic, address.clone()).await?;
+                }
+            }
+        }
+
         // Trigger dashboard refresh to reflect new wallet and network state
         if let Err(e) = self.refresh_dashboard_data().await {
             eprintln!("Warning: Failed to refresh dashboard data: {}", e);
         }
 
         Ok(())
+    }
+
+    /// Get the current wallet mnemonic from wizard state
+    fn get_current_wallet_mnemonic(&self) -> Option<String> {
+        if self.state.wizard_state.import_existing {
+            // For imported wallets, return the entered mnemonic
+            if !self.state.wizard_state.mnemonic_input.is_empty() {
+                Some(self.state.wizard_state.mnemonic_input.clone())
+            } else {
+                None
+            }
+        } else {
+            // For generated wallets, return the generated mnemonic
+            self.state.wizard_state.generated_mnemonic.clone()
+        }
+    }
+
+    /// Save wallet from wizard with user's chosen settings
+    async fn save_wallet_from_wizard(&mut self, mnemonic: String, address: String) -> Result<(), Error> {
+        self.set_loading("Saving wallet...".to_string());
+
+        let storage = crate::wallet::WalletStorage::new()
+            .map_err(|e| Error::Wallet(format!("Failed to initialize wallet storage: {}", e)))?;
+
+        match storage.save_wallet(
+            &self.state.wizard_state.wallet_name,
+            &mnemonic,
+            &self.state.wizard_state.save_password,
+            &address,
+        ) {
+            Ok(()) => {
+                // Clear sensitive data from memory
+                self.state.wizard_state.clear_wallet_save_data();
+                self.set_success(format!(
+                    "Wallet '{}' saved successfully!",
+                    self.state.wizard_state.wallet_name
+                ));
+            }
+            Err(e) => {
+                self.set_error(format!("Failed to save wallet: {}", e));
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Show modal to save wallet with password protection
+    fn show_wallet_save_modal(&mut self, mnemonic: String, address: String) {
+        // Create wallet save modal with password input
+        let title = "Save Wallet".to_string();
+        let message = format!(
+            "Would you like to save this wallet for future use?\n\n\
+            Wallet Address: {}\n\n\
+            Saving your wallet allows you to quickly access it next time without \
+            re-entering your mnemonic. Your wallet will be encrypted with a strong password.",
+            &address[..20] // Show partial address for security
+        );
+
+        self.state.modal_state = Some(crate::tui::components::modals::ModalState::wallet_save(
+            title,
+            message,
+            mnemonic,
+            address,
+        ));
     }
 
     /// Update the underlying client with a newly provided wallet and restart background tasks

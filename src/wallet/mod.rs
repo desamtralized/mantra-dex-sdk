@@ -11,6 +11,10 @@ use std::str::FromStr;
 
 use crate::error::Error;
 
+// Storage module for wallet persistence
+pub mod storage;
+pub use storage::*;
+
 /// HD Path prefix for Cosmos chains (BIP-44)
 const HD_PATH_PREFIX: &str = "m/44'/118'/0'/0/";
 

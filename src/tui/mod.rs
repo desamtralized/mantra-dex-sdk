@@ -150,8 +150,26 @@ pub async fn run_tui(client: MantraDexClient, config: MantraNetworkConfig) -> Re
     let event_sender = event_handler.get_sender();
     app.initialize_background_tasks(event_sender);
 
-    // Set initial status
-    app.set_status("MANTRA DEX TUI - Press 'q' to quit, 'h' for help".to_string());
+    // Check for saved wallets and set initial screen
+    let wallet_storage = crate::wallet::WalletStorage::new()?;
+    if wallet_storage.has_saved_wallets()? {
+        // Initialize wallet selection screen with available wallets
+        if let Err(e) = app.state.wallet_selection_state.initialize() {
+            eprintln!("Warning: Failed to load saved wallets: {}", e);
+            // Fall back to dashboard if we can't load wallets
+            app.set_status("Welcome to MANTRA DEX TUI! Use Tab/Shift+Tab to navigate, Enter to activate, Esc to go back.".to_string());
+            app.navigate_to(crate::tui::app::Screen::Dashboard);
+        } else {
+            // Show wallet selection screen
+            app.state.current_screen = crate::tui::app::Screen::WalletSelection;
+            app.state.wizard_state.show_wizard = false; // Don't show wizard when wallets exist
+            app.set_status("Select a wallet or create a new one. Use ↑/↓ to navigate, Enter to select, N for new, R to recover.".to_string());
+        }
+    } else {
+        // No saved wallets - show wizard for first-time setup
+        app.state.wizard_state.show_wizard = true;
+        app.set_status("Welcome to MANTRA DEX! Let's set up your wallet.".to_string());
+    }
 
     // Application result for error handling
     let app_result = run_app_loop(&mut terminal, &mut app, &mut event_handler).await;

@@ -25,6 +25,7 @@ pub enum WizardStep {
     NetworkSelection,
     WalletSetup,
     SecurityWarning,
+    WalletSave,
     Confirmation,
     Complete,
 }
@@ -36,6 +37,7 @@ impl WizardStep {
             Self::NetworkSelection,
             Self::WalletSetup,
             Self::SecurityWarning,
+            Self::WalletSave,
             Self::Confirmation,
             Self::Complete,
         ]
@@ -47,6 +49,7 @@ impl WizardStep {
             Self::NetworkSelection => "Network Configuration",
             Self::WalletSetup => "Wallet Setup",
             Self::SecurityWarning => "Security Information",
+            Self::WalletSave => "Save Wallet",
             Self::Confirmation => "Confirm Settings",
             Self::Complete => "Setup Complete",
         }
@@ -99,6 +102,27 @@ pub struct WizardState {
     pub generated_mnemonic: Option<String>,
     /// Whether to show the wizard
     pub show_wizard: bool,
+    /// Wallet save fields
+    pub wallet_name: String,
+    pub save_password: String,
+    pub save_password_confirm: String,
+    /// Whether user wants to save the wallet
+    pub save_wallet: bool,
+    /// Whether wallet save modal is currently shown
+    pub show_save_modal: bool,
+    /// Validation errors for wallet save form
+    pub wallet_save_errors: Vec<String>,
+    /// Current focused field in wallet save step
+    pub wallet_save_focus: WalletSaveField,
+}
+
+/// Fields that can be focused in the wallet save step
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WalletSaveField {
+    SaveToggle,
+    WalletName,
+    Password,
+    PasswordConfirm,
 }
 
 impl Default for WizardState {
@@ -111,6 +135,13 @@ impl Default for WizardState {
             import_existing: true,
             generated_mnemonic: None,
             show_wizard: true,
+            wallet_name: String::new(),
+            save_password: String::new(),
+            save_password_confirm: String::new(),
+            save_wallet: true, // Default to saving wallet for convenience
+            show_save_modal: false,
+            wallet_save_errors: Vec::new(),
+            wallet_save_focus: WalletSaveField::SaveToggle,
         }
     }
 }
@@ -125,7 +156,8 @@ impl WizardState {
             WizardStep::Welcome => WizardStep::NetworkSelection,
             WizardStep::NetworkSelection => WizardStep::WalletSetup,
             WizardStep::WalletSetup => WizardStep::SecurityWarning,
-            WizardStep::SecurityWarning => WizardStep::Confirmation,
+            WizardStep::SecurityWarning => WizardStep::WalletSave,
+            WizardStep::WalletSave => WizardStep::Confirmation,
             WizardStep::Confirmation => WizardStep::Complete,
             WizardStep::Complete => WizardStep::Complete,
         };
@@ -137,7 +169,8 @@ impl WizardState {
             WizardStep::NetworkSelection => WizardStep::Welcome,
             WizardStep::WalletSetup => WizardStep::NetworkSelection,
             WizardStep::SecurityWarning => WizardStep::WalletSetup,
-            WizardStep::Confirmation => WizardStep::SecurityWarning,
+            WizardStep::WalletSave => WizardStep::SecurityWarning,
+            WizardStep::Confirmation => WizardStep::WalletSave,
             WizardStep::Complete => WizardStep::Confirmation,
         };
     }
@@ -161,6 +194,10 @@ impl WizardState {
         self.show_wizard = false;
     }
 
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
     pub fn can_proceed(&self) -> bool {
         match self.current_step {
             WizardStep::Welcome => true,
@@ -174,8 +211,149 @@ impl WizardState {
                 }
             }
             WizardStep::SecurityWarning => self.security_acknowledged,
+            WizardStep::WalletSave => {
+                if self.save_wallet {
+                    self.validate_wallet_save().is_empty()
+                } else {
+                    true // Can skip saving
+                }
+            }
             WizardStep::Confirmation => true,
             WizardStep::Complete => true,
+        }
+    }
+
+    /// Validate wallet save form and return errors
+    pub fn validate_wallet_save(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+
+        // Validate wallet name
+        if self.wallet_name.trim().is_empty() {
+            errors.push("Wallet name is required".to_string());
+        } else if self.wallet_name.trim().len() < 3 {
+            errors.push("Wallet name must be at least 3 characters".to_string());
+        } else if self.wallet_name.contains('/') || self.wallet_name.contains('\\') {
+            errors.push("Wallet name cannot contain path separators".to_string());
+        }
+
+        // Validate password strength
+        if let Err(validation_error) = crate::wallet::WalletStorage::default().validate_password(&self.save_password) {
+            errors.push(format!("Password error: {}", validation_error));
+        }
+
+        // Validate password confirmation
+        if self.save_password != self.save_password_confirm {
+            errors.push("Passwords do not match".to_string());
+        }
+
+        errors
+    }
+
+    /// Toggle wallet save option
+    pub fn toggle_save_wallet(&mut self) {
+        self.save_wallet = !self.save_wallet;
+        if !self.save_wallet {
+            // Clear form when disabling save
+            self.wallet_name.clear();
+            self.save_password.clear();
+            self.save_password_confirm.clear();
+            self.wallet_save_errors.clear();
+        }
+    }
+
+    /// Clear sensitive wallet save data from memory
+    pub fn clear_wallet_save_data(&mut self) {
+        // Overwrite passwords with zeros for security
+        unsafe {
+            let password_bytes = self.save_password.as_bytes_mut();
+            for byte in password_bytes {
+                *byte = 0;
+            }
+            let confirm_bytes = self.save_password_confirm.as_bytes_mut();
+            for byte in confirm_bytes {
+                *byte = 0;
+            }
+        }
+        self.save_password.clear();
+        self.save_password_confirm.clear();
+    }
+
+    /// Navigate to next field in wallet save step
+    pub fn wallet_save_focus_next(&mut self) {
+        if !self.save_wallet {
+            // If save wallet is disabled, only toggle field is available
+            self.wallet_save_focus = WalletSaveField::SaveToggle;
+            return;
+        }
+
+        self.wallet_save_focus = match self.wallet_save_focus {
+            WalletSaveField::SaveToggle => WalletSaveField::WalletName,
+            WalletSaveField::WalletName => WalletSaveField::Password,
+            WalletSaveField::Password => WalletSaveField::PasswordConfirm,
+            WalletSaveField::PasswordConfirm => WalletSaveField::SaveToggle,
+        };
+    }
+
+    /// Navigate to previous field in wallet save step
+    pub fn wallet_save_focus_previous(&mut self) {
+        if !self.save_wallet {
+            // If save wallet is disabled, only toggle field is available
+            self.wallet_save_focus = WalletSaveField::SaveToggle;
+            return;
+        }
+
+        self.wallet_save_focus = match self.wallet_save_focus {
+            WalletSaveField::SaveToggle => WalletSaveField::PasswordConfirm,
+            WalletSaveField::WalletName => WalletSaveField::SaveToggle,
+            WalletSaveField::Password => WalletSaveField::WalletName,
+            WalletSaveField::PasswordConfirm => WalletSaveField::Password,
+        };
+    }
+
+    /// Handle character input for the currently focused field
+    pub fn wallet_save_handle_char(&mut self, c: char) {
+        match self.wallet_save_focus {
+            WalletSaveField::SaveToggle => {
+                // Handle toggle with space or y/n
+                if c == ' ' || c == 'y' || c == 'Y' {
+                    self.save_wallet = true;
+                } else if c == 'n' || c == 'N' {
+                    self.save_wallet = false;
+                }
+            }
+            WalletSaveField::WalletName => {
+                if c.is_alphanumeric() || c == '_' || c == '-' || c == ' ' {
+                    self.wallet_name.push(c);
+                }
+            }
+            WalletSaveField::Password => {
+                if c.is_ascii_graphic() || c == ' ' {
+                    self.save_password.push(c);
+                }
+            }
+            WalletSaveField::PasswordConfirm => {
+                if c.is_ascii_graphic() || c == ' ' {
+                    self.save_password_confirm.push(c);
+                }
+            }
+        }
+    }
+
+    /// Handle backspace for the currently focused field
+    pub fn wallet_save_handle_backspace(&mut self) {
+        match self.wallet_save_focus {
+            WalletSaveField::SaveToggle => {
+                // No backspace handling for toggle
+            }
+            WalletSaveField::WalletName => {
+                self.wallet_name.pop();
+            }
+            WalletSaveField::Password => {
+                self.save_password.pop();
+            }
+            WalletSaveField::PasswordConfirm => {
+                self.save_password_confirm.pop();
+            }
         }
     }
 }
@@ -246,6 +424,7 @@ fn render_wizard_modal(frame: &mut Frame, area: Rect, wizard_state: &WizardState
         WizardStep::NetworkSelection => render_network_step(frame, modal_area, wizard_state),
         WizardStep::WalletSetup => render_wallet_step(frame, modal_area, wizard_state),
         WizardStep::SecurityWarning => render_security_step(frame, modal_area, wizard_state),
+        WizardStep::WalletSave => render_wallet_save_step(frame, modal_area, wizard_state),
         WizardStep::Confirmation => render_confirmation_step(frame, modal_area, wizard_state),
         WizardStep::Complete => render_complete_step(frame, modal_area),
     }
@@ -846,6 +1025,320 @@ fn render_confirmation_step(frame: &mut Frame, area: Rect, wizard_state: &Wizard
 
     let controls_widget = Paragraph::new(Text::from(controls)).alignment(Alignment::Center);
     frame.render_widget(controls_widget, chunks[2]);
+}
+
+// Implement Drop for secure memory cleanup
+impl Drop for WizardState {
+    fn drop(&mut self) {
+        self.clear_wallet_save_data();
+        
+        // Also clear mnemonic input for security
+        unsafe {
+            let mnemonic_bytes = self.mnemonic_input.as_bytes_mut();
+            for byte in mnemonic_bytes {
+                *byte = 0;
+            }
+        }
+        self.mnemonic_input.clear();
+        
+        // Clear generated mnemonic if present
+        if let Some(ref mut generated) = self.generated_mnemonic {
+            unsafe {
+                let generated_bytes = generated.as_bytes_mut();
+                for byte in generated_bytes {
+                    *byte = 0;
+                }
+            }
+            generated.clear();
+        }
+    }
+}
+
+/// Render wallet save step
+fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardState) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("💾 Save Wallet")
+        .border_style(Style::default().fg(Color::Blue))
+        .padding(Padding::uniform(2));
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Vertical split: explanation, save option, form, controls
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4), // Explanation
+            Constraint::Length(3), // Save option toggle
+            Constraint::Min(8),    // Form or skip message
+            Constraint::Length(3), // Controls
+        ])
+        .split(inner);
+
+    // --------------------------------------------------
+    // Explanation section
+    // --------------------------------------------------
+    let explanation_lines = vec![
+        Line::from("💾 Would you like to save your wallet for future use?"),
+        Line::from(""),
+        Line::from("Saving your wallet allows you to access it without re-entering your mnemonic."),
+        Line::from("Your wallet will be encrypted with a strong password for security."),
+    ];
+
+    let explanation_widget = Paragraph::new(Text::from(explanation_lines));
+    frame.render_widget(explanation_widget, chunks[0]);
+
+    // --------------------------------------------------
+    // Save option toggle
+    // --------------------------------------------------
+    let save_toggle_focused = wizard_state.wallet_save_focus == WalletSaveField::SaveToggle;
+    let save_option_lines = vec![Line::from(vec![
+        Span::styled("Save wallet: ", Style::default().add_modifier(Modifier::BOLD)),
+        if wizard_state.save_wallet {
+            Span::styled("✅ Yes", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+        } else {
+            Span::styled("❌ No (Skip)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+        },
+        if save_toggle_focused {
+            Span::styled(" ← FOCUSED", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        } else {
+            Span::styled("", Style::default())
+        },
+    ])];
+
+    let save_option_widget = Paragraph::new(Text::from(save_option_lines))
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(if save_toggle_focused {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Gray)
+            }))
+        .alignment(Alignment::Center);
+    frame.render_widget(save_option_widget, chunks[1]);
+
+    // --------------------------------------------------
+    // Form or skip message
+    // --------------------------------------------------
+    if wizard_state.save_wallet {
+        // Show wallet save form
+        let form_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Wallet name
+                Constraint::Length(3), // Password
+                Constraint::Length(3), // Confirm password
+                Constraint::Min(2),    // Validation errors
+            ])
+            .split(chunks[2]);
+
+        // Wallet name input
+        let name_focused = wizard_state.wallet_save_focus == WalletSaveField::WalletName;
+        let name_input = Paragraph::new(if wizard_state.wallet_name.is_empty() {
+            "Enter wallet name..."
+        } else {
+            &wizard_state.wallet_name
+        })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(if name_focused { " Wallet Name [FOCUSED] " } else { " Wallet Name " })
+                .border_style(if name_focused {
+                    Style::default().fg(Color::Yellow)
+                } else if wizard_state.wallet_name.is_empty() {
+                    Style::default().fg(Color::Red)
+                } else {
+                    Style::default().fg(Color::Green)
+                }),
+        )
+        .style(if wizard_state.wallet_name.is_empty() {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::White)
+        });
+        frame.render_widget(name_input, form_chunks[0]);
+
+        // Password input (masked)
+        let password_focused = wizard_state.wallet_save_focus == WalletSaveField::Password;
+        let password_display = "•".repeat(wizard_state.save_password.len());
+        let password_input = Paragraph::new(if wizard_state.save_password.is_empty() {
+            "Enter password..."
+        } else {
+            &password_display
+        })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(if password_focused { " Password [FOCUSED] " } else { " Password " })
+                .border_style(if password_focused {
+                    Style::default().fg(Color::Yellow)
+                } else if wizard_state.save_password.len() < 12 {
+                    Style::default().fg(Color::Red)
+                } else {
+                    Style::default().fg(Color::Green)
+                }),
+        )
+        .style(if wizard_state.save_password.is_empty() {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::White)
+        });
+        frame.render_widget(password_input, form_chunks[1]);
+
+        // Confirm password input (masked)
+        let confirm_focused = wizard_state.wallet_save_focus == WalletSaveField::PasswordConfirm;
+        let confirm_display = "•".repeat(wizard_state.save_password_confirm.len());
+        let confirm_input = Paragraph::new(if wizard_state.save_password_confirm.is_empty() {
+            "Confirm password..."
+        } else {
+            &confirm_display
+        })
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(if confirm_focused { " Confirm Password [FOCUSED] " } else { " Confirm Password " })
+                .border_style(if confirm_focused {
+                    Style::default().fg(Color::Yellow)
+                } else if wizard_state.save_password_confirm.is_empty() || 
+                       wizard_state.save_password != wizard_state.save_password_confirm {
+                        Style::default().fg(Color::Red)
+                    } else {
+                        Style::default().fg(Color::Green)
+                    }
+                ),
+        )
+        .style(if wizard_state.save_password_confirm.is_empty() {
+            Style::default().fg(Color::DarkGray)
+        } else {
+            Style::default().fg(Color::White)
+        });
+        frame.render_widget(confirm_input, form_chunks[2]);
+
+        // Validation errors
+        let errors = wizard_state.validate_wallet_save();
+        if !errors.is_empty() {
+            let error_lines: Vec<Line> = errors
+                .iter()
+                .map(|error| {
+                    Line::from(vec![
+                        Span::styled("❌ ", Style::default().fg(Color::Red)),
+                        Span::styled(error, Style::default().fg(Color::Red)),
+                    ])
+                })
+                .collect();
+
+            let error_widget = Paragraph::new(Text::from(error_lines))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Validation Errors ")
+                        .border_style(Style::default().fg(Color::Red)),
+                )
+                .wrap(Wrap { trim: true });
+            frame.render_widget(error_widget, form_chunks[3]);
+        } else if !wizard_state.wallet_name.is_empty() 
+            && !wizard_state.save_password.is_empty() 
+            && !wizard_state.save_password_confirm.is_empty() {
+            // Show success message
+            let success_lines = vec![Line::from(vec![
+                Span::styled("✅ ", Style::default().fg(Color::Green)),
+                Span::styled("Ready to save wallet!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            ])];
+
+            let success_widget = Paragraph::new(Text::from(success_lines))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(" Status ")
+                        .border_style(Style::default().fg(Color::Green)),
+                )
+                .alignment(Alignment::Center);
+            frame.render_widget(success_widget, form_chunks[3]);
+        }
+    } else {
+        // Show skip message
+        let skip_lines = vec![
+            Line::from(vec![
+                Span::styled("⏭️  ", Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    "Skipping wallet save",
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                ),
+            ]),
+            Line::from(""),
+            Line::from("You'll need to enter your mnemonic each time you start the application."),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("💡 ", Style::default().fg(Color::Blue)),
+                Span::styled("You can save your wallet later in Settings if you change your mind.", Style::default().fg(Color::Gray)),
+            ]),
+        ];
+
+        let skip_widget = Paragraph::new(Text::from(skip_lines))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Wallet Not Saved ")
+                    .border_style(Style::default().fg(Color::Yellow)),
+            )
+            .alignment(Alignment::Center);
+        frame.render_widget(skip_widget, chunks[2]);
+    }
+
+    // --------------------------------------------------
+    // Controls section
+    // --------------------------------------------------
+    let controls = if wizard_state.save_wallet {
+        vec![Line::from(vec![
+            Span::styled(
+                "Tab",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(": Navigate Fields • "),
+            Span::styled(
+                "Space/Y/N",
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(": Toggle Save • "),
+            Span::styled(
+                "Enter",
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(": Continue • "),
+            Span::styled(
+                "Esc",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(": Back"),
+        ])]
+    } else {
+        vec![Line::from(vec![
+            Span::styled(
+                "Tab",
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(": Focus Toggle • "),
+            Span::styled(
+                "Space/Y",
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(": Enable Save • "),
+            Span::styled(
+                "Enter",
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(": Skip & Continue • "),
+            Span::styled(
+                "Esc",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(": Back"),
+        ])]
+    };
+
+    let controls_widget = Paragraph::new(Text::from(controls)).alignment(Alignment::Center);
+    frame.render_widget(controls_widget, chunks[3]);
 }
 
 fn render_complete_step(frame: &mut Frame, area: Rect) {

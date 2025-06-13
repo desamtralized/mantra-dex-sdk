@@ -629,10 +629,17 @@ impl EventHandler {
                 ..
             } => Some(Event::FocusLast),
 
-            // Character input
+            // Character input - including shifted characters
             KeyEvent {
                 code: KeyCode::Char(c),
                 modifiers: KeyModifiers::NONE,
+                ..
+            } => Some(Event::Char(c)),
+
+            // Shift + character combinations (for uppercase letters and symbols)
+            KeyEvent {
+                code: KeyCode::Char(c),
+                modifiers: KeyModifiers::SHIFT,
                 ..
             } => Some(Event::Char(c)),
 
