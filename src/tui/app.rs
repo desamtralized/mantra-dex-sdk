@@ -434,7 +434,8 @@ impl Default for AppState {
             network_info: NetworkInfo::default(),
             pending_operations: HashMap::new(),
             focus_manager: FocusManager::new(),
-            wallet_selection_state: crate::tui::screens::wallet_selection::WalletSelectionScreen::default(),
+            wallet_selection_state:
+                crate::tui::screens::wallet_selection::WalletSelectionScreen::default(),
             wizard_state: {
                 let mut wizard = crate::tui::screens::wizard::WizardState::new();
                 // Don't show wizard by default - it will be triggered by wallet selection actions
@@ -763,6 +764,17 @@ impl App {
             return Ok(false);
         }
 
+        // Handle retry with increased slippage event
+        if let Event::RetryWithIncreasedSlippage = &event {
+            if let Err(e) = self.handle_slippage_retry().await {
+                crate::tui::utils::logger::log_error(&format!(
+                    "Failed to handle slippage retry: {}",
+                    e
+                ));
+            }
+            return Ok(false);
+        }
+
         // Handle blockchain action events with comprehensive async processing
         match &event {
             Event::ExecuteSwap {
@@ -772,25 +784,15 @@ impl App {
                 pool_id,
                 slippage_tolerance,
             } => {
-                let operation_name = "swap";
-                let _from_asset = from_asset.clone();
-                let _to_asset = to_asset.clone();
-                let _amount = amount.clone();
-                let _pool_id = *pool_id;
-                let _slippage_tolerance = slippage_tolerance.clone();
-
-                // Execute swap with comprehensive error handling
-                let result = self
-                    .execute_async_operation(operation_name, || async {
-                        // TODO: Implement actual swap execution
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        Ok(())
-                    })
-                    .await;
-
-                if let Err(e) = result {
-                    eprintln!("Swap failed: {}", e);
-                }
+                // Execute real swap transaction
+                self.execute_real_swap(
+                    from_asset.clone(),
+                    to_asset.clone(),
+                    amount.clone(),
+                    pool_id.clone(),
+                    slippage_tolerance.clone(),
+                )
+                .await?;
                 return Ok(false);
             }
             Event::ProvideLiquidity {
@@ -814,7 +816,10 @@ impl App {
                     .await;
 
                 if let Err(e) = result {
-                    eprintln!("Liquidity provision failed: {}", e);
+                    crate::tui::utils::logger::log_error(&format!(
+                        "Liquidity provision failed: {}",
+                        e
+                    ));
                 }
                 return Ok(false);
             }
@@ -837,7 +842,10 @@ impl App {
                     .await;
 
                 if let Err(e) = result {
-                    eprintln!("Rewards claiming failed: {}", e);
+                    crate::tui::utils::logger::log_error(&format!(
+                        "Rewards claiming failed: {}",
+                        e
+                    ));
                 }
                 return Ok(false);
             }
@@ -948,7 +956,7 @@ impl App {
                         self.state.modal_state = None;
                     }
                 } else if self.state.current_screen == Screen::WalletSelection {
-                    // Special case: Wallet selection screen should handle Enter directly 
+                    // Special case: Wallet selection screen should handle Enter directly
                     // without needing to switch to WithinScreen mode first
                     self.handle_screen_specific_event(Event::Enter).await?;
                 } else if self.state.navigation_mode == NavigationMode::ScreenLevel {
@@ -1011,7 +1019,8 @@ impl App {
                 } else if self.state.current_screen == Screen::WalletSelection {
                     // Special case: Allow wallet selection screen to handle MoveFocus events even in ScreenLevel mode
                     // This is needed because wallet selection is often the first screen and needs arrow key navigation
-                    self.handle_screen_specific_event(Event::MoveFocus(direction)).await?;
+                    self.handle_screen_specific_event(Event::MoveFocus(direction))
+                        .await?;
                 }
             }
             Event::ContextAction => {
@@ -1221,7 +1230,7 @@ impl App {
         let swap_state = crate::tui::screens::swap::get_swap_screen_state();
 
         // Extract available pools from cache for swap operations
-        let mut available_pools: Vec<(String, String)> = self
+        let available_pools: Vec<(String, String)> = self
             .state
             .pool_cache
             .values()
@@ -1270,18 +1279,32 @@ impl App {
             })
             .collect();
 
+        // Debug output to understand what pools are available
+        crate::tui::utils::logger::log_debug(&format!(
+            "Total pools in cache: {}",
+            self.state.pool_cache.len()
+        ));
+        crate::tui::utils::logger::log_debug(&format!(
+            "Available swap-enabled pools: {}",
+            available_pools.len()
+        ));
+        for (pool_id, display_name) in &available_pools {
+            crate::tui::utils::logger::log_debug(&format!(
+                "Pool ID: '{}', Display: '{}'",
+                pool_id, display_name
+            ));
+        }
+
         // Note: If no pools are available from cache, dropdowns will remain empty
         // This is normal during initial loading or when no pools exist
 
-        // Add some test data if no pools are available (for development/testing)
+        // Note: No longer adding test data for pools since they don't exist on blockchain
+        // Real pool data will be loaded from the blockchain via the cache
         if available_pools.is_empty() {
-            available_pools = vec![
-                ("1".to_string(), "Pool 1: USDC / USDT".to_string()),
-                ("2".to_string(), "Pool 2: ATOM / OSMO".to_string()),
-                ("3".to_string(), "Pool 3: MANTRA / USDC".to_string()),
-                ("4".to_string(), "Pool 4: USDT / ATOM".to_string()),
-                ("5".to_string(), "Pool 5: OSMO / MANTRA".to_string()),
-            ];
+            // Log warning that no pools are available
+            crate::tui::utils::logger::log_warning(
+                "No pools available for swapping. Pool data may still be loading from blockchain.",
+            );
         }
 
         // Update the pool dropdown with available pools
@@ -1311,15 +1334,11 @@ impl App {
 
         let mut tokens_vec: Vec<String> = available_tokens.into_iter().collect();
 
-        // Add some test tokens if none are available (for development/testing)
+        // Note: No longer adding test tokens since they should come from real pool assets
         if tokens_vec.is_empty() {
-            tokens_vec = vec![
-                "USDC".to_string(),
-                "USDT".to_string(),
-                "ATOM".to_string(),
-                "OSMO".to_string(),
-                "MANTRA".to_string(),
-            ];
+            crate::tui::utils::logger::log_warning(
+                "No tokens available for swapping. Pool data may still be loading from blockchain.",
+            );
         }
 
         swap_state.initialize_tokens(tokens_vec);
@@ -1391,7 +1410,7 @@ impl App {
                             from_asset: from_asset.clone(),
                             to_asset: to_asset.clone(),
                             amount: swap_state.amount,
-                            pool_id: swap_state.selected_pool_id.and_then(|id| id.parse().ok()),
+                            pool_id: swap_state.selected_pool_id,
                             slippage_tolerance: Some(swap_state.slippage),
                         });
                     }
@@ -1484,13 +1503,15 @@ impl App {
 
         match event {
             Event::Up | Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
-                if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet {
+                if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet
+                {
                     self.state.wallet_selection_state.move_selection_up();
                     return Ok(true);
                 }
             }
             Event::Down | Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
-                if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet {
+                if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet
+                {
                     self.state.wallet_selection_state.move_selection_down();
                     return Ok(true);
                 }
@@ -1504,30 +1525,42 @@ impl App {
                 return self.handle_wallet_selection_action(action).await;
             }
             Event::Char(c) => {
-                if self.state.wallet_selection_state.state == WalletSelectionState::EnteringPassword {
+                if self.state.wallet_selection_state.state == WalletSelectionState::EnteringPassword
+                {
                     self.state.wallet_selection_state.handle_char(c);
                     return Ok(true);
                 } else if c == 'n' || c == 'N' {
                     // Quick shortcut to create new wallet
-                    if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet {
-                        return self.handle_wallet_selection_action(WalletSelectionAction::CreateNewWallet).await;
+                    if self.state.wallet_selection_state.state
+                        == WalletSelectionState::SelectingWallet
+                    {
+                        return self
+                            .handle_wallet_selection_action(WalletSelectionAction::CreateNewWallet)
+                            .await;
                     }
                 } else if c == 'r' || c == 'R' {
                     // Quick shortcut to recover wallet
-                    if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet {
-                        return self.handle_wallet_selection_action(WalletSelectionAction::RecoverWallet).await;
+                    if self.state.wallet_selection_state.state
+                        == WalletSelectionState::SelectingWallet
+                    {
+                        return self
+                            .handle_wallet_selection_action(WalletSelectionAction::RecoverWallet)
+                            .await;
                     }
                 }
             }
             Event::Backspace => {
-                if self.state.wallet_selection_state.state == WalletSelectionState::EnteringPassword {
+                if self.state.wallet_selection_state.state == WalletSelectionState::EnteringPassword
+                {
                     self.state.wallet_selection_state.handle_backspace();
                     return Ok(true);
                 }
             }
             Event::F(1) => {
                 // Toggle password visibility
-                self.state.wallet_selection_state.toggle_password_visibility();
+                self.state
+                    .wallet_selection_state
+                    .toggle_password_visibility();
                 return Ok(true);
             }
             _ => {}
@@ -1536,7 +1569,10 @@ impl App {
     }
 
     /// Handle wallet selection actions
-    async fn handle_wallet_selection_action(&mut self, action: crate::tui::screens::wallet_selection::WalletSelectionAction) -> Result<bool, Error> {
+    async fn handle_wallet_selection_action(
+        &mut self,
+        action: crate::tui::screens::wallet_selection::WalletSelectionAction,
+    ) -> Result<bool, Error> {
         use crate::tui::screens::wallet_selection::WalletSelectionAction;
 
         match action {
@@ -1565,17 +1601,23 @@ impl App {
                 self.state.wizard_state.import_existing = true;
                 Ok(true)
             }
-            WalletSelectionAction::AuthenticateWallet { wallet_name, password } => {
+            WalletSelectionAction::AuthenticateWallet {
+                wallet_name,
+                password,
+            } => {
                 // Attempt to load and decrypt the wallet
                 self.set_loading(format!("Loading wallet '{}'...", wallet_name));
-                
-                let storage = crate::wallet::WalletStorage::new()
-                    .map_err(|e| Error::Wallet(format!("Failed to initialize wallet storage: {}", e)))?;
-                
+
+                let storage = crate::wallet::WalletStorage::new().map_err(|e| {
+                    Error::Wallet(format!("Failed to initialize wallet storage: {}", e))
+                })?;
+
                 match storage.load_wallet(&wallet_name, &password) {
                     Ok(mnemonic) => {
-                        self.state.wallet_selection_state.handle_authentication_success(wallet_name.clone(), mnemonic.clone());
-                        
+                        self.state
+                            .wallet_selection_state
+                            .handle_authentication_success(wallet_name.clone(), mnemonic.clone());
+
                         // Load the wallet into the application
                         match crate::wallet::MantraWallet::from_mnemonic(&mnemonic, 0) {
                             Ok(wallet) => {
@@ -1584,36 +1626,48 @@ impl App {
                                         self.set_wallet_address(address.to_string());
                                         // Reconfigure the client with the loaded wallet
                                         self.configure_client_wallet(wallet).await?;
-                                        
+
                                         // Navigate to dashboard and hide wizard
                                         self.state.wizard_state.show_wizard = false;
                                         self.navigate_to(Screen::Dashboard);
-                                        
-                                        self.set_success(format!("Wallet '{}' loaded successfully!", wallet_name));
+
+                                        self.set_success(format!(
+                                            "Wallet '{}' loaded successfully!",
+                                            wallet_name
+                                        ));
                                     }
                                     Err(e) => {
-                                        self.state.wallet_selection_state.handle_authentication_failure(
-                                            format!("Failed to derive wallet address: {}", e)
-                                        );
+                                        self.state
+                                            .wallet_selection_state
+                                            .handle_authentication_failure(format!(
+                                                "Failed to derive wallet address: {}",
+                                                e
+                                            ));
                                     }
                                 }
                             }
                             Err(e) => {
-                                self.state.wallet_selection_state.handle_authentication_failure(
-                                    format!("Failed to load wallet: {}", e)
-                                );
+                                self.state
+                                    .wallet_selection_state
+                                    .handle_authentication_failure(format!(
+                                        "Failed to load wallet: {}",
+                                        e
+                                    ));
                             }
                         }
                     }
                     Err(e) => {
-                        self.state.wallet_selection_state.handle_authentication_failure(
-                            format!("Authentication failed: {}", e)
-                        );
+                        self.state
+                            .wallet_selection_state
+                            .handle_authentication_failure(format!("Authentication failed: {}", e));
                     }
                 }
                 Ok(true)
             }
-            WalletSelectionAction::WalletLoaded { wallet_name: _, mnemonic: _ } => {
+            WalletSelectionAction::WalletLoaded {
+                wallet_name: _,
+                mnemonic: _,
+            } => {
                 // This case is handled in AuthenticateWallet above
                 Ok(true)
             }
@@ -1683,12 +1737,22 @@ impl App {
                 return Ok(true);
             }
             Event::Enter => {
-                // Handle selection for currently focused list
+                // Handle selection for currently focused list or execute button
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Enter,
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    // Check if execute button was pressed by examining the current focus
+                    if matches!(
+                        swap_state.input_focus,
+                        crate::tui::screens::swap::SwapInputFocus::Execute
+                    ) {
+                        // Trigger swap confirmation
+                        if let Err(e) = self.handle_swap_execute_confirmation() {
+                            self.set_error(format!("Swap preparation failed: {}", e));
+                        }
+                    }
                     return Ok(true);
                 }
             }
@@ -2133,22 +2197,75 @@ impl App {
 
     /// Retry the last failed operation
     fn retry_last_operation(&mut self) {
-        // This would implement retry logic based on the operation type
-        // For now, just refresh the current screen
-        self.set_status("Retrying operation...".to_string());
+        // Check if the last error was slippage-related
+        if let LoadingState::Error {
+            message,
+            error_type,
+            ..
+        } = &self.state.loading_state.clone()
+        {
+            if message.to_lowercase().contains("slippage")
+                && matches!(error_type, ErrorType::Validation)
+            {
+                // For slippage errors, send an event to trigger async slippage retry
+                if let Some(sender) = self.event_sender.as_ref() {
+                    let _ = sender.send(crate::tui::events::Event::RetryWithIncreasedSlippage);
+                }
+                return;
+            }
+        }
+
+        // For other errors, just clear the modal and let user try again manually
+        self.state.modal_state = None;
+        self.state.error_message = None;
+        self.set_status("You can try the operation again".to_string());
     }
 
     /// Handle confirmation actions
     fn handle_confirmation(&mut self) {
-        // This would implement confirmation-specific logic
-        self.set_status("Action confirmed".to_string());
+        // Handle confirmation dialog result based on current screen
+        if let Some(ref modal_state) = self.state.modal_state.clone() {
+            if modal_state.is_confirmed() {
+                // Check if this is a swap confirmation modal
+                if self.state.current_screen == Screen::Swap {
+                    // Handle swap confirmation
+                    if let Some(swap_event) =
+                        crate::tui::screens::swap::handle_confirmation_response(true)
+                    {
+                        // Process the swap event immediately
+                        if let Some(sender) = self.event_sender.as_ref() {
+                            let _ = sender.send(swap_event);
+                        }
+                    }
+                } else {
+                    // Handle other confirmation types
+                    self.set_status("Action confirmed".to_string());
+                }
+            } else {
+                // Handle cancellation
+                if self.state.current_screen == Screen::Swap {
+                    let _ = crate::tui::screens::swap::handle_confirmation_response(false);
+                }
+                self.set_status("Action cancelled".to_string());
+            }
+        }
+        self.state.modal_state = None;
     }
 
     /// Navigate to a specific screen
     pub fn navigate_to(&mut self, screen: Screen) {
+        // Only clear messages if we're actually changing screens
+        let is_changing_screen = self.state.current_screen != screen;
+
         self.state.current_screen = screen;
         self.state.navigation_mode = NavigationMode::ScreenLevel;
-        self.clear_messages();
+
+        // Only clear messages when actually changing screens, not when staying on the same screen
+        if is_changing_screen {
+            // Don't clear error messages immediately - let them persist for a bit
+            self.state.status_message = None;
+            // Keep error messages and modals when changing screens
+        }
 
         // Update screen-specific data when navigating
         match screen {
@@ -2168,7 +2285,9 @@ impl App {
         let new_screen = screens[self.state.current_tab];
         self.state.current_screen = new_screen;
         self.state.navigation_mode = NavigationMode::ScreenLevel;
-        self.clear_messages();
+
+        // Don't clear error messages when navigating tabs - let them persist
+        self.state.status_message = None;
 
         // Update screen-specific data when navigating
         match new_screen {
@@ -2192,7 +2311,9 @@ impl App {
         let new_screen = screens[self.state.current_tab];
         self.state.current_screen = new_screen;
         self.state.navigation_mode = NavigationMode::ScreenLevel;
-        self.clear_messages();
+
+        // Don't clear error messages when navigating tabs - let them persist
+        self.state.status_message = None;
 
         // Update screen-specific data when navigating
         match new_screen {
@@ -2294,7 +2415,10 @@ impl App {
             }
             _ => {
                 // Unknown data type, log but don't error
-                eprintln!("Unknown data refresh type: {}", data_type);
+                crate::tui::utils::logger::log_warning(&format!(
+                    "Unknown data refresh type: {}",
+                    data_type
+                ));
             }
         }
 
@@ -2431,9 +2555,9 @@ impl App {
         if self.state.wallet_address.is_none() {
             // No wallet connected - only refresh basic network info
             self.set_loading("Refreshing network data...".to_string());
-            
+
             let mut errors = Vec::new();
-            
+
             // Refresh network info only
             match self.client.get_last_block_height().await {
                 Ok(height) => {
@@ -2445,7 +2569,7 @@ impl App {
                     errors.push(format!("Failed to fetch block height: {}", e));
                 }
             }
-            
+
             // Refresh pool data (limited to avoid overwhelming)
             match self.client.get_pools(Some(20)).await {
                 Ok(pools) => {
@@ -2462,7 +2586,7 @@ impl App {
                     errors.push(format!("Failed to fetch pools: {}", e));
                 }
             }
-            
+
             if errors.is_empty() {
                 self.set_success("Network data refreshed successfully".to_string());
             } else {
@@ -2476,10 +2600,10 @@ impl App {
                     crate::tui::components::modals::ErrorType::Network,
                 );
             }
-            
+
             return Ok(());
         }
-        
+
         // Refresh balances, network info, and other dashboard data (wallet connected)
         self.set_loading("Refreshing dashboard data...".to_string());
 
@@ -2714,7 +2838,7 @@ impl App {
                         // Finish wizard and apply settings
                         self.apply_wizard_settings().await?;
                         self.state.wizard_state.finish_wizard();
-                        
+
                         // Navigate to dashboard with the newly created/imported wallet
                         self.navigate_to(Screen::Dashboard);
                     } else {
@@ -2885,14 +3009,18 @@ impl App {
         if self.state.wizard_state.save_wallet {
             if let Some(mnemonic) = self.get_current_wallet_mnemonic() {
                 if let Some(address) = &self.state.wallet_address {
-                    self.save_wallet_from_wizard(mnemonic, address.clone()).await?;
+                    self.save_wallet_from_wizard(mnemonic, address.clone())
+                        .await?;
                 }
             }
         }
 
         // Trigger dashboard refresh to reflect new wallet and network state
         if let Err(e) = self.refresh_dashboard_data().await {
-            eprintln!("Warning: Failed to refresh dashboard data: {}", e);
+            crate::tui::utils::logger::log_warning(&format!(
+                "Failed to refresh dashboard data: {}",
+                e
+            ));
         }
 
         Ok(())
@@ -2914,7 +3042,11 @@ impl App {
     }
 
     /// Save wallet from wizard with user's chosen settings
-    async fn save_wallet_from_wizard(&mut self, mnemonic: String, address: String) -> Result<(), Error> {
+    async fn save_wallet_from_wizard(
+        &mut self,
+        mnemonic: String,
+        address: String,
+    ) -> Result<(), Error> {
         self.set_loading("Saving wallet...".to_string());
 
         let storage = crate::wallet::WalletStorage::new()
@@ -2956,10 +3088,7 @@ impl App {
         );
 
         self.state.modal_state = Some(crate::tui::components::modals::ModalState::wallet_save(
-            title,
-            message,
-            mnemonic,
-            address,
+            title, message, mnemonic, address,
         ));
     }
 
@@ -2981,6 +3110,762 @@ impl App {
         // Restart background tasks so they pick up the new client instance
         if let Some(sender) = self.event_sender.clone() {
             self.initialize_background_tasks(sender);
+        }
+
+        Ok(())
+    }
+
+    /// Map display name back to actual denomination
+    fn map_display_name_to_denom(
+        &self,
+        display_name: &str,
+        pool_assets: &[cosmwasm_std::Coin],
+    ) -> String {
+        // Try to find the asset in the pool that matches the display name
+        for asset in pool_assets {
+            let denom = &asset.denom;
+
+            // Check if the display name matches the full denomination
+            if denom == display_name {
+                return denom.clone();
+            }
+
+            // Check if the display name matches the shortened version
+            let shortened = if denom.len() > 15 {
+                if let Some(last_part) = denom.split('/').last() {
+                    last_part.to_string()
+                } else {
+                    format!("{}...", &denom[..10])
+                }
+            } else {
+                denom.clone()
+            };
+
+            if shortened == display_name {
+                return denom.clone();
+            }
+        }
+
+        // If no match found, return the display name as-is (fallback)
+        crate::tui::utils::logger::log_warning(&format!(
+            "Could not map display name '{}' to actual denomination, using as-is",
+            display_name
+        ));
+        display_name.to_string()
+    }
+
+    /// Execute a real swap transaction on the blockchain
+    async fn execute_real_swap(
+        &mut self,
+        from_asset: String,
+        to_asset: String,
+        amount: String,
+        pool_id: Option<String>,
+        slippage_tolerance: Option<String>,
+    ) -> Result<(), Error> {
+        crate::tui::utils::logger::log_info("=== EXECUTE REAL SWAP - BLOCKCHAIN TRANSACTION ===");
+        crate::tui::utils::logger::log_info(&format!("Starting blockchain swap execution:"));
+        crate::tui::utils::logger::log_info(&format!("  From Asset: {}", from_asset));
+        crate::tui::utils::logger::log_info(&format!("  To Asset: {}", to_asset));
+        crate::tui::utils::logger::log_info(&format!("  Amount: {}", amount));
+        crate::tui::utils::logger::log_info(&format!("  Pool ID: {:?}", pool_id));
+        crate::tui::utils::logger::log_info(&format!(
+            "  Slippage Tolerance: {:?}",
+            slippage_tolerance
+        ));
+
+        // Show loading state
+        self.set_loading("Executing swap transaction...".to_string());
+
+        // Validate that we have a valid pool ID
+        let pool_id_str = match pool_id {
+            Some(id) => {
+                crate::tui::utils::logger::log_info(&format!("Pool ID validated: {}", id));
+                id
+            }
+            None => {
+                crate::tui::utils::logger::log_error("SWAP FAILED: No pool ID provided");
+                self.set_error_with_type(
+                    "Swap Validation Error".to_string(),
+                    ErrorType::Validation,
+                );
+                return Err(Error::Other("No pool selected for swap".to_string()));
+            }
+        };
+
+        // Validate that the pool exists in our cache
+        crate::tui::utils::logger::log_info(&format!(
+            "Checking pool cache for pool: {}",
+            pool_id_str
+        ));
+        crate::tui::utils::logger::log_info(&format!(
+            "Total pools in cache: {}",
+            self.state.pool_cache.len()
+        ));
+
+        let pool_entry = match self.state.pool_cache.get(&pool_id_str) {
+            Some(entry) => {
+                crate::tui::utils::logger::log_info(&format!(
+                    "Pool {} found in cache",
+                    pool_id_str
+                ));
+                crate::tui::utils::logger::log_debug(&format!(
+                    "Pool info: {:?}",
+                    entry.pool_info.pool_info
+                ));
+                entry
+            }
+            None => {
+                crate::tui::utils::logger::log_error(&format!(
+                    "SWAP FAILED: Pool {} not found in cache",
+                    pool_id_str
+                ));
+                crate::tui::utils::logger::log_error("Available pools in cache:");
+                for (cached_pool_id, _) in &self.state.pool_cache {
+                    crate::tui::utils::logger::log_error(&format!("  - {}", cached_pool_id));
+                }
+                self.set_error_with_type(
+                    format!("Pool {} not found or not loaded", pool_id_str),
+                    ErrorType::Validation,
+                );
+                return Err(Error::Other(format!(
+                    "Pool {} does not exist or is not loaded",
+                    pool_id_str
+                )));
+            }
+        };
+
+        // Map display names back to actual denominations
+        let actual_from_denom =
+            self.map_display_name_to_denom(&from_asset, &pool_entry.pool_info.pool_info.assets);
+        let actual_to_denom =
+            self.map_display_name_to_denom(&to_asset, &pool_entry.pool_info.pool_info.assets);
+
+        crate::tui::utils::logger::log_debug(&format!(
+            "Asset mapping: '{}' -> '{}', '{}' -> '{}'",
+            from_asset, actual_from_denom, to_asset, actual_to_denom
+        ));
+
+        // Parse amount
+        crate::tui::utils::logger::log_info(&format!("Parsing amount: {}", amount));
+        let amount_f64 = amount.parse::<f64>().map_err(|e| {
+            crate::tui::utils::logger::log_error(&format!(
+                "SWAP FAILED: Invalid amount '{}': {}",
+                amount, e
+            ));
+            Error::Other(format!("Invalid amount: {}", amount))
+        })?;
+
+        // Convert to blockchain format (assuming 6 decimal places)
+        let amount_uint = cosmwasm_std::Uint128::new((amount_f64 * 1_000_000.0) as u128);
+        crate::tui::utils::logger::log_info(&format!(
+            "Amount converted: {} -> {} (micro units)",
+            amount_f64, amount_uint
+        ));
+
+        // Parse slippage tolerance
+        let slippage = if let Some(slippage_str) = slippage_tolerance {
+            let parsed_slippage = slippage_str
+                .parse::<f64>()
+                .ok()
+                .map(|s| cosmwasm_std::Decimal::percent((s * 100.0) as u64));
+            crate::tui::utils::logger::log_info(&format!(
+                "Slippage parsed: {}% -> {:?}",
+                slippage_str, parsed_slippage
+            ));
+            parsed_slippage
+        } else {
+            crate::tui::utils::logger::log_info("Using default slippage: 1%");
+            Some(cosmwasm_std::Decimal::percent(100)) // 1% default slippage
+        };
+
+        // Create the offer asset coin using the actual denomination
+        let offer_asset = cosmwasm_std::Coin {
+            denom: actual_from_denom.clone(),
+            amount: amount_uint,
+        };
+
+        crate::tui::utils::logger::log_info(&format!(
+            "Offer asset created: {} {}",
+            offer_asset.amount, offer_asset.denom
+        ));
+        crate::tui::utils::logger::log_info(&format!("Target denomination: {}", actual_to_denom));
+
+        // Execute the swap using actual denominations
+        crate::tui::utils::logger::log_info("=== CALLING BLOCKCHAIN SWAP METHOD ===");
+        crate::tui::utils::logger::log_info(&format!("Calling client.swap() with parameters:"));
+        crate::tui::utils::logger::log_info(&format!("  Pool ID: {}", pool_id_str));
+        crate::tui::utils::logger::log_info(&format!(
+            "  Offer Asset: {} {}",
+            offer_asset.amount, offer_asset.denom
+        ));
+        crate::tui::utils::logger::log_info(&format!("  Target Denom: {}", actual_to_denom));
+        crate::tui::utils::logger::log_info(&format!("  Slippage: {:?}", slippage));
+
+        let swap_start_time = std::time::Instant::now();
+        match self
+            .client
+            .swap(&pool_id_str, offer_asset, &actual_to_denom, slippage)
+            .await
+        {
+            Ok(tx_response) => {
+                let elapsed = swap_start_time.elapsed();
+                crate::tui::utils::logger::log_info("=== BLOCKCHAIN SWAP SUCCESS ===");
+                crate::tui::utils::logger::log_info(&format!("Swap execution time: {:?}", elapsed));
+                crate::tui::utils::logger::log_info(&format!(
+                    "Transaction Hash: {}",
+                    tx_response.txhash
+                ));
+                crate::tui::utils::logger::log_info(&format!(
+                    "Transaction Code: {}",
+                    tx_response.code
+                ));
+                crate::tui::utils::logger::log_info(&format!("Gas Used: {}", tx_response.gas_used));
+                crate::tui::utils::logger::log_info(&format!(
+                    "Gas Wanted: {}",
+                    tx_response.gas_wanted
+                ));
+                crate::tui::utils::logger::log_info(&format!("Height: {}", tx_response.height));
+                crate::tui::utils::logger::log_info(&format!("Raw Log: {}", tx_response.raw_log));
+
+                // Log transaction events if any
+                if !tx_response.events.is_empty() {
+                    crate::tui::utils::logger::log_info("Transaction Events:");
+                    for event in &tx_response.events {
+                        crate::tui::utils::logger::log_info(&format!(
+                            "  Event Type: {}",
+                            event.r#type
+                        ));
+                        for attr in &event.attributes {
+                            crate::tui::utils::logger::log_info(&format!(
+                                "    {}: {}",
+                                attr.key, attr.value
+                            ));
+                        }
+                    }
+                } else {
+                    crate::tui::utils::logger::log_info("No transaction events found");
+                }
+
+                // Check if transaction actually succeeded (code 0 means success)
+                if tx_response.code != 0 {
+                    crate::tui::utils::logger::log_error(&format!(
+                        "TRANSACTION FAILED WITH CODE: {}",
+                        tx_response.code
+                    ));
+                    crate::tui::utils::logger::log_error(&format!(
+                        "Error Log: {}",
+                        tx_response.raw_log
+                    ));
+                } else {
+                    crate::tui::utils::logger::log_info("Transaction executed successfully!");
+                }
+
+                // Swap succeeded - show success modal
+                let tx_hash = tx_response.txhash;
+                let success_details = vec![
+                    format!("Swapped: {} {} → {} {}", amount, from_asset, "~", to_asset),
+                    format!("Pool ID: {}", pool_id_str),
+                    format!("Transaction Hash: {}", tx_hash),
+                    format!("Gas Used: {}", tx_response.gas_used),
+                    format!("Gas Wanted: {}", tx_response.gas_wanted),
+                ];
+
+                // Show success modal with transaction details
+                self.state.modal_state = Some(
+                    crate::tui::components::modals::ModalState::transaction_details(
+                        tx_hash.clone(),
+                        "Success".to_string(),
+                        vec![
+                            ("Operation".to_string(), "Token Swap".to_string()),
+                            ("From".to_string(), format!("{} {}", amount, from_asset)),
+                            (
+                                "To".to_string(),
+                                format!("~{} {}", amount_f64 * 0.95, to_asset),
+                            ), // Estimated
+                            ("Pool ID".to_string(), pool_id_str),
+                            ("Gas Used".to_string(), tx_response.gas_used.to_string()),
+                            ("Gas Wanted".to_string(), tx_response.gas_wanted.to_string()),
+                            ("Status".to_string(), "Completed".to_string()),
+                        ],
+                    ),
+                );
+
+                // Add to transaction history
+                let tx_info = TransactionInfo {
+                    hash: tx_hash.clone(),
+                    status: TransactionStatus::Success,
+                    operation_type: "Swap".to_string(),
+                    timestamp: chrono::Utc::now(),
+                    gas_used: Some(tx_response.gas_used),
+                    gas_wanted: Some(tx_response.gas_wanted),
+                };
+                self.add_transaction(tx_info);
+
+                // Update loading state to success
+                self.state.loading_state = LoadingState::success_with_details(
+                    "Swap completed successfully!".to_string(),
+                    success_details,
+                );
+
+                // Reset swap form
+                crate::tui::screens::swap::reset_swap_form();
+
+                crate::tui::utils::logger::log_info(
+                    "=== SWAP EXECUTION COMPLETED SUCCESSFULLY ===",
+                );
+                crate::tui::utils::logger::log_info(&format!(
+                    "Final transaction hash: {}",
+                    tx_hash
+                ));
+                crate::tui::utils::logger::log_info(
+                    "Transaction should be visible on Mantra testnet explorer",
+                );
+                crate::tui::utils::logger::log_info(&format!(
+                    "Explorer URL: https://explorer.mantrachain.io/Mantra-Dukong/tx/{}",
+                    tx_hash
+                ));
+
+                Ok(())
+            }
+            Err(e) => {
+                let elapsed = swap_start_time.elapsed();
+                crate::tui::utils::logger::log_error("=== BLOCKCHAIN SWAP FAILED ===");
+                crate::tui::utils::logger::log_error(&format!(
+                    "Swap execution time before failure: {:?}",
+                    elapsed
+                ));
+                crate::tui::utils::logger::log_error(&format!("Error type: {:?}", e));
+                crate::tui::utils::logger::log_error(&format!("Error message: {}", e));
+
+                // Log the full error to file for debugging
+                crate::tui::utils::logger::log_error("SWAP FAILED - Full error details:");
+                crate::tui::utils::logger::log_error(&format!(
+                    "  Operation: Swap {} {} to {} (display names)",
+                    amount, from_asset, to_asset
+                ));
+                crate::tui::utils::logger::log_error(&format!(
+                    "  Actual denominations: {} -> {}",
+                    actual_from_denom, actual_to_denom
+                ));
+                crate::tui::utils::logger::log_error(&format!("  Pool ID: {}", pool_id_str));
+                crate::tui::utils::logger::log_error(&format!(
+                    "  Amount: {} (parsed as {})",
+                    amount, amount_uint
+                ));
+                crate::tui::utils::logger::log_error(&format!("  Slippage: {:?}", slippage));
+                crate::tui::utils::logger::log_error(&format!("  Error: {:?}", e));
+                crate::tui::utils::logger::log_error(&format!("  Error string: {}", e));
+
+                // Check if this is a network/connection error
+                let error_str = e.to_string().to_lowercase();
+                if error_str.contains("connection")
+                    || error_str.contains("network")
+                    || error_str.contains("timeout")
+                {
+                    crate::tui::utils::logger::log_error(
+                        "This appears to be a NETWORK/CONNECTION error",
+                    );
+                } else if error_str.contains("insufficient") || error_str.contains("balance") {
+                    crate::tui::utils::logger::log_error(
+                        "This appears to be an INSUFFICIENT FUNDS error",
+                    );
+                } else if error_str.contains("slippage") && error_str.contains("exceeded") {
+                    crate::tui::utils::logger::log_error(
+                        "This appears to be a SLIPPAGE LIMIT EXCEEDED error",
+                    );
+                } else if error_str.contains("contract") || error_str.contains("execution") {
+                    crate::tui::utils::logger::log_error(
+                        "This appears to be a CONTRACT EXECUTION error",
+                    );
+                } else {
+                    crate::tui::utils::logger::log_error(
+                        "This appears to be an UNKNOWN error type",
+                    );
+                }
+
+                // Determine error type and create user-friendly error handling
+                let (error_type, error_title, user_message, suggestions) = if error_str
+                    .contains("slippage")
+                    && error_str.contains("exceeded")
+                {
+                    (
+                            crate::tui::components::modals::ErrorType::Validation,
+                            "Slippage Limit Exceeded".to_string(),
+                            format!(
+                                                                 "The price moved too much during your swap transaction.\n\n\
+                                 Your slippage tolerance of {}% was not sufficient to complete the swap.\n\n\
+                                 This usually happens when:\n\
+                                 • The pool has low liquidity\n\
+                                 • There's high trading activity\n\
+                                 • Market conditions are volatile",
+                                 slippage.map(|s| {
+                                     // Convert cosmwasm Decimal percentage back to human-readable format
+                                     let percentage = s.to_string().parse::<f64>().unwrap_or(0.01) * 100.0;
+                                     format!("{:.1}", percentage)
+                                 }).unwrap_or_else(|| "1.0".to_string())
+                            ),
+                            vec![
+                                "Increase your slippage tolerance (e.g., to 2-5%)".to_string(),
+                                "Try a smaller swap amount".to_string(),
+                                "Wait for better market conditions".to_string(),
+                                "Check if the pool has sufficient liquidity".to_string(),
+                            ]
+                        )
+                } else if error_str.contains("insufficient") || error_str.contains("balance") {
+                    (
+                        crate::tui::components::modals::ErrorType::InsufficientFunds,
+                        "Insufficient Funds".to_string(),
+                        format!(
+                            "You don't have enough {} to complete this swap.\n\n\
+                                Required: {} {}\n\
+                                Please check your wallet balance.",
+                            from_asset, amount, from_asset
+                        ),
+                        vec![
+                            "Check your wallet balance".to_string(),
+                            "Reduce the swap amount".to_string(),
+                            "Add more funds to your wallet".to_string(),
+                            "Ensure you have enough for gas fees".to_string(),
+                        ],
+                    )
+                } else if error_str.contains("connection")
+                    || error_str.contains("network")
+                    || error_str.contains("timeout")
+                {
+                    (
+                            crate::tui::components::modals::ErrorType::Network,
+                            "Network Error".to_string(),
+                            "Failed to connect to the Mantra network.\n\nPlease check your internet connection and try again.".to_string(),
+                            vec![
+                                "Check your internet connection".to_string(),
+                                "Wait a moment and try again".to_string(),
+                                "Try switching to a different RPC endpoint".to_string(),
+                                "Check if the Mantra network is operational".to_string(),
+                            ]
+                        )
+                } else if error_str.contains("contract") || error_str.contains("execution") {
+                    (
+                        crate::tui::components::modals::ErrorType::Contract,
+                        "Contract Execution Error".to_string(),
+                        format!(
+                            "The smart contract failed to execute your swap.\n\n\
+                                This could be due to:\n\
+                                • Pool configuration issues\n\
+                                • Unexpected contract state\n\
+                                • Network congestion\n\n\
+                                Technical details: {}",
+                            e
+                        ),
+                        vec![
+                            "Try again in a few moments".to_string(),
+                            "Check if the pool is active".to_string(),
+                            "Verify your transaction parameters".to_string(),
+                            "Contact support if the problem persists".to_string(),
+                        ],
+                    )
+                } else {
+                    (
+                        crate::tui::components::modals::ErrorType::Transaction,
+                        "Transaction Failed".to_string(),
+                        format!("Your swap transaction failed: {}", e),
+                        vec![
+                            "Review your transaction parameters".to_string(),
+                            "Try again with different settings".to_string(),
+                            "Check network status".to_string(),
+                            "Contact support if needed".to_string(),
+                        ],
+                    )
+                };
+
+                // Create detailed error information for the modal
+                let error_details = vec![
+                    format!("Operation: Swap {} {} to {}", amount, from_asset, to_asset),
+                    format!("Pool ID: {}", pool_id_str),
+                    format!("Amount: {} ({})", amount, amount_uint),
+                    format!("Slippage: {:?}", slippage),
+                    format!("Technical Error: {}", e),
+                ];
+
+                // Show appropriate modal based on error type
+                if error_str.contains("slippage") && error_str.contains("exceeded") {
+                    // Create validation error modal for slippage issues to provide better guidance
+                    self.state.modal_state = Some(
+                        crate::tui::components::modals::ModalState::validation_error(
+                            error_title.clone(),
+                            "Slippage Tolerance".to_string(),
+                            user_message.clone(),
+                            suggestions,
+                        ),
+                    );
+                } else {
+                    // For other errors, use the standard error modal
+                    self.state.modal_state =
+                        Some(crate::tui::components::modals::ModalState::error(
+                            error_title.clone(),
+                            user_message.clone(),
+                            error_type.clone(),
+                            Some(error_details),
+                            Some("Try again".to_string()),
+                        ));
+                }
+
+                // Update loading state to error with persistent message
+                self.state.loading_state = LoadingState::error_with_retry(
+                    error_title.clone(),
+                    error_type.clone(),
+                    "retry_swap".to_string(),
+                );
+
+                // Also set a persistent error message in the status
+                self.state.error_message = Some(error_title);
+
+                Err(e)
+            }
+        }
+    }
+
+    /// Handle swap execute button - show confirmation modal
+    pub fn handle_swap_execute_confirmation(&mut self) -> Result<(), Error> {
+        let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+
+        // Check if any pools are available
+        if self.state.pool_cache.is_empty() {
+            self.show_validation_error(
+                "No Pools Available".to_string(),
+                "No pools are currently loaded for swapping".to_string(),
+                vec![
+                    "Wait for pool data to load from blockchain".to_string(),
+                    "Check network connection".to_string(),
+                    "Refresh the pools data".to_string(),
+                ],
+            );
+            return Ok(());
+        }
+
+        // Validate swap inputs
+        if !swap_state.validate() {
+            self.show_validation_error(
+                "Swap Validation".to_string(),
+                "Please fill in all required fields".to_string(),
+                vec![
+                    "Select a pool".to_string(),
+                    "Select from token".to_string(),
+                    "Enter swap amount".to_string(),
+                    "Set slippage tolerance".to_string(),
+                ],
+            );
+            return Ok(());
+        }
+
+        // Get swap details for confirmation
+        let from_amount = swap_state.from_amount_input.value();
+        let from_token = swap_state
+            .from_token_dropdown
+            .get_selected_value()
+            .unwrap_or_default();
+        let pool_id = swap_state
+            .pool_dropdown
+            .get_selected_value()
+            .unwrap_or_default();
+        let slippage = swap_state.slippage_input.value();
+
+        // Get the "to" token from the selected pool
+        let to_token = if let Some(pool_name) = swap_state.pool_dropdown.get_selected_label() {
+            crate::tui::screens::swap::determine_to_token_from_pool(&pool_name, &from_token)
+        } else {
+            "Unknown".to_string()
+        };
+
+        // Calculate expected output (placeholder - would use simulation result)
+        let expected_output = format!("{:.6}", from_amount.parse::<f64>().unwrap_or(0.0) * 0.95);
+
+        // Calculate price impact (placeholder - would use real simulation data)
+        let price_impact = 0.05; // 0.05%
+
+        // Calculate fees (placeholder - would use real pool data)
+        let fee_amount = format!("{:.6}", from_amount.parse::<f64>().unwrap_or(0.0) * 0.003);
+
+        // Create swap details for confirmation
+        let swap_details = crate::tui::screens::swap::SwapDetails {
+            from_amount: from_amount.to_string(),
+            from_token: from_token.to_string(),
+            to_amount: expected_output.clone(),
+            to_token: to_token.clone(),
+            pool_name: swap_state
+                .pool_dropdown
+                .get_selected_label()
+                .unwrap_or_default()
+                .to_string(),
+            slippage: slippage.to_string(),
+            expected_output: expected_output.clone(),
+            price_impact,
+            fee_amount,
+        };
+
+        // Show global confirmation modal
+        let confirmation_message = swap_state.show_confirmation_modal(&swap_details);
+
+        self.show_confirmation(
+            "Confirm Swap".to_string(),
+            confirmation_message,
+            Some("Execute Swap".to_string()),
+            Some("Cancel".to_string()),
+        );
+
+        Ok(())
+    }
+
+    /// Map display name to actual denomination using available pool assets
+    /// This is a public utility for balance lookups
+    pub fn map_token_name_to_denom(&self, token_name: &str) -> Option<String> {
+        // First try direct lookup (for simple denoms like "uom")
+        if self.state.balances.contains_key(token_name) {
+            return Some(token_name.to_string());
+        }
+
+        // Search through all pool assets to find matching denominations
+        for pool_entry in self.state.pool_cache.values() {
+            for asset in &pool_entry.pool_info.pool_info.assets {
+                let denom = &asset.denom;
+
+                // Check if the token name matches the shortened version
+                let shortened = if denom.len() > 15 {
+                    if let Some(last_part) = denom.split('/').last() {
+                        last_part.to_string()
+                    } else {
+                        format!("{}...", &denom[..10])
+                    }
+                } else {
+                    denom.clone()
+                };
+
+                if shortened == token_name {
+                    return Some(denom.clone());
+                }
+            }
+        }
+
+        // If not found in pools, search balances for denominations that end with the token name
+        for (denom, _) in &self.state.balances {
+            if denom.ends_with(&format!("/{}", token_name)) {
+                return Some(denom.clone());
+            }
+
+            if let Some(last_part) = denom.split('/').last() {
+                if last_part == token_name {
+                    return Some(denom.clone());
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Get balance for a token by its display name
+    /// This handles mapping from display names to full denominations
+    pub fn get_balance_by_token_name(&self, token_name: &str) -> Option<&String> {
+        // Try direct lookup first
+        if let Some(balance) = self.state.balances.get(token_name) {
+            return Some(balance);
+        }
+
+        // Map token name to full denomination and lookup balance
+        if let Some(full_denom) = self.map_token_name_to_denom(token_name) {
+            return self.state.balances.get(&full_denom);
+        }
+
+        None
+    }
+
+    /// Handle slippage error retry with automatic slippage increase
+    pub async fn handle_slippage_retry(&mut self) -> Result<(), Error> {
+        // Get current swap parameters
+        let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+
+        let current_slippage = swap_state
+            .slippage_input
+            .value()
+            .parse::<f64>()
+            .unwrap_or(1.0);
+        let suggested_slippage = if current_slippage < 2.0 {
+            2.0
+        } else if current_slippage < 5.0 {
+            5.0
+        } else {
+            current_slippage + 2.0 // Increase by 2% if already high
+        };
+
+        // Show confirmation for increased slippage
+        self.show_confirmation(
+            "Increase Slippage and Retry?".to_string(),
+            format!(
+                "Would you like to retry the swap with increased slippage tolerance?\n\n\
+                Current: {:.1}%\n\
+                Suggested: {:.1}%\n\n\
+                Higher slippage tolerance increases the chance of success but may result in less favorable rates.",
+                current_slippage,
+                suggested_slippage
+            ),
+            Some("Retry with Higher Slippage".to_string()),
+            Some("Cancel".to_string()),
+        );
+
+        Ok(())
+    }
+
+    /// Apply suggested slippage and retry swap
+    pub async fn retry_swap_with_increased_slippage(&mut self) -> Result<(), Error> {
+        let swap_state = crate::tui::screens::swap::get_swap_screen_state();
+
+        let current_slippage = swap_state
+            .slippage_input
+            .value()
+            .parse::<f64>()
+            .unwrap_or(1.0);
+        let suggested_slippage = if current_slippage < 2.0 {
+            2.0
+        } else if current_slippage < 5.0 {
+            5.0
+        } else {
+            current_slippage + 2.0
+        };
+
+        // Update the slippage input
+        swap_state
+            .slippage_input
+            .set_value(&format!("{:.1}", suggested_slippage));
+
+        // Clear previous error modal
+        self.state.modal_state = None;
+        self.state.error_message = None;
+
+        // Show info message
+        self.set_status(format!(
+            "Increased slippage tolerance to {:.1}% - retrying swap...",
+            suggested_slippage
+        ));
+
+        // Retry the swap with the same parameters but higher slippage
+        if let Some(from_asset) = swap_state.from_token_dropdown.get_selected_value() {
+            // Get the to_asset from the pool selection
+            let to_asset = if let Some(pool_name) = swap_state.pool_dropdown.get_selected_label() {
+                crate::tui::screens::swap::determine_to_token_from_pool(&pool_name, &from_asset)
+            } else {
+                "Unknown".to_string()
+            };
+            if let Some(pool_id) = swap_state.pool_dropdown.get_selected_value() {
+                let amount = swap_state.from_amount_input.value().to_string();
+
+                self.execute_real_swap(
+                    from_asset.to_string(),
+                    to_asset,
+                    amount,
+                    Some(pool_id.to_string()),
+                    Some(format!("{:.1}", suggested_slippage)),
+                )
+                .await?;
+            }
         }
 
         Ok(())

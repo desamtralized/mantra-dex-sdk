@@ -6,12 +6,14 @@
 pub mod async_ops;
 pub mod focus_manager;
 pub mod formatting;
+pub mod logger;
 pub mod responsive;
 pub mod validation;
 
 pub use async_ops::*;
 pub use focus_manager::*;
 pub use formatting::*;
+pub use logger::*;
 pub use validation::*;
 
 // Placeholder - utilities will be implemented in future tasks

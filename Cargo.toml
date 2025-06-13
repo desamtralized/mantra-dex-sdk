@@ -13,6 +13,7 @@ path = "src/bin/main.rs"
 name = "tui"
 path = "src/bin/tui.rs"
 
+
 [package.metadata.commands]
 tui = "cargo run --bin mantra-dex-tui --features tui"
 

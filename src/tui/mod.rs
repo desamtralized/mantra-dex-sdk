@@ -136,6 +136,15 @@ pub async fn run_tui(client: MantraDexClient, config: MantraNetworkConfig) -> Re
     // Setup panic handler for graceful terminal restoration
     setup_panic_handler();
 
+    // Initialize file logger
+    utils::logger::init_logger();
+    utils::logger::log_info("MANTRA DEX TUI starting up");
+
+    // Log the file path for user reference
+    if let Some(log_path) = utils::logger::get_log_file_path() {
+        utils::logger::log_info(&format!("Log file location: {}", log_path.display()));
+    }
+
     // Initialize terminal
     let mut terminal = init_terminal().map_err(|e| {
         emergency_terminal_cleanup();

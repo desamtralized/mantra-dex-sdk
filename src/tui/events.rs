@@ -124,7 +124,7 @@ pub enum Event {
         from_asset: String,
         to_asset: String,
         amount: String,
-        pool_id: Option<u64>,
+        pool_id: Option<String>,
         slippage_tolerance: Option<String>,
     },
     /// Provide liquidity to a pool
@@ -204,6 +204,12 @@ pub enum Event {
     },
     /// Trigger simulation based on input changes
     TriggerSimulation,
+
+    /// Retry swap with increased slippage tolerance
+    RetryWithIncreasedSlippage,
+
+    /// Show swap confirmation modal
+    ShowSwapConfirmation,
 }
 
 /// Swap operation for multi-hop swaps
@@ -243,7 +249,7 @@ impl AsyncBlockchainProcessor {
         from_asset: String,
         to_asset: String,
         amount: String,
-        _pool_id: Option<u64>,
+        _pool_id: Option<String>,
         _slippage_tolerance: Option<String>,
     ) {
         let operation = "swap".to_string();
@@ -848,7 +854,7 @@ mod tests {
             from_asset: "USDC".to_string(),
             to_asset: "OM".to_string(),
             amount: "100".to_string(),
-            pool_id: Some(1),
+            pool_id: Some("o.uom.usdc.pool".to_string()),
             slippage_tolerance: Some("0.01".to_string()),
         };
         assert!(EventHandler::is_blockchain_action(&swap_event));

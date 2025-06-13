@@ -859,7 +859,7 @@ pub fn export_transactions(
     match format {
         ExportFormat::Json => {
             // Generate JSON and write to file
-            println!(
+            eprintln!(
                 "Would export {} transactions to {} as JSON",
                 transactions.len(),
                 filename
@@ -867,7 +867,7 @@ pub fn export_transactions(
         }
         ExportFormat::Csv => {
             // Generate CSV and write to file
-            println!(
+            eprintln!(
                 "Would export {} transactions to {} as CSV",
                 transactions.len(),
                 filename
@@ -875,7 +875,7 @@ pub fn export_transactions(
         }
         ExportFormat::Text => {
             // Generate text and write to file
-            println!(
+            eprintln!(
                 "Would export {} transactions to {} as text",
                 transactions.len(),
                 filename

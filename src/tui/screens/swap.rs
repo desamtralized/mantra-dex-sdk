@@ -9,7 +9,6 @@ use crate::tui::{
     components::{
         forms::{InputType, TextInput},
         header::render_header,
-        modals::{render_modal, ModalState},
         navigation::render_navigation,
         simple_list::{ListEvent, SimpleList, SimpleListOption},
         status_bar::render_status_bar,
@@ -20,7 +19,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap},
     Frame,
 };
 use tui_input::InputRequest;
@@ -48,10 +47,7 @@ pub struct SwapScreenState {
     pub from_amount_input: TextInput,
     /// Slippage tolerance input
     pub slippage_input: TextInput,
-    /// Whether confirmation modal is shown
-    pub show_confirmation: bool,
-    /// Modal state for confirmations
-    pub modal_state: Option<ModalState>,
+
     /// Available tokens for selection
     pub available_tokens: Vec<String>,
     /// Available pools for the selected token pair
@@ -66,22 +62,8 @@ impl Default for SwapScreenState {
     fn default() -> Self {
         let mut pool_dropdown = SimpleList::new("Available Pools");
 
-        // Initialize with test data immediately (for development/testing)
-        let test_pools = vec![
-            ("1".to_string(), "Pool 1: USDC / USDT".to_string()),
-            ("2".to_string(), "Pool 2: ATOM / OSMO".to_string()),
-            ("3".to_string(), "Pool 3: MANTRA / USDC".to_string()),
-            ("4".to_string(), "Pool 4: USDT / ATOM".to_string()),
-            ("5".to_string(), "Pool 5: OSMO / MANTRA".to_string()),
-        ];
-
-        let pool_options: Vec<SimpleListOption> = test_pools
-            .iter()
-            .map(|(pool_id, display_name)| {
-                SimpleListOption::new(display_name.clone(), pool_id.clone())
-            })
-            .collect();
-        pool_dropdown = pool_dropdown.with_options(pool_options);
+        // Pool data will be loaded from the blockchain via the app's pool cache
+        // No hardcoded test data since it doesn't exist on the actual blockchain
 
         // Start with empty token list - will be populated when a pool is selected
         let from_token_dropdown = SimpleList::new("Pool Tokens");
@@ -105,10 +87,8 @@ impl Default for SwapScreenState {
             from_token_dropdown,
             from_amount_input,
             slippage_input,
-            show_confirmation: false,
-            modal_state: None,
             available_tokens: Vec::new(), // Will be populated when pool is selected
-            available_pools: test_pools,
+            available_pools: Vec::new(),  // Will be populated from blockchain data
             simulation_timer: None,
             last_input_change: None,
         };
@@ -138,6 +118,18 @@ impl SwapScreenState {
 
     /// Update available pools based on selected tokens
     pub fn update_available_pools(&mut self, pools: Vec<(String, String)>) {
+        crate::tui::utils::logger::log_info(&format!(
+            "Updating available pools: {} pools found",
+            pools.len()
+        ));
+
+        for (pool_id, display_name) in &pools {
+            crate::tui::utils::logger::log_debug(&format!(
+                "  Pool: {} -> {}",
+                pool_id, display_name
+            ));
+        }
+
         self.available_pools = pools.clone();
 
         // Update pool list while preserving focus state
@@ -152,10 +144,17 @@ impl SwapScreenState {
         dropdown = dropdown.with_options(options);
         dropdown.set_active(was_active);
         self.pool_dropdown = dropdown;
+
+        crate::tui::utils::logger::log_info("Pool dropdown updated successfully");
     }
 
     /// Update token list based on selected pool
     pub fn update_tokens_for_pool(&mut self, pool_id: &str) {
+        crate::tui::utils::logger::log_info(&format!(
+            "Updating tokens for selected pool: {}",
+            pool_id
+        ));
+
         // Attempt to derive the token pair for the selected pool using the cached `available_pools`.
         // `available_pools` entries are (pool_id, display_name) where display_name was created as
         // "<token_a> / <token_b>" in `App::update_swap_screen_pools`.  We can therefore recover the
@@ -166,6 +165,8 @@ impl SwapScreenState {
             .iter()
             .find(|(id, _)| id == pool_id)
             .and_then(|(_, name)| {
+                crate::tui::utils::logger::log_debug(&format!("Found pool display name: {}", name));
+
                 // Expected format: "Pool <num>: TOKEN_A / TOKEN_B"
                 let after_colon = name
                     .split(':')
@@ -176,6 +177,8 @@ impl SwapScreenState {
                     .split('/')
                     .map(|s| s.trim().to_string())
                     .collect();
+
+                crate::tui::utils::logger::log_debug(&format!("Parsed token parts: {:?}", parts));
 
                 if parts.len() == 2 {
                     Some(parts)
@@ -188,8 +191,16 @@ impl SwapScreenState {
         // Fallback: if we could not determine tokens from the pool name, keep the full list of
         // available tokens so the user is not left with an empty dropdown.
         let tokens_for_pool = if tokens_for_pool.is_empty() {
+            crate::tui::utils::logger::log_warning(&format!(
+                "Could not determine tokens from pool {}, using all available tokens as fallback",
+                pool_id
+            ));
             self.available_tokens.clone()
         } else {
+            crate::tui::utils::logger::log_info(&format!(
+                "Successfully extracted tokens for pool {}: {:?}",
+                pool_id, tokens_for_pool
+            ));
             tokens_for_pool
         };
 
@@ -217,6 +228,11 @@ impl SwapScreenState {
         } else {
             self.from_token_dropdown.list_state.select(None);
         }
+
+        crate::tui::utils::logger::log_info(&format!(
+            "Token dropdown updated with {} tokens",
+            tokens_for_pool.len()
+        ));
     }
 
     /// Clear focus from all inputs
@@ -289,6 +305,15 @@ impl SwapScreenState {
         // Only handle events when in WithinScreen mode
         if navigation_mode != crate::tui::app::NavigationMode::WithinScreen {
             return false;
+        }
+
+        // Log significant key events for swap execution
+        if matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
+            && matches!(self.input_focus, SwapInputFocus::Execute)
+        {
+            crate::tui::utils::logger::log_info("=== SWAP EXECUTE KEY PRESSED ===");
+            crate::tui::utils::logger::log_debug(&format!("Key event: {:?}", key));
+            crate::tui::utils::logger::log_debug(&format!("Current focus: {:?}", self.input_focus));
         }
 
         // Handle regular input focus
@@ -378,8 +403,14 @@ impl SwapScreenState {
                 match key.code {
                     KeyCode::Enter | KeyCode::Char(' ') => {
                         if self.validate() {
-                            // Trigger swap execution
-                            return true;
+                            // Mark that we're starting a swap process for better UX feedback
+                            self.mark_input_change();
+                            // Send ShowSwapConfirmation event to trigger the global modal
+                            // This event will be handled by the main app event loop
+                            eprintln!("Swap execute button pressed - validation passed");
+                            return true; // Event will be handled by app
+                        } else {
+                            eprintln!("Swap validation failed - please check all fields");
                         }
                     }
                     _ => {}
@@ -432,10 +463,41 @@ impl SwapScreenState {
         pool_valid && from_token_valid && amount_valid && slippage_valid
     }
 
-    /// Show confirmation modal
-    pub fn show_confirmation_modal(&mut self, swap_details: &SwapDetails) {
+    /// Get detailed validation errors for user feedback
+    pub fn get_validation_errors(&mut self) -> Vec<String> {
+        let mut errors = Vec::new();
+
+        if self.pool_dropdown.get_selected_value().is_none() {
+            errors.push("Please select a trading pool".to_string());
+        }
+
+        if self.from_token_dropdown.get_selected_value().is_none() {
+            errors.push("Please select a token to swap from".to_string());
+        }
+
+        if !self.from_amount_input.validate() {
+            if self.from_amount_input.value().is_empty() {
+                errors.push("Please enter an amount to swap".to_string());
+            } else {
+                errors.push("Please enter a valid amount (numbers only)".to_string());
+            }
+        }
+
+        if !self.slippage_input.validate() {
+            if self.slippage_input.value().is_empty() {
+                errors.push("Please set slippage tolerance".to_string());
+            } else {
+                errors.push("Please enter a valid slippage tolerance (0.1-20%)".to_string());
+            }
+        }
+
+        errors
+    }
+
+    /// Show confirmation modal using global app state
+    pub fn show_confirmation_modal(&mut self, swap_details: &SwapDetails) -> String {
         let message = format!(
-            "Confirm swap:\n{} {} → {} {}\nPool: {}\nSlippage: {}%\nExpected output: {} {}\nPrice impact: {:.2}%",
+            "Confirm swap:\n{} {} → {} {}\nPool: {}\nSlippage: {}%\nExpected output: {} {}\nPrice impact: {:.2}%\nTotal fees: {} {}",
             swap_details.from_amount,
             swap_details.from_token,
             swap_details.to_amount,
@@ -444,22 +506,19 @@ impl SwapScreenState {
             swap_details.slippage,
             swap_details.expected_output,
             swap_details.to_token,
-            swap_details.price_impact
+            swap_details.price_impact,
+            swap_details.fee_amount,
+            swap_details.from_token
         );
 
-        self.modal_state = Some(ModalState::confirmation(
-            "Confirm Swap".to_string(),
-            message,
-            Some("Execute Swap".to_string()),
-            Some("Cancel".to_string()),
-        ));
-        self.show_confirmation = true;
+        // Return the message for the global app to handle
+        message
     }
 
-    /// Hide confirmation modal
+    /// Hide confirmation modal (now handled by global app state)
     pub fn hide_confirmation_modal(&mut self) {
-        self.modal_state = None;
-        self.show_confirmation = false;
+        // Modal state is now managed by the global app
+        // This method is kept for compatibility but doesn't do anything
     }
 }
 
@@ -521,12 +580,13 @@ pub fn render_swap(f: &mut Frame, app: &App) {
     // Render swap content
     render_swap_content(f, chunks[2], app);
 
-    // Render status bar
+    // Render status bar with enhanced error information
     render_status_bar(f, &app.state, chunks[3]);
 
-    // Render modal if visible
-    if let Some(ref modal_state) = swap_state.modal_state {
-        render_modal(f, modal_state, size);
+    // Modal rendering is now handled by the global app modal system
+    // But we can also check for validation errors and display them as temporary overlays
+    if app.state.current_screen == crate::tui::app::Screen::Swap {
+        render_validation_overlay(f, size, app);
     }
 }
 
@@ -629,10 +689,12 @@ fn render_from_amount_input(
         ]
     } else {
         let default_balance = "0.0".to_string();
+
+        // FIXED: Look up balance using the full denomination, not just the token name
+        // The balances are stored using the full denom (e.g., "factory/mantra1qwm8p82w0ygaz3duf0y56gjf8pwh5ykmgnqmtm/uUSDC")
+        // but the dropdown shows simplified names (e.g., "uUSDC")
         let balance = app
-            .state
-            .balances
-            .get(from_token)
+            .get_balance_by_token_name(from_token)
             .unwrap_or(&default_balance);
 
         vec![
@@ -672,39 +734,97 @@ fn render_execute_button(f: &mut Frame, area: Rect, app: &App) {
     let is_focused = matches!(swap_state.input_focus, SwapInputFocus::Execute);
     let is_valid = swap_state.clone().validate();
 
-    let (button_style, button_text) =
-        if matches!(app.state.loading_state, LoadingState::Loading { .. }) {
-            (Style::default().fg(Color::Yellow), "Processing Swap...")
-        } else if !is_valid {
-            (Style::default().fg(Color::DarkGray), "Invalid Input")
-        } else if is_focused {
-            (
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-                "► Swap ◄",
-            )
+    // Enhanced loading state detection and display
+    let is_loading = matches!(app.state.loading_state, LoadingState::Loading { .. });
+    let loading_message = if let LoadingState::Loading {
+        message, progress, ..
+    } = &app.state.loading_state
+    {
+        if let Some(p) = progress {
+            format!("{} ({}%)", message, *p as u16)
         } else {
-            (
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-                "Swap",
-            )
-        };
+            message.clone()
+        }
+    } else {
+        String::new()
+    };
 
-    let button = Paragraph::new(button_text)
+    let (button_style, button_text, border_style) = if is_loading {
+        // Show prominent loading state
+        (
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
+            if loading_message.is_empty() {
+                "Processing Swap..."
+            } else {
+                &loading_message
+            },
+            Style::default().fg(Color::Yellow),
+        )
+    } else if !is_valid {
+        (
+            Style::default().fg(Color::DarkGray),
+            "Invalid Input",
+            Style::default().fg(Color::Gray),
+        )
+    } else if is_focused {
+        (
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            "► Execute Swap ◄",
+            Style::default().fg(Color::Green),
+        )
+    } else {
+        (
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+            "Execute Swap",
+            Style::default().fg(Color::Green),
+        )
+    };
+
+    // Add loading progress indicator if available
+    let button_content = if is_loading {
+        if let LoadingState::Loading {
+            progress: Some(p), ..
+        } = &app.state.loading_state
+        {
+            let progress_bar = "█".repeat(((*p / 10.0) as usize).min(10));
+            let empty_bar = "░".repeat(10 - progress_bar.len());
+            format!("{}\n[{}{}]", button_text, progress_bar, empty_bar)
+        } else {
+            // Show animated dots for indeterminate progress
+            let dots = match (std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                / 500)
+                % 4
+            {
+                0 => "",
+                1 => ".",
+                2 => "..",
+                _ => "...",
+            };
+            format!("{}{}", button_text, dots)
+        }
+    } else {
+        button_text.to_string()
+    };
+
+    let button = Paragraph::new(button_content)
         .style(button_style)
         .alignment(Alignment::Center)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(if is_focused {
-                    Style::default().fg(Color::Green)
-                } else {
-                    Style::default().fg(Color::Gray)
-                }),
+                .border_style(border_style)
+                .title(if is_loading { "Processing" } else { "Action" }),
         );
 
     f.render_widget(button, area);
@@ -822,13 +942,62 @@ fn render_simulation_results(f: &mut Frame, area: Rect, app: &App) {
 
     let swap_state = get_swap_screen_state();
 
+    // Enhanced loading state display for swap operations
     let content = if let Some(ref simulation) = app.state.swap_state.simulation_result {
         render_simulation_details(simulation)
     } else if matches!(app.state.loading_state, LoadingState::Loading { .. }) {
-        vec![Line::from(vec![Span::styled(
-            "Running simulation...",
-            Style::default().fg(Color::Yellow),
-        )])]
+        // Show detailed loading information
+        if let LoadingState::Loading {
+            message, progress, ..
+        } = &app.state.loading_state
+        {
+            let mut loading_lines = vec![
+                Line::from(vec![Span::styled(
+                    "🔄 Processing Transaction",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    message,
+                    Style::default().fg(Color::Cyan),
+                )]),
+            ];
+
+            // Add progress bar if available
+            if let Some(p) = progress {
+                let progress_percent = *p as u16;
+                let bar_width = 20;
+                let filled = ((progress_percent as f32 / 100.0) * bar_width as f32) as usize;
+                let empty = bar_width - filled;
+
+                loading_lines.push(Line::from(""));
+                loading_lines.push(Line::from(vec![
+                    Span::styled("[", Style::default().fg(Color::White)),
+                    Span::styled("█".repeat(filled), Style::default().fg(Color::Green)),
+                    Span::styled("░".repeat(empty), Style::default().fg(Color::DarkGray)),
+                    Span::styled("]", Style::default().fg(Color::White)),
+                    Span::styled(
+                        format!(" {}%", progress_percent),
+                        Style::default().fg(Color::Yellow),
+                    ),
+                ]));
+            }
+
+            loading_lines.push(Line::from(""));
+            loading_lines.push(Line::from(vec![Span::styled(
+                "Please wait while your transaction is processed...",
+                Style::default().fg(Color::Gray),
+            )]));
+
+            loading_lines
+        } else {
+            vec![Line::from(vec![Span::styled(
+                "Running simulation...",
+                Style::default().fg(Color::Yellow),
+            )])]
+        }
     } else if swap_state.should_trigger_simulation() {
         vec![
             Line::from(vec![Span::styled(
@@ -961,53 +1130,263 @@ pub fn handle_swap_screen_input(input: InputRequest) -> bool {
 pub fn execute_swap_with_confirmation() {
     let swap_state = get_swap_screen_state();
 
+    // Log swap execution attempt
+    crate::tui::utils::logger::log_info("=== SWAP EXECUTION ATTEMPT ===");
+
+    // Validate all required fields are filled
+    if !swap_state.validate() {
+        let errors = swap_state.clone().get_validation_errors();
+        crate::tui::utils::logger::log_error("Swap validation failed:");
+        for error in &errors {
+            crate::tui::utils::logger::log_error(&format!("  - {}", error));
+        }
+        eprintln!("Swap validation failed - missing required fields");
+        return;
+    }
+
+    // Get current values from the form
+    let from_amount = swap_state.from_amount_input.value();
     let from_token = swap_state
         .from_token_dropdown
-        .get_selected_label()
-        .unwrap_or("Unknown")
-        .to_string();
-
-    let pool_info = swap_state
+        .get_selected_value()
+        .unwrap_or_default();
+    let pool_id_str = swap_state
         .pool_dropdown
-        .get_selected_label()
-        .unwrap_or("Unknown Pool")
-        .to_string();
+        .get_selected_value()
+        .unwrap_or_default();
 
-    let to_token = determine_to_token_from_pool(&pool_info, &from_token);
+    // Log swap parameters
+    crate::tui::utils::logger::log_info("Swap parameters:");
+    crate::tui::utils::logger::log_info(&format!("  From Amount: {}", from_amount));
+    crate::tui::utils::logger::log_info(&format!("  From Token: {}", from_token));
+    crate::tui::utils::logger::log_info(&format!("  Pool ID: {}", pool_id_str));
+
+    // Validate that we have a valid pool selection
+    if pool_id_str.is_empty() {
+        crate::tui::utils::logger::log_error("Swap failed: No pool selected");
+        eprintln!("Error: No pool selected for swap");
+        return;
+    }
+
+    let slippage = swap_state.slippage_input.value();
+    crate::tui::utils::logger::log_info(&format!("  Slippage Tolerance: {}%", slippage));
+
+    // Get the "to" token from the selected pool
+    let to_token = if let Some(pool_name) = swap_state.pool_dropdown.get_selected_label() {
+        determine_to_token_from_pool(&pool_name, &from_token)
+    } else {
+        crate::tui::utils::logger::log_error(
+            "Swap failed: No pool name available for token determination",
+        );
+        eprintln!("Error: No pool name available");
+        return;
+    };
+
+    crate::tui::utils::logger::log_info(&format!("  To Token: {}", to_token));
+
+    // Additional validation: ensure we have valid token data
+    if from_token.is_empty() || to_token.is_empty() || to_token == "Unknown" {
+        crate::tui::utils::logger::log_error(&format!(
+            "Swap failed: Invalid token selection - from: '{}', to: '{}'",
+            from_token, to_token
+        ));
+        eprintln!(
+            "Error: Invalid token selection - from: {}, to: {}",
+            from_token, to_token
+        );
+        return;
+    }
+
+    // Calculate expected output (placeholder - would use simulation result)
+    let expected_output = format!("{:.6}", from_amount.parse::<f64>().unwrap_or(0.0) * 0.95);
+
+    // Calculate price impact (placeholder - would use real simulation data)
+    let price_impact = 0.05; // 0.05%
+
+    // Calculate fees (placeholder - would use real pool data)
+    let fee_amount = format!("{:.6}", from_amount.parse::<f64>().unwrap_or(0.0) * 0.003);
+
+    // Log calculated values
+    crate::tui::utils::logger::log_info("Calculated swap details:");
+    crate::tui::utils::logger::log_info(&format!(
+        "  Expected Output: {} {}",
+        expected_output, to_token
+    ));
+    crate::tui::utils::logger::log_info(&format!("  Price Impact: {:.4}%", price_impact));
+    crate::tui::utils::logger::log_info(&format!(
+        "  Estimated Fees: {} {}",
+        fee_amount, from_token
+    ));
 
     // Create swap details for confirmation
     let swap_details = SwapDetails {
-        from_amount: swap_state.from_amount_input.value().to_string(),
-        from_token,
-        to_amount: "0.0".to_string(), // Would calculate
-        to_token,
-        pool_name: pool_info,
-        slippage: swap_state.slippage_input.value().to_string(),
-        expected_output: "0.0".to_string(), // Would calculate
-        price_impact: 1.5,                  // Would calculate
-        fee_amount: "0.001".to_string(),    // Would calculate
+        from_amount: from_amount.to_string(),
+        from_token: from_token.to_string(),
+        to_amount: expected_output.clone(),
+        to_token: to_token.clone(),
+        pool_name: swap_state
+            .pool_dropdown
+            .get_selected_label()
+            .unwrap_or_default()
+            .to_string(),
+        slippage: slippage.to_string(),
+        expected_output: expected_output.clone(),
+        price_impact,
+        fee_amount,
     };
 
-    swap_state.show_confirmation_modal(&swap_details);
+    // Show confirmation modal using global app state
+    let confirmation_message = swap_state.show_confirmation_modal(&swap_details);
+
+    // Log confirmation ready
+    crate::tui::utils::logger::log_info("Swap confirmation modal prepared");
+    crate::tui::utils::logger::log_debug(&format!(
+        "Confirmation message: {}",
+        confirmation_message
+    ));
+
+    // We need to return the confirmation message to trigger the global modal
+    // This will be handled by the calling app code
+    eprintln!("Swap confirmation ready: {}", confirmation_message);
 }
 
 /// Handle confirmation modal response
-pub fn handle_confirmation_response(confirmed: bool) -> bool {
+pub fn handle_confirmation_response(confirmed: bool) -> Option<crate::tui::events::Event> {
     let swap_state = get_swap_screen_state();
+    swap_state.hide_confirmation_modal();
+
+    crate::tui::utils::logger::log_info(&format!(
+        "=== SWAP CONFIRMATION RESPONSE: {} ===",
+        if confirmed { "CONFIRMED" } else { "CANCELLED" }
+    ));
+
     if confirmed {
-        // Execute the actual swap
-        swap_state.hide_confirmation_modal();
-        true // Return true to indicate swap should be executed
+        // Execute the actual swap by creating the ExecuteSwap event
+        let from_amount = swap_state.from_amount_input.value();
+        let from_token = swap_state
+            .from_token_dropdown
+            .get_selected_value()
+            .unwrap_or_default();
+
+        // Get pool ID as string (no parsing needed for string identifiers)
+        let pool_id_str = swap_state
+            .pool_dropdown
+            .get_selected_value()
+            .unwrap_or_default();
+
+        // Validate that we have a valid pool ID before proceeding
+        if pool_id_str.is_empty() {
+            crate::tui::utils::logger::log_error("Swap execution failed: No pool selected");
+            eprintln!("Error: No pool selected for swap execution");
+            return None;
+        }
+
+        let slippage = swap_state.slippage_input.value();
+
+        // Get the "to" token from the selected pool
+        let to_token = if let Some(pool_name) = swap_state.pool_dropdown.get_selected_label() {
+            determine_to_token_from_pool(&pool_name, &from_token)
+        } else {
+            crate::tui::utils::logger::log_error(
+                "Swap execution failed: No pool name available for token determination",
+            );
+            eprintln!("Error: No pool name available for token determination");
+            return None;
+        };
+
+        // Log the final swap parameters being sent to execution
+        crate::tui::utils::logger::log_info("Creating ExecuteSwap event with parameters:");
+        crate::tui::utils::logger::log_info(&format!("  From Asset: {}", from_token));
+        crate::tui::utils::logger::log_info(&format!("  To Asset: {}", to_token));
+        crate::tui::utils::logger::log_info(&format!("  Amount: {}", from_amount));
+        crate::tui::utils::logger::log_info(&format!("  Pool ID: {}", pool_id_str));
+        crate::tui::utils::logger::log_info(&format!("  Slippage Tolerance: {}%", slippage));
+
+        // Return the ExecuteSwap event to be processed by the main app
+        let execute_event = crate::tui::events::Event::ExecuteSwap {
+            from_asset: from_token.to_string(),
+            to_asset: to_token,
+            amount: from_amount.to_string(),
+            pool_id: Some(pool_id_str.to_string()),
+            slippage_tolerance: Some(slippage.to_string()),
+        };
+
+        crate::tui::utils::logger::log_info("ExecuteSwap event created successfully");
+        Some(execute_event)
     } else {
-        swap_state.hide_confirmation_modal();
-        false
+        // User cancelled
+        crate::tui::utils::logger::log_info("User cancelled swap execution");
+        None
     }
 }
 
 /// Reset swap form
 pub fn reset_swap_form() {
+    crate::tui::utils::logger::log_info("=== SWAP FORM RESET ===");
+    crate::tui::utils::logger::log_info("Resetting swap form to default state");
+
     let swap_state = get_swap_screen_state();
     *swap_state = SwapScreenState::default();
+
+    crate::tui::utils::logger::log_info("Swap form reset completed");
+}
+
+/// Render validation error overlay for immediate feedback
+fn render_validation_overlay(f: &mut Frame, area: Rect, app: &App) {
+    let swap_state = get_swap_screen_state();
+
+    // Only show validation errors when the execute button is focused and validation fails
+    if !matches!(swap_state.input_focus, SwapInputFocus::Execute) {
+        return;
+    }
+
+    if swap_state.clone().validate() {
+        return; // No errors to display
+    }
+
+    let errors = swap_state.clone().get_validation_errors();
+    if errors.is_empty() {
+        return;
+    }
+
+    // Create a small overlay at the bottom of the screen
+    let overlay_height = (errors.len() + 2).min(6) as u16;
+    let overlay_area = Rect {
+        x: area.x + 2,
+        y: area.y + area.height - overlay_height - 4,
+        width: area.width - 4,
+        height: overlay_height,
+    };
+
+    // Clear the area
+    f.render_widget(ratatui::widgets::Clear, overlay_area);
+
+    // Create error content
+    let error_lines: Vec<Line> = errors
+        .iter()
+        .enumerate()
+        .map(|(i, error)| {
+            Line::from(vec![
+                Span::styled("• ", Style::default().fg(Color::Red)),
+                Span::styled(error, Style::default().fg(Color::White)),
+            ])
+        })
+        .collect();
+
+    let error_text = Text::from(error_lines);
+
+    let error_block = Paragraph::new(error_text)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Red))
+                .title("Validation Errors")
+                .title_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        )
+        .style(Style::default().bg(Color::Black))
+        .wrap(Wrap { trim: true });
+
+    f.render_widget(error_block, overlay_area);
 }
 
 #[cfg(test)]
