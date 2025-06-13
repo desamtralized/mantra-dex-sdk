@@ -437,8 +437,8 @@ impl Default for AppState {
             wallet_selection_state: crate::tui::screens::wallet_selection::WalletSelectionScreen::default(),
             wizard_state: {
                 let mut wizard = crate::tui::screens::wizard::WizardState::new();
-                // Show wizard on first run if no wallet is configured
-                wizard.show_wizard = true; // Always show for now; in real app, check wallet config
+                // Don't show wizard by default - it will be triggered by wallet selection actions
+                wizard.show_wizard = false;
                 wizard
             },
         }
@@ -947,6 +947,10 @@ impl App {
                         self.handle_confirmation();
                         self.state.modal_state = None;
                     }
+                } else if self.state.current_screen == Screen::WalletSelection {
+                    // Special case: Wallet selection screen should handle Enter directly 
+                    // without needing to switch to WithinScreen mode first
+                    self.handle_screen_specific_event(Event::Enter).await?;
                 } else if self.state.navigation_mode == NavigationMode::ScreenLevel {
                     // Enter within-screen navigation mode
                     self.state.navigation_mode = NavigationMode::WithinScreen;
@@ -1539,16 +1543,26 @@ impl App {
             WalletSelectionAction::None => Ok(true),
             WalletSelectionAction::CreateNewWallet => {
                 // Go to wizard for creating new wallet
+                self.state.wizard_state.reset(); // Reset first to clear any previous state
                 self.state.wizard_state.show_wizard = true;
                 self.state.wizard_state.import_existing = false;
-                self.state.wizard_state.reset();
+                // Generate new mnemonic for wallet creation
+                match crate::wallet::MantraWallet::generate() {
+                    Ok((_, mnemonic)) => {
+                        self.state.wizard_state.generated_mnemonic = Some(mnemonic);
+                    }
+                    Err(e) => {
+                        self.set_error(format!("Failed to generate wallet: {}", e));
+                        return Ok(true);
+                    }
+                }
                 Ok(true)
             }
             WalletSelectionAction::RecoverWallet => {
                 // Go to wizard for recovering existing wallet
+                self.state.wizard_state.reset(); // Reset first to clear any previous state
                 self.state.wizard_state.show_wizard = true;
                 self.state.wizard_state.import_existing = true;
-                self.state.wizard_state.reset();
                 Ok(true)
             }
             WalletSelectionAction::AuthenticateWallet { wallet_name, password } => {
