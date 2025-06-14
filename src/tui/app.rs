@@ -1243,38 +1243,26 @@ impl App {
                 let pool = &entry.pool_info;
                 let pool_id = pool.pool_info.pool_identifier.to_string();
 
-                // Create display name showing asset pair
-                let asset_pair = if pool.pool_info.assets.len() >= 2 {
-                    let asset1 = &pool.pool_info.assets[0].denom;
-                    let asset2 = &pool.pool_info.assets[1].denom;
+                // Create display name showing asset pair with amounts
+                let asset_pair_with_amounts = if pool.pool_info.assets.len() >= 2 {
+                    let asset1 = &pool.pool_info.assets[0];
+                    let asset2 = &pool.pool_info.assets[1];
 
-                    // Simplify long denominations
-                    let asset1_name = if asset1.len() > 15 {
-                        if let Some(last_part) = asset1.split('/').last() {
-                            last_part.to_string()
-                        } else {
-                            format!("{}...", &asset1[..10])
-                        }
-                    } else {
-                        asset1.clone()
-                    };
+                    // Get proper token symbols instead of micro denominations
+                    let asset1_symbol = self.denom_to_symbol(&asset1.denom);
+                    let asset2_symbol = self.denom_to_symbol(&asset2.denom);
 
-                    let asset2_name = if asset2.len() > 15 {
-                        if let Some(last_part) = asset2.split('/').last() {
-                            last_part.to_string()
-                        } else {
-                            format!("{}...", &asset2[..10])
-                        }
-                    } else {
-                        asset2.clone()
-                    };
+                    // Convert micro amounts to actual token amounts
+                    let asset1_amount = self.micro_to_token_amount(&asset1.amount.to_string(), &asset1.denom);
+                    let asset2_amount = self.micro_to_token_amount(&asset2.amount.to_string(), &asset2.denom);
 
-                    format!("{} / {}", asset1_name, asset2_name)
+                    // Format with proper symbols and amounts
+                    format!("{} ({}) / {} ({})", asset1_symbol, asset1_amount, asset2_symbol, asset2_amount)
                 } else {
                     "Unknown Pair".to_string()
                 };
 
-                let display_name = format!("Pool {}: {}", pool_id, asset_pair);
+                let display_name = format!("Pool {}: {}", pool_id, asset_pair_with_amounts);
                 (pool_id, display_name)
             })
             .collect();
@@ -1316,16 +1304,9 @@ impl App {
         for entry in self.state.pool_cache.values() {
             for asset in &entry.pool_info.pool_info.assets {
                 let denom = &asset.denom;
-                let token_name = if denom.len() > 15 {
-                    if let Some(last_part) = denom.split('/').last() {
-                        last_part.to_string()
-                    } else {
-                        format!("{}...", &denom[..10])
-                    }
-                } else {
-                    denom.clone()
-                };
-                available_tokens.insert(token_name);
+                // Use proper token symbol instead of micro denomination
+                let token_symbol = self.denom_to_symbol(denom);
+                available_tokens.insert(token_symbol);
             }
         }
 
@@ -1343,22 +1324,8 @@ impl App {
 
         swap_state.initialize_tokens(tokens_vec);
 
-        // Add some sample balance data for testing
-        self.state
-            .balances
-            .insert("USDC".to_string(), "1000.0".to_string());
-        self.state
-            .balances
-            .insert("USDT".to_string(), "500.0".to_string());
-        self.state
-            .balances
-            .insert("ATOM".to_string(), "25.0".to_string());
-        self.state
-            .balances
-            .insert("OSMO".to_string(), "100.0".to_string());
-        self.state
-            .balances
-            .insert("MANTRA".to_string(), "2500.0".to_string());
+        // Note: Real balances should be loaded from blockchain via refresh_balances()
+        // The hardcoded test balances have been removed to show actual wallet balances
     }
 
     /// Handle enter key based on current focus
@@ -3130,7 +3097,13 @@ impl App {
                 return denom.clone();
             }
 
-            // Check if the display name matches the shortened version
+            // Check if the display name matches our symbol mapping
+            let symbol = self.denom_to_symbol(denom);
+            if symbol == display_name {
+                return denom.clone();
+            }
+
+            // Check if the display name matches the shortened version (fallback)
             let shortened = if denom.len() > 15 {
                 if let Some(last_part) = denom.split('/').last() {
                     last_part.to_string()
@@ -3152,6 +3125,74 @@ impl App {
             display_name
         ));
         display_name.to_string()
+    }
+
+    /// Convert token denomination to display symbol
+    /// Maps micro denominations (uUSDC, uom) to their symbols (USDC, OM)
+    pub fn denom_to_symbol(&self, denom: &str) -> String {
+        // Handle common token mappings
+        match denom {
+            "uom" => "OM".to_string(),
+            d if d.starts_with("factory/") && d.contains("/uUSDC") => "USDC".to_string(),
+            d if d.starts_with("factory/") && d.contains("/uUSDT") => "USDT".to_string(),
+            d if d.starts_with("factory/") && d.contains("/uUSDY") => "USDY".to_string(),
+            d if d.starts_with("factory/") && d.contains("/aUSDY") => "aUSDY".to_string(),
+            d if d.starts_with("factory/") && d.contains("/uATOM") => "ATOM".to_string(),
+            d if d.starts_with("factory/") && d.contains("/uOSMO") => "OSMO".to_string(),
+            _ => {
+                // For other factory tokens, try to extract the last part
+                if let Some(last_part) = denom.split('/').last() {
+                    // Remove 'u' prefix if it exists and the rest looks like a symbol
+                    if last_part.starts_with('u') && last_part.len() > 1 {
+                        last_part[1..].to_string()
+                    } else {
+                        last_part.to_string()
+                    }
+                } else {
+                    denom.to_string()
+                }
+            }
+        }
+    }
+
+    /// Get token decimals for a given denomination
+    /// Most Mantra tokens use 6 decimals
+    pub fn get_token_decimals(&self, denom: &str) -> u8 {
+        // Most tokens on Mantra use 6 decimals
+        match denom {
+            "uom" => 6,
+            d if d.starts_with("factory/") => 6, // Most factory tokens use 6 decimals
+            _ => 6, // Default to 6 decimals
+        }
+    }
+
+    /// Convert micro amount to actual token amount
+    /// Divides by 10^decimals to get the real amount
+    pub fn micro_to_token_amount(&self, amount: &str, denom: &str) -> String {
+        let decimals = self.get_token_decimals(denom);
+        let divisor = 10_u128.pow(decimals as u32);
+        
+        if let Ok(micro_amount) = amount.parse::<u128>() {
+            let token_amount = micro_amount as f64 / divisor as f64;
+            // Format with appropriate precision
+            if token_amount >= 1000.0 {
+                format!("{:.2}", token_amount)
+            } else if token_amount >= 1.0 {
+                format!("{:.4}", token_amount)
+            } else {
+                format!("{:.6}", token_amount)
+            }
+        } else {
+            amount.to_string()
+        }
+    }
+
+    /// Format token amount with symbol for display
+    /// Converts from micro units and shows proper symbol
+    pub fn format_token_display(&self, amount: &str, denom: &str) -> String {
+        let token_amount = self.micro_to_token_amount(amount, denom);
+        let symbol = self.denom_to_symbol(denom);
+        format!("{} {}", token_amount, symbol)
     }
 
     /// Execute a real swap transaction on the blockchain
@@ -3410,6 +3451,11 @@ impl App {
 
                 // Reset swap form
                 crate::tui::screens::swap::reset_swap_form();
+                
+                // Refresh swap screen pools to ensure they remain available
+                if self.state.current_screen == Screen::Swap {
+                    self.update_swap_screen_pools();
+                }
 
                 crate::tui::utils::logger::log_info(
                     "=== SWAP EXECUTION COMPLETED SUCCESSFULLY ===",
@@ -3724,12 +3770,18 @@ impl App {
             return Some(token_name.to_string());
         }
 
-        // Search through all pool assets to find matching denominations
+        // Search through all pool assets to find matching denominations using symbol mapping
         for pool_entry in self.state.pool_cache.values() {
             for asset in &pool_entry.pool_info.pool_info.assets {
                 let denom = &asset.denom;
 
-                // Check if the token name matches the shortened version
+                // Check if the token name matches our symbol mapping
+                let symbol = self.denom_to_symbol(denom);
+                if symbol == token_name {
+                    return Some(denom.clone());
+                }
+
+                // Check if the token name matches the shortened version (fallback)
                 let shortened = if denom.len() > 15 {
                     if let Some(last_part) = denom.split('/').last() {
                         last_part.to_string()
@@ -3746,8 +3798,14 @@ impl App {
             }
         }
 
-        // If not found in pools, search balances for denominations that end with the token name
+        // Search through all balances to find matching denominations using symbol mapping
         for (denom, _) in &self.state.balances {
+            let symbol = self.denom_to_symbol(denom);
+            if symbol == token_name {
+                return Some(denom.clone());
+            }
+
+            // Fallback: check if denom ends with the token name
             if denom.ends_with(&format!("/{}", token_name)) {
                 return Some(denom.clone());
             }
@@ -3772,7 +3830,9 @@ impl App {
 
         // Map token name to full denomination and lookup balance
         if let Some(full_denom) = self.map_token_name_to_denom(token_name) {
-            return self.state.balances.get(&full_denom);
+            if let Some(balance) = self.state.balances.get(&full_denom) {
+                return Some(balance);
+            }
         }
 
         None

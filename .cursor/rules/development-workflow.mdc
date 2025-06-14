@@ -24,14 +24,13 @@ cargo build --release --bin tui --features tui
 
 ### Testing Commands
 ```bash
-# Run all tests
+# Run all tests (SDK only)
 cargo test
 
-# Run tests with TUI features
+# Run tests with TUI features (for existing tests only)
 cargo test --features tui
 
-# Run specific test module
-cargo test --features tui tui::tests
+# Note: Do not implement new TUI tests - focus on SDK functionality testing
 ```
 
 ### Library Development
@@ -108,15 +107,20 @@ When working with TUI components, follow this structure:
 
 ## Testing Strategy
 
-### Unit Tests
+**Important: Do not implement tests for TUI components or screens. Focus testing efforts on the core SDK functionality only.**
+
+### Unit Tests (SDK Only)
 - Test business logic in isolation
 - Mock blockchain interactions
 - Validate state transitions
+- Test wallet operations and key management
+- Test DEX client functionality
 
-### Integration Tests
-- Test complete workflows
-- Validate TUI navigation flows
+### Integration Tests (SDK Only)
+- Test complete SDK workflows
+- Test blockchain integration
 - Test error handling paths
+- **Exclude**: TUI navigation, screen rendering, or UI component testing
 
 ## Debugging and Logging
 

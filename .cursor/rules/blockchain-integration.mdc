@@ -127,11 +127,14 @@ cargo test --features mock-blockchain
 For integration tests with real blockchain:
 
 ```bash
-# Test against testnet
-RUST_LOG=debug cargo test --features tui -- --ignored testnet
+# Test against testnet (SDK functionality only)
+RUST_LOG=debug cargo test -- --ignored testnet
 
 # Test specific blockchain operations
 cargo test blockchain::integration::swap_operations
+
+# Note: Do not implement TUI integration tests
+# Test TUI functionality manually through the interface
 ```
 
 ## Development Environment Setup

@@ -130,9 +130,9 @@ cargo test --features tui
 # Use mock mode for unit tests
 cargo test --features mock-blockchain
 
-# TUI tests require terminal
-# Run in headless mode for CI
-cargo test --features tui -- --test-threads=1
+# Note: TUI tests are not implemented by design
+# Focus on SDK functionality testing only
+# If TUI issues arise, test manually through the interface
 ```
 
 ## State Management Issues

@@ -859,27 +859,27 @@ pub fn export_transactions(
     match format {
         ExportFormat::Json => {
             // Generate JSON and write to file
-            eprintln!(
+            crate::tui::utils::logger::log_info(&format!(
                 "Would export {} transactions to {} as JSON",
                 transactions.len(),
                 filename
-            );
+            ));
         }
         ExportFormat::Csv => {
             // Generate CSV and write to file
-            eprintln!(
+            crate::tui::utils::logger::log_info(&format!(
                 "Would export {} transactions to {} as CSV",
                 transactions.len(),
                 filename
-            );
+            ));
         }
         ExportFormat::Text => {
             // Generate text and write to file
-            eprintln!(
+            crate::tui::utils::logger::log_info(&format!(
                 "Would export {} transactions to {} as text",
                 transactions.len(),
                 filename
-            );
+            ));
         }
     }
 
