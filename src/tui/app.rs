@@ -897,7 +897,8 @@ impl App {
         // Handle standard navigation events
         match event {
             Event::Quit => {
-                self.state.should_quit = true;
+                // Show quit confirmation modal instead of immediately quitting
+                self.show_quit_confirmation();
                 return Ok(true);
             }
             Event::Tab => {
@@ -936,12 +937,25 @@ impl App {
                 // Handle escape key - close modals or return to screen-level navigation
                 if self.state.modal_state.is_some() {
                     self.state.modal_state = None;
+                    return Ok(true); // Event was handled - modal was closed
                 } else if self.state.navigation_mode == NavigationMode::WithinScreen {
-                    // Exit within-screen navigation mode
+                    // First, give screen-specific handlers a chance to handle ESC
+                    if self.handle_screen_specific_event(Event::Escape).await? {
+                        // Screen handled the ESC event, now switch navigation modes
+                        self.state.navigation_mode = NavigationMode::ScreenLevel;
+                        self.state.focus_manager.clear_focus();
+                        return Ok(true); // Event was handled - returned to screen level
+                    }
+
+                    // If screen didn't handle it, exit within-screen navigation mode anyway
                     self.state.navigation_mode = NavigationMode::ScreenLevel;
                     self.state.focus_manager.clear_focus();
+                    return Ok(true); // Event was handled - returned to screen level
                 } else {
-                    self.state.focus_manager.return_to_previous();
+                    // User is in ScreenLevel navigation mode and pressed ESC
+                    // Show quit confirmation modal instead of immediately quitting
+                    self.show_quit_confirmation();
+                    return Ok(true); // Event was handled - showed quit confirmation
                 }
             }
             Event::Help => {
@@ -990,6 +1004,19 @@ impl App {
 
                             // Allow focus movement only if we're NOT inside list focus/editing state
                             !(is_list_focus || swap_state.is_any_list_editing())
+                        }
+                        Screen::Liquidity => {
+                            let liquidity_state =
+                                crate::tui::screens::liquidity::get_liquidity_screen_state();
+                            // When pool dropdown is focused or in Mode focus, keep arrow keys inside screen
+                            let is_list_or_mode_focus = matches!(
+                                liquidity_state.input_focus,
+                                crate::tui::screens::liquidity::LiquidityInputFocus::PoolSelection
+                                    | crate::tui::screens::liquidity::LiquidityInputFocus::Mode
+                            );
+
+                            // Allow focus movement only if we're NOT inside list/mode focus or editing state
+                            !(is_list_or_mode_focus || liquidity_state.is_any_list_editing())
                         }
                         _ => true, // Other screens use normal focus management
                     };
@@ -1121,6 +1148,50 @@ impl App {
                 // Ensure internal state knows which widget is focused so that render_* helpers style correctly
                 swap_state.apply_focus();
             }
+            Screen::Liquidity => {
+                let liquidity_state = crate::tui::screens::liquidity::get_liquidity_screen_state();
+                // Clear previous internal focus first
+                liquidity_state.reset_focus();
+
+                match focused_component {
+                    FocusableComponent::TextInput(id) => match id.as_str() {
+                        "liquidity_amount1" => liquidity_state.input_focus =
+                            crate::tui::screens::liquidity::LiquidityInputFocus::FirstAssetAmount,
+                        "liquidity_amount2" => liquidity_state.input_focus =
+                            crate::tui::screens::liquidity::LiquidityInputFocus::SecondAssetAmount,
+                        "liquidity_withdraw_amount" => {
+                            liquidity_state.input_focus =
+                                crate::tui::screens::liquidity::LiquidityInputFocus::WithdrawAmount
+                        }
+                        "liquidity_slippage_amount" => {
+                            liquidity_state.input_focus =
+                                crate::tui::screens::liquidity::LiquidityInputFocus::SlippageAmount
+                        }
+                        "liquidity_slippage_swap" => {
+                            liquidity_state.input_focus =
+                                crate::tui::screens::liquidity::LiquidityInputFocus::SlippageSwap
+                        }
+                        _ => {}
+                    },
+                    FocusableComponent::Dropdown(id) => {
+                        if id == "liquidity_pool" {
+                            liquidity_state.input_focus =
+                                crate::tui::screens::liquidity::LiquidityInputFocus::PoolSelection
+                        }
+                    }
+                    FocusableComponent::Button(id) => match id.as_str() {
+                        "liquidity_provide" | "liquidity_withdraw" | "liquidity_execute" => {
+                            liquidity_state.input_focus =
+                                crate::tui::screens::liquidity::LiquidityInputFocus::Execute
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+
+                // Ensure internal state knows which widget is focused so that render_* helpers style correctly
+                liquidity_state.apply_focus();
+            }
             _ => {}
         }
     }
@@ -1218,6 +1289,9 @@ impl App {
                 self.update_swap_screen_pools();
             }
             Screen::Liquidity => {
+                // Initialize focus for liquidity screen
+                crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
+
                 // Refresh pool data for liquidity screen
                 if let Some(sender) = &self.event_sender {
                     let _ = sender.send(Event::DataRefresh {
@@ -1736,8 +1810,9 @@ impl App {
                 }
             }
             Event::Escape => {
-                // Clear current selection or return to screen navigation
-                return Ok(false);
+                // ESC in WithinScreen mode should return to ScreenLevel mode
+                // We handle this by returning true and letting the main app know we processed it
+                return Ok(true);
             }
             Event::Char(c) => {
                 // Handle character input for text fields
@@ -1817,69 +1892,123 @@ impl App {
 
     /// Handle liquidity screen specific events. Returns `true` if the event was handled.
     async fn handle_liquidity_screen_event(&mut self, event: Event) -> Result<bool, Error> {
-        match event {
-            Event::Right => {
-                let new_mode = match liquidity::get_liquidity_screen_state().mode {
-                    LiquidityMode::Provide => LiquidityMode::Withdraw,
-                    LiquidityMode::Withdraw => LiquidityMode::Positions,
-                    LiquidityMode::Positions => LiquidityMode::Provide,
-                };
-                liquidity::switch_liquidity_mode(new_mode);
-                return Ok(true);
-            }
-            Event::Left => {
-                let new_mode = match liquidity::get_liquidity_screen_state().mode {
-                    LiquidityMode::Provide => LiquidityMode::Positions,
-                    LiquidityMode::Withdraw => LiquidityMode::Provide,
-                    LiquidityMode::Positions => LiquidityMode::Withdraw,
-                };
-                liquidity::switch_liquidity_mode(new_mode);
-                return Ok(true);
-            }
-            Event::Char(c) => {
-                let focused = self.state.focus_manager.current_focus().cloned();
-                if let Some(focused) = focused {
-                    match focused {
-                        crate::tui::events::FocusableComponent::TextInput(field_id) => {
-                            match field_id.as_str() {
-                                "liquidity_amount1" => {
-                                    self.state.liquidity_state.first_asset_amount.push(c);
-                                    return Ok(true);
-                                }
-                                "liquidity_amount2" => {
-                                    self.state.liquidity_state.second_asset_amount.push(c);
-                                    return Ok(true);
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {}
+        let liquidity_state = liquidity::get_liquidity_screen_state();
+
+        // Convert Event to KeyEvent for the new key system (similar to swap screen)
+        let key_event = match &event {
+            Event::MoveFocus(direction) => {
+                // Convert focus events to direct key events for navigation
+                match direction {
+                    crate::tui::events::FocusDirection::Up => {
+                        Some(crossterm::event::KeyEvent::new(
+                            crossterm::event::KeyCode::Up,
+                            crossterm::event::KeyModifiers::NONE,
+                        ))
                     }
+                    crate::tui::events::FocusDirection::Down => {
+                        Some(crossterm::event::KeyEvent::new(
+                            crossterm::event::KeyCode::Down,
+                            crossterm::event::KeyModifiers::NONE,
+                        ))
+                    }
+                    crate::tui::events::FocusDirection::Left => {
+                        Some(crossterm::event::KeyEvent::new(
+                            crossterm::event::KeyCode::Left,
+                            crossterm::event::KeyModifiers::NONE,
+                        ))
+                    }
+                    crate::tui::events::FocusDirection::Right => {
+                        Some(crossterm::event::KeyEvent::new(
+                            crossterm::event::KeyCode::Right,
+                            crossterm::event::KeyModifiers::NONE,
+                        ))
+                    }
+                    _ => None,
                 }
             }
-            Event::Backspace => {
-                let focused = self.state.focus_manager.current_focus().cloned();
-                if let Some(focused) = focused {
-                    match focused {
-                        crate::tui::events::FocusableComponent::TextInput(field_id) => {
-                            match field_id.as_str() {
-                                "liquidity_amount1" => {
-                                    self.state.liquidity_state.first_asset_amount.pop();
-                                    return Ok(true);
-                                }
-                                "liquidity_amount2" => {
-                                    self.state.liquidity_state.second_asset_amount.pop();
-                                    return Ok(true);
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {}
-                    }
+            Event::Char(c) => Some(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char(*c),
+                crossterm::event::KeyModifiers::NONE,
+            )),
+            Event::Enter => Some(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+            Event::Tab => Some(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Tab,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+            Event::Backspace => Some(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Backspace,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+            Event::Delete => Some(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Delete,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+            Event::Home => Some(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Home,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+            Event::End => Some(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::End,
+                crossterm::event::KeyModifiers::NONE,
+            )),
+            _ => None,
+        };
+
+        // Handle the event using the new key event system (similar to swap screen)
+        if let Some(key_event) = key_event {
+            if liquidity_state.handle_key_event(key_event, self.state.navigation_mode) {
+                return Ok(true);
+            }
+        }
+
+        // Handle specific events that don't need key conversion
+        match event {
+            Event::Right => {
+                // Handle direct right arrow for tab switching
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Right,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if liquidity_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::Left => {
+                // Handle direct left arrow for tab switching
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Left,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if liquidity_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::Up => {
+                // Handle up arrow for lists
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Up,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if liquidity_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::Down => {
+                // Handle down arrow for lists
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Down,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if liquidity_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
                 }
             }
             _ => {}
         }
+
         Ok(false)
     }
 
@@ -2130,6 +2259,16 @@ impl App {
         self.state.modal_state = Some(crate::tui::components::modals::create_comprehensive_help());
     }
 
+    /// Show quit confirmation modal
+    pub fn show_quit_confirmation(&mut self) {
+        self.show_confirmation(
+            "Exit Application".to_string(),
+            "Are you sure you want to exit the MANTRA DEX TUI?\n\nAny unsaved changes will be lost.".to_string(),
+            Some("Exit".to_string()),
+            Some("Cancel".to_string()),
+        );
+    }
+
     /// Show validation error
     pub fn show_validation_error(
         &mut self,
@@ -2220,6 +2359,20 @@ impl App {
 
     /// Handle confirmation actions
     fn handle_confirmation(&mut self) {
+        // Check if this is a quit confirmation by examining the modal title
+        if let Some(ref modal_state) = self.state.modal_state {
+            if let crate::tui::components::modals::ModalType::Confirmation { title, .. } =
+                &modal_state.modal_type
+            {
+                if title == "Exit Application" {
+                    // User confirmed they want to quit
+                    self.state.should_quit = true;
+                    self.state.modal_state = None;
+                    return;
+                }
+            }
+        }
+
         // Handle confirmation dialog result based on current screen
         if let Some(ref modal_state) = self.state.modal_state.clone() {
             if modal_state.is_confirmed() {
@@ -2270,6 +2423,10 @@ impl App {
                 // Update swap pools when entering swap screen
                 self.update_swap_screen_pools();
             }
+            Screen::Liquidity => {
+                // Initialize liquidity screen focus state
+                crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
+            }
             _ => {}
         }
         // Don't initialize focus here - it will be done when user presses Enter
@@ -2291,6 +2448,10 @@ impl App {
             Screen::Swap => {
                 // Update swap pools when entering swap screen
                 self.update_swap_screen_pools();
+            }
+            Screen::Liquidity => {
+                // Initialize liquidity screen focus state
+                crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
             }
             _ => {}
         }
@@ -2317,6 +2478,10 @@ impl App {
             Screen::Swap => {
                 // Update swap pools when entering swap screen
                 self.update_swap_screen_pools();
+            }
+            Screen::Liquidity => {
+                // Initialize liquidity screen focus state
+                crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
             }
             _ => {}
         }
@@ -3628,8 +3793,7 @@ impl App {
                             "The smart contract failed to execute your swap.\n\n\
                                 This could be due to:\n\
                                 • Pool configuration issues\n\
-                                • Unexpected contract state\n\
-                                • Network congestion\n\n\
+                                • Unexpected contract state\n\n\
                                 Technical details: {}",
                             e
                         ),

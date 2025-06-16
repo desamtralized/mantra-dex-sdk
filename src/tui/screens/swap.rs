@@ -410,16 +410,20 @@ impl SwapScreenState {
                 // Handle execute button activation
                 match key.code {
                     KeyCode::Enter | KeyCode::Char(' ') => {
-                                            if self.validate() {
-                        // Mark that we're starting a swap process for better UX feedback
-                        self.mark_input_change();
-                        // Send ShowSwapConfirmation event to trigger the global modal
-                        // This event will be handled by the main app event loop
-                        crate::tui::utils::logger::log_info("Swap execute button pressed - validation passed");
-                        return true; // Event will be handled by app
-                    } else {
-                        crate::tui::utils::logger::log_warning("Swap validation failed - please check all fields");
-                    }
+                        if self.validate() {
+                            // Mark that we're starting a swap process for better UX feedback
+                            self.mark_input_change();
+                            // Send ShowSwapConfirmation event to trigger the global modal
+                            // This event will be handled by the main app event loop
+                            crate::tui::utils::logger::log_info(
+                                "Swap execute button pressed - validation passed",
+                            );
+                            return true; // Event will be handled by app
+                        } else {
+                            crate::tui::utils::logger::log_warning(
+                                "Swap validation failed - please check all fields",
+                            );
+                        }
                     }
                     _ => {}
                 }
@@ -684,68 +688,68 @@ fn render_from_amount_input(
         .get_selected_label()
         .unwrap_or("Select Token");
 
-            let balance_text = if from_token == "Select Token" {
-            vec![
-                Line::from(vec![Span::styled(
-                    "Select token",
-                    Style::default().fg(Color::Gray),
-                )]),
-                Line::from(vec![Span::styled(
-                    "to view balance",
-                    Style::default().fg(Color::Gray),
-                )]),
-            ]
-        } else {
-            // Get the balance using the token symbol mapping
-            if let Some(micro_balance) = app.get_balance_by_token_name(from_token) {
-                // Map the token symbol back to denomination to get decimals
-                if let Some(denom) = app.map_token_name_to_denom(from_token) {
-                    // Convert from micro units to actual token amount
-                    let token_amount = app.micro_to_token_amount(micro_balance, &denom);
-                    
-                    vec![
-                        Line::from(vec![Span::styled(
-                            "Available:",
-                            Style::default().fg(Color::Gray),
-                        )]),
-                        Line::from(vec![Span::styled(
-                            format!("{} {}", token_amount, from_token),
-                            Style::default()
-                                .fg(Color::Green)
-                                .add_modifier(Modifier::BOLD),
-                        )]),
-                    ]
-                } else {
-                    // Fallback: show raw balance if denomination mapping fails
-                    vec![
-                        Line::from(vec![Span::styled(
-                            "Available:",
-                            Style::default().fg(Color::Gray),
-                        )]),
-                        Line::from(vec![Span::styled(
-                            format!("{} {} (raw)", micro_balance, from_token),
-                            Style::default()
-                                .fg(Color::Green)
-                                .add_modifier(Modifier::BOLD),
-                        )]),
-                    ]
-                }
-            } else {
-                // No balance found
+    let balance_text = if from_token == "Select Token" {
+        vec![
+            Line::from(vec![Span::styled(
+                "Select token",
+                Style::default().fg(Color::Gray),
+            )]),
+            Line::from(vec![Span::styled(
+                "to view balance",
+                Style::default().fg(Color::Gray),
+            )]),
+        ]
+    } else {
+        // Get the balance using the token symbol mapping
+        if let Some(micro_balance) = app.get_balance_by_token_name(from_token) {
+            // Map the token symbol back to denomination to get decimals
+            if let Some(denom) = app.map_token_name_to_denom(from_token) {
+                // Convert from micro units to actual token amount
+                let token_amount = app.micro_to_token_amount(micro_balance, &denom);
+
                 vec![
                     Line::from(vec![Span::styled(
                         "Available:",
                         Style::default().fg(Color::Gray),
                     )]),
                     Line::from(vec![Span::styled(
-                        format!("0.0 {}", from_token),
+                        format!("{} {}", token_amount, from_token),
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )]),
+                ]
+            } else {
+                // Fallback: show raw balance if denomination mapping fails
+                vec![
+                    Line::from(vec![Span::styled(
+                        "Available:",
+                        Style::default().fg(Color::Gray),
+                    )]),
+                    Line::from(vec![Span::styled(
+                        format!("{} {} (raw)", micro_balance, from_token),
+                        Style::default()
+                            .fg(Color::Green)
                             .add_modifier(Modifier::BOLD),
                     )]),
                 ]
             }
-        };
+        } else {
+            // No balance found
+            vec![
+                Line::from(vec![Span::styled(
+                    "Available:",
+                    Style::default().fg(Color::Gray),
+                )]),
+                Line::from(vec![Span::styled(
+                    format!("0.0 {}", from_token),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+            ]
+        }
+    };
 
     let balance_paragraph = Paragraph::new(Text::from(balance_text))
         .block(
@@ -967,7 +971,7 @@ pub fn determine_to_token_from_pool(pool_info: &str, from_token: &str) -> String
                 }
             })
             .collect();
-        
+
         if tokens.len() == 2 {
             // Return the token that's not the from_token
             if tokens[0] == from_token {
@@ -1210,10 +1214,10 @@ pub fn execute_swap_with_confirmation() {
     crate::tui::utils::logger::log_info(&format!("  Pool ID: {}", pool_id_str));
 
     // Validate that we have a valid pool selection
-            if pool_id_str.is_empty() {
-            crate::tui::utils::logger::log_error("Swap failed: No pool selected");
-            return;
-        }
+    if pool_id_str.is_empty() {
+        crate::tui::utils::logger::log_error("Swap failed: No pool selected");
+        return;
+    }
 
     let slippage = swap_state.slippage_input.value();
     crate::tui::utils::logger::log_info(&format!("  Slippage Tolerance: {}%", slippage));
@@ -1221,23 +1225,23 @@ pub fn execute_swap_with_confirmation() {
     // Get the "to" token from the selected pool
     let to_token = if let Some(pool_name) = swap_state.pool_dropdown.get_selected_label() {
         determine_to_token_from_pool(&pool_name, &from_token)
-            } else {
-            crate::tui::utils::logger::log_error(
-                "Swap failed: No pool name available for token determination",
-            );
-            return;
-        };
+    } else {
+        crate::tui::utils::logger::log_error(
+            "Swap failed: No pool name available for token determination",
+        );
+        return;
+    };
 
     crate::tui::utils::logger::log_info(&format!("  To Token: {}", to_token));
 
     // Additional validation: ensure we have valid token data
-            if from_token.is_empty() || to_token.is_empty() || to_token == "Unknown" {
-            crate::tui::utils::logger::log_error(&format!(
-                "Swap failed: Invalid token selection - from: '{}', to: '{}'",
-                from_token, to_token
-            ));
-            return;
-        }
+    if from_token.is_empty() || to_token.is_empty() || to_token == "Unknown" {
+        crate::tui::utils::logger::log_error(&format!(
+            "Swap failed: Invalid token selection - from: '{}', to: '{}'",
+            from_token, to_token
+        ));
+        return;
+    }
 
     // Calculate expected output (placeholder - would use simulation result)
     let expected_output = format!("{:.6}", from_amount.parse::<f64>().unwrap_or(0.0) * 0.95);
@@ -1289,7 +1293,10 @@ pub fn execute_swap_with_confirmation() {
 
     // We need to return the confirmation message to trigger the global modal
     // This will be handled by the calling app code
-    crate::tui::utils::logger::log_info(&format!("Swap confirmation ready: {}", confirmation_message));
+    crate::tui::utils::logger::log_info(&format!(
+        "Swap confirmation ready: {}",
+        confirmation_message
+    ));
 }
 
 /// Handle confirmation modal response
@@ -1366,11 +1373,11 @@ pub fn reset_swap_form() {
     crate::tui::utils::logger::log_info("Resetting swap form to default state");
 
     let swap_state = get_swap_screen_state();
-    
+
     // Preserve pool data before reset
     let available_pools = swap_state.available_pools.clone();
     let available_tokens = swap_state.available_tokens.clone();
-    
+
     crate::tui::utils::logger::log_info(&format!(
         "Preserving {} pools and {} tokens during reset",
         available_pools.len(),
@@ -1379,11 +1386,11 @@ pub fn reset_swap_form() {
 
     // Reset to default state
     *swap_state = SwapScreenState::default();
-    
+
     // Restore the preserved pool data
     swap_state.available_pools = available_pools;
     swap_state.available_tokens = available_tokens;
-    
+
     // Repopulate the dropdowns with the preserved data
     swap_state.update_available_pools(swap_state.available_pools.clone());
     swap_state.initialize_tokens(swap_state.available_tokens.clone());

@@ -94,7 +94,7 @@ pub fn get_navigation_help() -> Vec<(&'static str, &'static str)> {
         ("Tab/→", "Next tab"),
         ("Shift+Tab/←", "Previous tab"),
         ("1-8", "Jump to screen"),
-        ("q/Esc", "Quit"),
+        ("q/Esc", "Exit app"),
         ("?", "Help"),
     ]
 }

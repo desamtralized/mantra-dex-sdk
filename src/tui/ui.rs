@@ -54,7 +54,9 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) -> Result<(), Error> {
     match app.state.current_screen {
         crate::tui::app::Screen::WalletSelection => {
             // Render wallet selection screen
-            app.state.wallet_selection_state.render(frame.area(), frame.buffer_mut());
+            app.state
+                .wallet_selection_state
+                .render(frame.area(), frame.buffer_mut());
         }
         crate::tui::app::Screen::Dashboard => render_dashboard(frame, app),
         crate::tui::app::Screen::Pools => render_pools(frame, app),
@@ -363,10 +365,10 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App, layout_config: &L
     ) {
         let help_text = match app.state.navigation_mode {
             crate::tui::app::NavigationMode::ScreenLevel => {
-                "TAB MODE: 1-8: Jump to Tab | Tab/Shift+Tab: Navigate | Enter: Enter Content | q: Quit"
+                "TAB MODE: 1-8: Jump to Tab | Tab/Shift+Tab: Navigate | Enter: Enter Content | q/Esc: Exit App"
             }
             crate::tui::app::NavigationMode::WithinScreen => {
-                "CONTENT MODE: Tab/Shift+Tab: Focus | Enter: Activate | Esc: Back to Tab Mode | q: Quit"
+                "CONTENT MODE: Tab/Shift+Tab: Focus | Enter: Activate | Esc: Back to Tab Mode | q: Exit App"
             }
         };
         let help = Paragraph::new(help_text)
@@ -437,10 +439,10 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &App, _layout_config: &Lay
     // Additional info
     let help_text = match app.state.navigation_mode {
         crate::tui::app::NavigationMode::ScreenLevel => {
-            "TAB MODE:\n\n• 1-8: Jump to Screen\n• Tab/Shift+Tab: Navigate\n• Enter: Enter Content\n• q: Quit\n• F1: Help"
+            "TAB MODE:\n\n• 1-8: Jump to Screen\n• Tab/Shift+Tab: Navigate\n• Enter: Enter Content\n• q/Esc: Exit App\n• F1: Help"
         }
         crate::tui::app::NavigationMode::WithinScreen => {
-            "CONTENT MODE:\n\n• Tab/Shift+Tab: Focus\n• Enter: Activate\n• Esc: Back to Tab Mode\n• Space: Context Action\n• q: Quit"
+            "CONTENT MODE:\n\n• Tab/Shift+Tab: Focus\n• Enter: Activate\n• Esc: Back to Tab Mode\n• Space: Context Action\n• q: Exit App"
         }
     };
     let help = Paragraph::new(help_text)

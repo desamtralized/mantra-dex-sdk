@@ -194,20 +194,13 @@ impl LiquidityScreenState {
             self.mode = mode;
             self.clear_focus();
 
-            // Set appropriate initial focus for each mode
-            match mode {
-                LiquidityMode::Provide => {
-                    self.input_focus = LiquidityInputFocus::FirstAssetAmount;
-                    self.first_asset_input.set_focused(true);
-                }
-                LiquidityMode::Withdraw => {
-                    self.input_focus = LiquidityInputFocus::WithdrawAmount;
-                    self.withdraw_amount_input.set_focused(true);
-                }
-                LiquidityMode::Positions => {
-                    self.input_focus = LiquidityInputFocus::Mode;
-                }
-            }
+            // Always stay in Mode focus when switching tabs to maintain navigation
+            self.input_focus = LiquidityInputFocus::Mode;
+
+            crate::tui::utils::logger::log_info(&format!(
+                "Liquidity mode switched to {:?}, maintaining Mode focus for navigation",
+                mode
+            ));
         }
     }
 
@@ -400,6 +393,11 @@ impl LiquidityScreenState {
                             }
                         }
                         return true;
+                    }
+                    KeyCode::Esc => {
+                        // When in Mode focus, Esc should not exit the application
+                        // but should be handled by the main app to return to ScreenLevel mode
+                        return false; // Let the main app handle it properly
                     }
                     _ => return false,
                 }
