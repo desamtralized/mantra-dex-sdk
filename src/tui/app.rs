@@ -8,6 +8,8 @@ use crate::tui::components::modals::{ErrorType, ModalState};
 #[cfg(feature = "tui")]
 use crate::tui::events::Event;
 #[cfg(feature = "tui")]
+use crate::tui::screens::liquidity::{self, LiquidityMode};
+#[cfg(feature = "tui")]
 use crate::tui::utils::focus_manager::FocusManager;
 #[cfg(feature = "tui")]
 use crate::{Error, MantraDexClient, MantraNetworkConfig};
@@ -1137,13 +1139,18 @@ impl App {
                 swap_slippage_input(), // Slippage tolerance (maps to SwapInputFocus::Slippage)
                 swap_execute_button(), // Execute button (maps to SwapInputFocus::Execute)
             ],
-            Screen::Liquidity => vec![
-                liquidity_pool_dropdown(),
-                liquidity_amount1_input(),
-                liquidity_amount2_input(),
-                liquidity_provide_button(),
-                liquidity_withdraw_button(),
-            ],
+            Screen::Liquidity => {
+                // Initialize liquidity screen specific focus
+                liquidity::initialize_liquidity_screen_focus();
+
+                vec![
+                    liquidity_pool_dropdown(),
+                    liquidity_amount1_input(),
+                    liquidity_amount2_input(),
+                    liquidity_provide_button(),
+                    liquidity_withdraw_button(),
+                ]
+            }
             Screen::Rewards => vec![
                 rewards_epoch_input(),
                 rewards_claim_all_button(),
@@ -1253,11 +1260,16 @@ impl App {
                     let asset2_symbol = self.denom_to_symbol(&asset2.denom);
 
                     // Convert micro amounts to actual token amounts
-                    let asset1_amount = self.micro_to_token_amount(&asset1.amount.to_string(), &asset1.denom);
-                    let asset2_amount = self.micro_to_token_amount(&asset2.amount.to_string(), &asset2.denom);
+                    let asset1_amount =
+                        self.micro_to_token_amount(&asset1.amount.to_string(), &asset1.denom);
+                    let asset2_amount =
+                        self.micro_to_token_amount(&asset2.amount.to_string(), &asset2.denom);
 
                     // Format with proper symbols and amounts
-                    format!("{} ({}) / {} ({})", asset1_symbol, asset1_amount, asset2_symbol, asset2_amount)
+                    format!(
+                        "{} ({}) / {} ({})",
+                        asset1_symbol, asset1_amount, asset2_symbol, asset2_amount
+                    )
                 } else {
                     "Unknown Pair".to_string()
                 };
@@ -1806,6 +1818,24 @@ impl App {
     /// Handle liquidity screen specific events. Returns `true` if the event was handled.
     async fn handle_liquidity_screen_event(&mut self, event: Event) -> Result<bool, Error> {
         match event {
+            Event::Right => {
+                let new_mode = match liquidity::get_liquidity_screen_state().mode {
+                    LiquidityMode::Provide => LiquidityMode::Withdraw,
+                    LiquidityMode::Withdraw => LiquidityMode::Positions,
+                    LiquidityMode::Positions => LiquidityMode::Provide,
+                };
+                liquidity::switch_liquidity_mode(new_mode);
+                return Ok(true);
+            }
+            Event::Left => {
+                let new_mode = match liquidity::get_liquidity_screen_state().mode {
+                    LiquidityMode::Provide => LiquidityMode::Positions,
+                    LiquidityMode::Withdraw => LiquidityMode::Provide,
+                    LiquidityMode::Positions => LiquidityMode::Withdraw,
+                };
+                liquidity::switch_liquidity_mode(new_mode);
+                return Ok(true);
+            }
             Event::Char(c) => {
                 let focused = self.state.focus_manager.current_focus().cloned();
                 if let Some(focused) = focused {
@@ -3162,7 +3192,7 @@ impl App {
         match denom {
             "uom" => 6,
             d if d.starts_with("factory/") => 6, // Most factory tokens use 6 decimals
-            _ => 6, // Default to 6 decimals
+            _ => 6,                              // Default to 6 decimals
         }
     }
 
@@ -3171,7 +3201,7 @@ impl App {
     pub fn micro_to_token_amount(&self, amount: &str, denom: &str) -> String {
         let decimals = self.get_token_decimals(denom);
         let divisor = 10_u128.pow(decimals as u32);
-        
+
         if let Ok(micro_amount) = amount.parse::<u128>() {
             let token_amount = micro_amount as f64 / divisor as f64;
             // Format with appropriate precision
@@ -3451,7 +3481,7 @@ impl App {
 
                 // Reset swap form
                 crate::tui::screens::swap::reset_swap_form();
-                
+
                 // Refresh swap screen pools to ensure they remain available
                 if self.state.current_screen == Screen::Swap {
                     self.update_swap_screen_pools();
