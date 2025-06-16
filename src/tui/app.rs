@@ -883,9 +883,12 @@ impl App {
             }
         } else {
             // Non-directional focus related events can be passed through directly.
-            if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
-                self.update_component_focus(&focused_component);
-                focus_handled = true;
+            // However, exclude ESC events to let the main handler manage navigation mode switches
+            if !matches!(event, Event::Escape) {
+                if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
+                    self.update_component_focus(&focused_component);
+                    focus_handled = true;
+                }
             }
         }
 
@@ -1811,8 +1814,15 @@ impl App {
             }
             Event::Escape => {
                 // ESC in WithinScreen mode should return to ScreenLevel mode
-                // We handle this by returning true and letting the main app know we processed it
-                return Ok(true);
+                // First, let the swap screen handle the ESC key event for any internal state cleanup
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Esc,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                swap_state.handle_key_event(key_event, self.state.navigation_mode);
+
+                // Return false to let the main app handle the navigation mode switch
+                return Ok(false);
             }
             Event::Char(c) => {
                 // Handle character input for text fields
@@ -2983,10 +2993,8 @@ impl App {
                 if self.state.wizard_state.current_step
                     == crate::tui::screens::wizard::WizardStep::Welcome
                 {
-                    // Skip wizard (not recommended) - stay on wallet selection since no wallet was set up
-                    self.state.wizard_state.finish_wizard();
-                    // Note: We don't navigate anywhere since the user skipped wallet setup
-                    // They'll remain on the wallet selection screen to choose/create a wallet later
+                    // Show quit confirmation instead of immediately skipping wizard
+                    self.show_quit_confirmation();
                 } else {
                     self.state.wizard_state.previous_step();
                 }

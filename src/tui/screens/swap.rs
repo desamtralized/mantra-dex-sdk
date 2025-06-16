@@ -315,6 +315,13 @@ impl SwapScreenState {
             return false;
         }
 
+        // Handle ESC key to return to screen-level navigation
+        if matches!(key.code, KeyCode::Esc) {
+            // ESC should return to screen-level navigation, not exit the app
+            // The main app handler will switch navigation modes
+            return true; // Indicate we handled the ESC event
+        }
+
         // Log significant key events for swap execution
         if matches!(key.code, KeyCode::Enter | KeyCode::Char(' '))
             && matches!(self.input_focus, SwapInputFocus::Execute)
