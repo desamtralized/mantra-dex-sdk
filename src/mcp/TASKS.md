@@ -60,8 +60,48 @@
   - ✅ Proper error conversion from SDK errors to MCP errors
   - ✅ Updated server initialization to use client wrapper
   - ✅ All core tests passing (4/5 tests, 1 async runtime issue in test only)
-- [ ] Set up async runtime integration
-- [ ] Create error mapping from SDK errors to MCP errors
+- [x] **Set up async runtime integration ✅ COMPLETED**
+  - ✅ Implemented comprehensive `AsyncRuntimeConfig` with environment variable support
+  - ✅ Created `RuntimeFlavor` enum (CurrentThread, MultiThread) with validation
+  - ✅ Added complete runtime configuration from environment variables:
+    - `MCP_RUNTIME_FLAVOR` - Runtime type selection (current_thread/multi_thread)
+    - `MCP_WORKER_THREADS` - Number of worker threads for multi-threaded runtime
+    - `MCP_MAX_BLOCKING_THREADS` - Maximum blocking threads for blocking operations
+    - `MCP_THREAD_KEEP_ALIVE_SECS` - Thread lifecycle management
+    - `MCP_THREAD_STACK_SIZE` - Memory configuration for thread stacks
+  - ✅ Implemented `RuntimeMetrics` with real-time monitoring:
+    - Runtime uptime tracking with start time and elapsed duration
+    - Active task count monitoring with dynamic updates
+    - Worker and blocking thread count reporting
+    - Runtime flavor identification and JSON serialization
+  - ✅ Created `AsyncRuntimeManager` for runtime lifecycle management:
+    - Current runtime handle integration for existing runtime environments
+    - Monitored task spawning with `spawn_monitored()` for async tasks
+    - Blocking task management with `spawn_blocking_monitored()`
+    - Health status reporting with comprehensive runtime metrics
+    - Task count tracking and automatic cleanup
+  - ✅ Integrated runtime configuration into `McpServerConfig` and `McpServerStateData`
+  - ✅ Enhanced server health status reporting with runtime metrics
+  - ✅ Added comprehensive validation for all runtime configuration parameters
+  - ✅ Implemented proper error handling and configuration validation
+  - ✅ Added 5 comprehensive test cases covering all runtime functionality:
+    - Runtime configuration and environment variable loading
+    - Runtime metrics generation and JSON serialization
+    - Runtime manager task spawning and monitoring
+    - Server-level runtime integration and health reporting
+    - Configuration validation with edge cases and error conditions
+  - ✅ All 17 MCP tests passing including new async runtime integration tests
+- [x] **Create error mapping from SDK errors to MCP errors ✅ COMPLETED**
+  - ✅ Enhanced SDK error to JSON-RPC error code mapping with context detection
+  - ✅ Implemented sophisticated wallet error classification (insufficient funds, address format, mnemonic, public key)
+  - ✅ Added contract error context detection (pool not found, slippage, liquidity)
+  - ✅ Created comprehensive error data generation with recovery suggestions
+  - ✅ Added error severity classification (low, medium, high) for monitoring
+  - ✅ Implemented error recoverability detection and retry delay suggestions
+  - ✅ Added timestamp generation for all error responses
+  - ✅ Created extensive test suite covering all error mapping scenarios
+  - ✅ Enhanced JSON-RPC error creation with full MCP compliance
+  - ✅ All 20+ MCP tests passing including new enhanced error mapping tests
 - [ ] Implement connection pooling for blockchain RPC clients
 - [ ] Add logging and tracing infrastructure
 
@@ -194,7 +234,10 @@
   - ✅ Added detailed success/error responses with wallet information
   - ✅ Implemented comprehensive test suite covering all edge cases
   - ✅ All tests passing including wallet switching functionality
-- [ ] Add wallet validation tools
+- [x] Add wallet validation tools
+  - [x] validate_wallet - check wallet address format
+  - [x] validate_mnemonic - verify BIP39 mnemonic phrase  
+  - [x] validate_public_key - check public key format
 
 ### Network Configuration Resources
 - [x] **Implement network configuration foundation** ✅ PARTIALLY COMPLETED
@@ -210,7 +253,14 @@
   - ✅ Documents `switch_network` tool usage with parameters and examples
   - ✅ Includes safety warnings for network switching operations
   - ✅ All tests passing including new network switch resource test
-- [ ] Add `network://status` resource for blockchain status
+- [x] **Add `network://status` resource for blockchain status ✅ COMPLETED**
+  - ✅ Added `network://status` resource to available resources list
+  - ✅ Implemented `read_network_status()` method with comprehensive blockchain status
+  - ✅ Provides real-time network connectivity, block height, and RPC status
+  - ✅ Includes network configuration details (gas price, adjustment, native denom)
+  - ✅ Enhanced error handling for connection failures and client unavailability
+  - ✅ Added comprehensive test case covering all status scenarios
+  - ✅ Proper timestamp generation and status validation
 - [ ] Implement `contracts://addresses` resource
 - [ ] Create `contracts://info` resource for contract metadata
 

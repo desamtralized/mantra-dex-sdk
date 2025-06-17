@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use crate::client::MantraDexClient;
-use crate::config::{ContractAddresses, MantraNetworkConfig};
+use crate::config::{MantraNetworkConfig, ContractAddresses};
 use crate::wallet::{MantraWallet, WalletInfo};
 
 use super::server::{McpResult, McpServerError};

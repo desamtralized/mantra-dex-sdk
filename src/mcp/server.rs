@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock};
+use tokio::runtime::{Builder, Handle, Runtime};
 use tracing::{debug, error, info, warn};
 
 // MCP transport and communication types
@@ -21,6 +23,340 @@ use crate::wallet::{MantraWallet, WalletInfo};
 
 use super::client_wrapper::McpClientWrapper;
 use super::sdk_adapter::McpSdkAdapter;
+
+// =============================================================================
+// Async Runtime Configuration and Management
+// =============================================================================
+
+/// Configuration for the async runtime
+#[derive(Debug, Clone)]
+pub struct AsyncRuntimeConfig {
+    /// Runtime flavor (single-threaded or multi-threaded)
+    pub flavor: RuntimeFlavor,
+    /// Number of worker threads (for multi-threaded runtime)
+    pub worker_threads: Option<usize>,
+    /// Whether to enable I/O operations
+    pub enable_io: bool,
+    /// Whether to enable time operations
+    pub enable_time: bool,
+    /// Maximum blocking threads for blocking operations
+    pub max_blocking_threads: Option<usize>,
+    /// Thread keep alive duration
+    pub thread_keep_alive: Option<Duration>,
+    /// Thread stack size
+    pub thread_stack_size: Option<usize>,
+    /// Global queue interval for work stealing
+    pub global_queue_interval: Option<u32>,
+    /// Event interval for work stealing
+    pub event_interval: Option<u32>,
+}
+
+/// Runtime flavor options
+#[derive(Debug, Clone, PartialEq)]
+pub enum RuntimeFlavor {
+    /// Single-threaded current thread runtime
+    CurrentThread,
+    /// Multi-threaded runtime with work stealing
+    MultiThread,
+}
+
+impl Default for AsyncRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            flavor: RuntimeFlavor::MultiThread,
+            worker_threads: None, // Use system default (number of CPUs)
+            enable_io: true,
+            enable_time: true,
+            max_blocking_threads: Some(512), // Reasonable default for blocking operations
+            thread_keep_alive: Some(Duration::from_secs(10)),
+            thread_stack_size: None, // Use system default
+            global_queue_interval: Some(31), // Default Tokio value
+            event_interval: Some(61), // Default Tokio value
+        }
+    }
+}
+
+impl AsyncRuntimeConfig {
+    /// Create configuration from environment variables
+    pub fn from_env() -> Self {
+        let mut config = Self::default();
+
+        // Runtime flavor
+        if let Ok(flavor) = env::var("MCP_RUNTIME_FLAVOR") {
+            match flavor.to_lowercase().as_str() {
+                "current_thread" | "single" => config.flavor = RuntimeFlavor::CurrentThread,
+                "multi_thread" | "multi" => config.flavor = RuntimeFlavor::MultiThread,
+                _ => warn!("Invalid runtime flavor '{}', using default", flavor),
+            }
+        }
+
+        // Worker threads
+        if let Ok(threads) = env::var("MCP_WORKER_THREADS") {
+            if let Ok(count) = threads.parse::<usize>() {
+                if count > 0 {
+                    config.worker_threads = Some(count);
+                } else {
+                    warn!("Invalid worker thread count '{}', using default", threads);
+                }
+            }
+        }
+
+        // Max blocking threads
+        if let Ok(blocking) = env::var("MCP_MAX_BLOCKING_THREADS") {
+            if let Ok(count) = blocking.parse::<usize>() {
+                config.max_blocking_threads = Some(count);
+            }
+        }
+
+        // Thread keep alive
+        if let Ok(keep_alive) = env::var("MCP_THREAD_KEEP_ALIVE_SECS") {
+            if let Ok(secs) = keep_alive.parse::<u64>() {
+                config.thread_keep_alive = Some(Duration::from_secs(secs));
+            }
+        }
+
+        // Thread stack size
+        if let Ok(stack_size) = env::var("MCP_THREAD_STACK_SIZE") {
+            if let Ok(size) = stack_size.parse::<usize>() {
+                config.thread_stack_size = Some(size);
+            }
+        }
+
+        config
+    }
+
+    /// Build a Tokio runtime with this configuration
+    pub fn build_runtime(&self) -> Result<Runtime, std::io::Error> {
+        let mut builder = match self.flavor {
+            RuntimeFlavor::CurrentThread => Builder::new_current_thread(),
+            RuntimeFlavor::MultiThread => Builder::new_multi_thread(),
+        };
+
+        // Configure I/O and time
+        if self.enable_io {
+            builder.enable_io();
+        }
+        if self.enable_time {
+            builder.enable_time();
+        }
+
+        // Configure worker threads (multi-threaded only)
+        if self.flavor == RuntimeFlavor::MultiThread {
+            if let Some(threads) = self.worker_threads {
+                builder.worker_threads(threads);
+            }
+        }
+
+        // Configure blocking threads
+        if let Some(max_blocking) = self.max_blocking_threads {
+            builder.max_blocking_threads(max_blocking);
+        }
+
+        // Configure thread settings
+        if let Some(keep_alive) = self.thread_keep_alive {
+            builder.thread_keep_alive(keep_alive);
+        }
+
+        if let Some(stack_size) = self.thread_stack_size {
+            builder.thread_stack_size(stack_size);
+        }
+
+        // Configure work stealing parameters (multi-threaded only)
+        if self.flavor == RuntimeFlavor::MultiThread {
+            if let Some(interval) = self.global_queue_interval {
+                builder.global_queue_interval(interval);
+            }
+            if let Some(interval) = self.event_interval {
+                builder.event_interval(interval);
+            }
+        }
+
+        // Set thread name
+        builder.thread_name("mcp-tokio-worker");
+
+        builder.build()
+    }
+
+    /// Validate the configuration
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(threads) = self.worker_threads {
+            if threads == 0 {
+                return Err("Worker thread count must be greater than 0".to_string());
+            }
+            if threads > 1024 {
+                return Err("Worker thread count too high (max 1024)".to_string());
+            }
+        }
+
+        if let Some(blocking) = self.max_blocking_threads {
+            if blocking == 0 {
+                return Err("Max blocking threads must be greater than 0".to_string());
+            }
+            if blocking > 10000 {
+                return Err("Max blocking threads too high (max 10000)".to_string());
+            }
+        }
+
+        if let Some(stack_size) = self.thread_stack_size {
+            if stack_size < 1024 * 1024 {
+                return Err("Thread stack size too small (min 1MB)".to_string());
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Runtime metrics and monitoring
+#[derive(Debug, Clone)]
+pub struct RuntimeMetrics {
+    /// Runtime start time
+    pub start_time: Instant,
+    /// Number of active tasks
+    pub active_tasks: usize,
+    /// Number of worker threads
+    pub worker_threads: usize,
+    /// Number of blocking threads
+    pub blocking_threads: usize,
+    /// Runtime flavor
+    pub flavor: RuntimeFlavor,
+}
+
+impl RuntimeMetrics {
+    /// Create new runtime metrics
+    pub fn new(config: &AsyncRuntimeConfig) -> Self {
+        Self {
+            start_time: Instant::now(),
+            active_tasks: 0,
+            worker_threads: config.worker_threads.unwrap_or_else(num_cpus::get),
+            blocking_threads: config.max_blocking_threads.unwrap_or(512),
+            flavor: config.flavor.clone(),
+        }
+    }
+
+    /// Get runtime uptime
+    pub fn uptime(&self) -> Duration {
+        self.start_time.elapsed()
+    }
+
+    /// Get runtime metrics as JSON
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "uptime_secs": self.uptime().as_secs(),
+            "active_tasks": self.active_tasks,
+            "worker_threads": self.worker_threads,
+            "blocking_threads": self.blocking_threads,
+            "flavor": match self.flavor {
+                RuntimeFlavor::CurrentThread => "current_thread",
+                RuntimeFlavor::MultiThread => "multi_thread",
+            },
+            "start_time": self.start_time.elapsed().as_secs()
+        })
+    }
+}
+
+/// Async runtime manager for the MCP server
+pub struct AsyncRuntimeManager {
+    /// Runtime configuration
+    config: AsyncRuntimeConfig,
+    /// Runtime metrics
+    metrics: Arc<RwLock<RuntimeMetrics>>,
+    /// Runtime handle (if running in existing runtime)
+    handle: Option<Handle>,
+}
+
+impl AsyncRuntimeManager {
+    /// Create a new runtime manager
+    pub fn new(config: AsyncRuntimeConfig) -> Self {
+        let metrics = RuntimeMetrics::new(&config);
+        Self {
+            config: config.clone(),
+            metrics: Arc::new(RwLock::new(metrics)),
+            handle: None,
+        }
+    }
+
+    /// Initialize the runtime manager with current handle
+    pub fn with_current_handle() -> Self {
+        let config = AsyncRuntimeConfig::from_env();
+        let mut manager = Self::new(config);
+        manager.handle = Some(Handle::current());
+        manager
+    }
+
+    /// Get runtime configuration
+    pub fn config(&self) -> &AsyncRuntimeConfig {
+        &self.config
+    }
+
+    /// Get runtime metrics
+    pub async fn metrics(&self) -> RuntimeMetrics {
+        self.metrics.read().await.clone()
+    }
+
+    /// Update active task count
+    pub async fn update_active_tasks(&self, count: usize) {
+        let mut metrics = self.metrics.write().await;
+        metrics.active_tasks = count;
+    }
+
+    /// Get runtime handle
+    pub fn handle(&self) -> Option<&Handle> {
+        self.handle.as_ref()
+    }
+
+    /// Spawn a task with monitoring
+    pub fn spawn_monitored<T>(&self, future: T) -> tokio::task::JoinHandle<T::Output>
+    where
+        T: std::future::Future + Send + 'static,
+        T::Output: Send + 'static,
+    {
+        let metrics = self.metrics.clone();
+        
+        tokio::spawn(async move {
+            // Increment active tasks
+            {
+                let mut m = metrics.write().await;
+                m.active_tasks += 1;
+            }
+
+            let result = future.await;
+
+            // Decrement active tasks
+            {
+                let mut m = metrics.write().await;
+                m.active_tasks = m.active_tasks.saturating_sub(1);
+            }
+
+            result
+        })
+    }
+
+    /// Spawn a blocking task with monitoring
+    pub fn spawn_blocking_monitored<F, R>(&self, f: F) -> tokio::task::JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let metrics = self.metrics.clone();
+        
+        tokio::task::spawn_blocking(move || {
+            // Note: We don't track blocking tasks in active_tasks as they run on separate thread pool
+            let result = f();
+            result
+        })
+    }
+
+    /// Get runtime health status
+    pub async fn health_status(&self) -> serde_json::Value {
+        let metrics = self.metrics().await;
+        serde_json::json!({
+            "status": "healthy",
+            "runtime": metrics.to_json(),
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        })
+    }
+}
 
 // =============================================================================
 // MCP Server Trait Definitions
@@ -304,6 +640,302 @@ pub enum McpServerError {
     UnknownResource(String),
 }
 
+impl McpServerError {
+    /// Convert SDK error to MCP JSON-RPC error code
+    /// This provides proper error mapping as required by the MCP specification
+    pub fn to_json_rpc_error_code(&self) -> i32 {
+        use json_rpc_error_codes::*;
+        
+        match self {
+            // SDK error mapping - map based on the underlying SDK error type
+            McpServerError::Sdk(sdk_error) => Self::sdk_error_to_code(sdk_error),
+            
+            // MCP protocol errors
+            McpServerError::Mcp(_) => INTERNAL_ERROR,
+            McpServerError::WalletNotConfigured => WALLET_NOT_CONFIGURED,
+            McpServerError::InvalidArguments(_) => INVALID_PARAMS,
+            McpServerError::UnknownTool(_) => METHOD_NOT_FOUND,
+            McpServerError::UnknownResource(_) => RESOURCE_NOT_FOUND,
+            
+            // System errors
+            McpServerError::Serialization(_) => SERIALIZATION_ERROR,
+            McpServerError::Network(_) => NETWORK_CONNECTION_FAILED,
+            McpServerError::Validation(_) => VALIDATION_ERROR,
+            McpServerError::Internal(_) => INTERNAL_ERROR,
+        }
+    }
+    
+    /// Map SDK error types to appropriate JSON-RPC error codes
+    fn sdk_error_to_code(sdk_error: &SdkError) -> i32 {
+        use json_rpc_error_codes::*;
+        
+        match sdk_error {
+            // CosmRS and RPC errors
+            SdkError::CosmRs(_) => BLOCKCHAIN_RPC_ERROR,
+            SdkError::Rpc(_) => BLOCKCHAIN_RPC_ERROR,
+            
+            // Transaction errors
+            SdkError::TxBroadcast(_) => TRANSACTION_FAILED,
+            SdkError::TxSimulation(_) => TRANSACTION_FAILED,
+            SdkError::Tx(_) => TRANSACTION_FAILED,
+            
+            // Wallet errors with enhanced context detection
+            SdkError::Wallet(msg) => {
+                let msg_lower = msg.to_lowercase();
+                if msg_lower.contains("insufficient") || msg_lower.contains("balance") {
+                    INSUFFICIENT_FUNDS
+                } else if msg_lower.contains("public key") || msg_lower.contains("pubkey") {
+                    INVALID_PUBLIC_KEY_FORMAT
+                } else if msg_lower.contains("mnemonic") {
+                    INVALID_MNEMONIC_FORMAT
+                } else if msg_lower.contains("address") || msg_lower.contains("format") {
+                    INVALID_ADDRESS_FORMAT
+                } else {
+                    WALLET_NOT_CONFIGURED
+                }
+            },
+            
+            // Configuration and contract errors
+            SdkError::Config(_) => CONFIGURATION_ERROR,
+            SdkError::Contract(msg) => {
+                let msg_lower = msg.to_lowercase();
+                if msg_lower.contains("pool") && msg_lower.contains("not found") {
+                    POOL_NOT_FOUND
+                } else if msg_lower.contains("slippage") {
+                    SWAP_SLIPPAGE_EXCEEDED
+                } else if msg_lower.contains("liquidity") {
+                    LIQUIDITY_INSUFFICIENT
+                } else {
+                    TOOL_EXECUTION_FAILED
+                }
+            },
+            
+            // Fee validation errors (v3.0.0 feature)
+            SdkError::FeeValidation(_) => FEE_VALIDATION_FAILED,
+            
+            // Network and timeout errors
+            SdkError::Network(_) => NETWORK_CONNECTION_FAILED,
+            SdkError::Timeout(_) => TIMEOUT_ERROR,
+            
+            // Serialization and IO errors
+            SdkError::Serialization(_) => SERIALIZATION_ERROR,
+            SdkError::Io(_) => IO_ERROR,
+            
+            // Generic errors
+            SdkError::Other(_) => INTERNAL_ERROR,
+        }
+    }
+    
+    /// Get additional error data for JSON-RPC error response
+    /// This provides context and helps with debugging and error recovery
+    pub fn get_error_data(&self) -> Option<serde_json::Value> {
+        match self {
+            McpServerError::Sdk(sdk_error) => Some(serde_json::json!({
+                "sdk_error_type": Self::get_sdk_error_type_name(sdk_error),
+                "original_error": sdk_error.to_string(),
+                "category": "sdk",
+                "error_code": Self::sdk_error_to_code(sdk_error),
+                "recovery_suggestions": Self::get_recovery_suggestions(sdk_error),
+                "severity": Self::get_error_severity(sdk_error),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+            
+            McpServerError::Validation(msg) => Some(serde_json::json!({
+                "validation_error": msg,
+                "category": "validation",
+                "severity": "high",
+                "recovery_suggestions": ["Check input parameters", "Validate data format"],
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+            
+            McpServerError::Network(msg) => Some(serde_json::json!({
+                "network_error": msg,
+                "category": "network",
+                "severity": "medium",
+                "recovery_suggestions": ["Check network connectivity", "Verify RPC endpoints", "Retry with exponential backoff"],
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+            
+            McpServerError::InvalidArguments(msg) => Some(serde_json::json!({
+                "argument_error": msg,
+                "category": "arguments",
+                "severity": "high",
+                "recovery_suggestions": ["Check tool argument schema", "Validate required parameters"],
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+            
+            McpServerError::WalletNotConfigured => Some(serde_json::json!({
+                "category": "wallet",
+                "severity": "high",
+                "recovery_suggestions": ["Generate or import a wallet", "Check wallet configuration"],
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+            
+            McpServerError::UnknownTool(tool_name) => Some(serde_json::json!({
+                "tool_name": tool_name,
+                "category": "tool",
+                "severity": "medium",
+                "recovery_suggestions": ["Check available tools list", "Verify tool name spelling"],
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+            
+            McpServerError::UnknownResource(uri) => Some(serde_json::json!({
+                "resource_uri": uri,
+                "category": "resource",
+                "severity": "medium",
+                "recovery_suggestions": ["Check available resources list", "Verify resource URI format"],
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+            
+            _ => None
+        }
+    }
+    
+    /// Get recovery suggestions based on SDK error type
+    fn get_recovery_suggestions(sdk_error: &SdkError) -> Vec<&'static str> {
+        match sdk_error {
+            SdkError::CosmRs(_) | SdkError::Rpc(_) => vec![
+                "Check network connectivity",
+                "Verify RPC endpoint configuration",
+                "Try alternative RPC endpoints",
+                "Check if blockchain network is operational"
+            ],
+            SdkError::TxBroadcast(_) | SdkError::TxSimulation(_) | SdkError::Tx(_) => vec![
+                "Check transaction parameters",
+                "Verify wallet has sufficient balance for gas fees",
+                "Try with higher gas limit",
+                "Check network congestion status"
+            ],
+            SdkError::Wallet(_) => vec![
+                "Verify wallet is properly configured",
+                "Check wallet balance",
+                "Validate wallet address format",
+                "Regenerate or re-import wallet if corrupted"
+            ],
+            SdkError::Config(_) => vec![
+                "Check configuration file syntax",
+                "Verify network configuration parameters",
+                "Reset to default configuration if needed"
+            ],
+            SdkError::Contract(_) => vec![
+                "Verify contract addresses are correct",
+                "Check contract is deployed on current network",
+                "Validate method parameters",
+                "Check contract state and availability"
+            ],
+            SdkError::FeeValidation(_) => vec![
+                "Review fee structure parameters",
+                "Ensure total fees don't exceed 20% limit",
+                "Validate individual fee components",
+                "Use default fee structure if unsure"
+            ],
+            SdkError::Network(_) => vec![
+                "Check internet connectivity",
+                "Verify firewall settings",
+                "Try different network configuration",
+                "Check DNS resolution"
+            ],
+            SdkError::Timeout(_) => vec![
+                "Increase timeout duration",
+                "Check network latency",
+                "Retry with exponential backoff",
+                "Switch to faster RPC endpoint"
+            ],
+            SdkError::Serialization(_) => vec![
+                "Check data format and structure",
+                "Validate JSON syntax",
+                "Ensure all required fields are present"
+            ],
+            SdkError::Io(_) => vec![
+                "Check file permissions",
+                "Verify file paths are accessible",
+                "Ensure sufficient disk space",
+                "Check directory structure"
+            ],
+            SdkError::Other(_) => vec![
+                "Check application logs for details",
+                "Retry the operation",
+                "Contact support if issue persists"
+            ],
+        }
+    }
+    
+    /// Get error severity level for monitoring and alerting
+    fn get_error_severity(sdk_error: &SdkError) -> &'static str {
+        match sdk_error {
+            SdkError::CosmRs(_) | SdkError::Rpc(_) => "high",
+            SdkError::TxBroadcast(_) | SdkError::TxSimulation(_) | SdkError::Tx(_) => "high",
+            SdkError::Wallet(_) => "high",
+            SdkError::Config(_) => "medium",
+            SdkError::Contract(_) => "high",
+            SdkError::FeeValidation(_) => "medium",
+            SdkError::Network(_) => "medium",
+            SdkError::Timeout(_) => "low",
+            SdkError::Serialization(_) => "medium",
+            SdkError::Io(_) => "low",
+            SdkError::Other(_) => "medium",
+        }
+    }
+    
+    /// Get SDK error type name for debugging and categorization
+    fn get_sdk_error_type_name(sdk_error: &SdkError) -> &'static str {
+        match sdk_error {
+            SdkError::CosmRs(_) => "CosmRs",
+            SdkError::Rpc(_) => "Rpc", 
+            SdkError::TxBroadcast(_) => "TxBroadcast",
+            SdkError::TxSimulation(_) => "TxSimulation",
+            SdkError::Wallet(_) => "Wallet",
+            SdkError::Config(_) => "Config",
+            SdkError::Contract(_) => "Contract",
+            SdkError::Serialization(_) => "Serialization",
+            SdkError::Io(_) => "Io",
+            SdkError::FeeValidation(_) => "FeeValidation",
+            SdkError::Other(_) => "Other",
+            SdkError::Tx(_) => "Tx",
+            SdkError::Network(_) => "Network",
+            SdkError::Timeout(_) => "Timeout",
+        }
+    }
+    
+    /// Create a JSON-RPC error object from this MCP error
+    pub fn to_json_rpc_error(&self) -> JsonRpcError {
+        JsonRpcError {
+            code: self.to_json_rpc_error_code(),
+            message: self.to_string(),
+            data: self.get_error_data(),
+        }
+    }
+    
+    /// Check if error is recoverable and suggests retry strategy
+    pub fn is_recoverable(&self) -> bool {
+        match self {
+            McpServerError::Sdk(sdk_error) => match sdk_error {
+                SdkError::Network(_) | SdkError::Timeout(_) | SdkError::Rpc(_) => true,
+                SdkError::TxBroadcast(_) => true, // Transaction might succeed on retry
+                _ => false,
+            },
+            McpServerError::Network(_) => true,
+            _ => false,
+        }
+    }
+    
+    /// Get suggested retry delay in seconds for recoverable errors
+    pub fn get_retry_delay(&self) -> Option<u64> {
+        if self.is_recoverable() {
+            match self {
+                McpServerError::Sdk(SdkError::Network(_)) => Some(5),
+                McpServerError::Sdk(SdkError::Timeout(_)) => Some(10),
+                McpServerError::Sdk(SdkError::Rpc(_)) => Some(3),
+                McpServerError::Sdk(SdkError::TxBroadcast(_)) => Some(15),
+                McpServerError::Network(_) => Some(5),
+                _ => Some(1),
+            }
+        } else {
+            None
+        }
+    }
+}
+
 /// MCP server result type
 pub type McpResult<T> = std::result::Result<T, McpServerError>;
 
@@ -330,6 +962,8 @@ pub struct McpServerConfig {
     pub cache_ttl_secs: u64,
     /// Whether to auto-load .env file
     pub auto_load_env: bool,
+    /// Async runtime configuration
+    pub runtime_config: AsyncRuntimeConfig,
 }
 
 impl Default for McpServerConfig {
@@ -345,6 +979,7 @@ impl Default for McpServerConfig {
             request_timeout_secs: 30,
             cache_ttl_secs: 300,
             auto_load_env: true,
+            runtime_config: AsyncRuntimeConfig::default(),
         }
     }
 }
@@ -415,6 +1050,9 @@ impl McpServerConfig {
         }
 
         config.auto_load_env = auto_load_env;
+
+        // Load runtime configuration from environment
+        config.runtime_config = AsyncRuntimeConfig::from_env();
 
         // Load network configuration
         if let Ok(network_name) = env::var("MANTRA_NETWORK") {
@@ -489,6 +1127,14 @@ impl McpServerConfig {
             ));
         }
 
+        // Validate runtime configuration
+        if let Err(e) = self.runtime_config.validate() {
+            return Err(McpServerError::Validation(format!(
+                "Runtime configuration error: {}",
+                e
+            )));
+        }
+
         Ok(())
     }
 
@@ -544,11 +1190,16 @@ pub struct McpServerStateData {
     pub sdk_adapter: Arc<McpSdkAdapter>,
     /// High-level client wrapper for MCP operations
     pub client_wrapper: Arc<Mutex<Option<McpClientWrapper>>>,
+    /// Async runtime manager
+    pub runtime_manager: Arc<AsyncRuntimeManager>,
 }
 
 impl McpServerStateData {
     pub fn new(config: McpServerConfig) -> Self {
         let sdk_adapter = Arc::new(McpSdkAdapter::default());
+        let mut runtime_manager = AsyncRuntimeManager::new(config.runtime_config.clone());
+        runtime_manager.handle = Some(tokio::runtime::Handle::current());
+        let runtime_manager = Arc::new(runtime_manager);
 
         Self {
             client: Arc::new(Mutex::new(None)),
@@ -558,6 +1209,7 @@ impl McpServerStateData {
             cache: Arc::new(RwLock::new(HashMap::new())),
             sdk_adapter,
             client_wrapper: Arc::new(Mutex::new(None)),
+            runtime_manager,
         }
     }
 
@@ -977,6 +1629,12 @@ impl MantraDexMcpServer {
                 "description": "Information about network switching capabilities and available networks",
                 "mime_type": "application/json"
             }),
+            serde_json::json!({
+                "uri": "network://status",
+                "name": "Network Status",
+                "description": "Current blockchain network status including connectivity, block height, and sync status",
+                "mime_type": "application/json"
+            }),
         ]
     }
 
@@ -1013,6 +1671,7 @@ impl MantraDexMcpServer {
             "wallet://list" => self.read_wallet_list().await,
             "network://config" => self.read_network_config().await,
             "network://switch" => self.read_network_switch().await,
+            "network://status" => self.read_network_status().await,
             "pools://list" => self.read_pools_list().await,
             "wallet://balance" => self.read_wallet_balance().await,
             _ => Err(McpServerError::UnknownResource(uri.to_string())),
@@ -1431,6 +2090,50 @@ impl MantraDexMcpServer {
         }))
     }
 
+    /// Read network status resource
+    async fn read_network_status(&self) -> McpResult<serde_json::Value> {
+        // Get network configuration
+        let config = &self.state.config.network_config;
+        
+        // Try to get real-time network status from client wrapper
+        let client_wrapper_guard = self.state.client_wrapper.lock().await;
+        let network_status = if let Some(wrapper) = client_wrapper_guard.as_ref() {
+            // Get comprehensive network status
+            match wrapper.get_network_status().await {
+                Ok(status) => status,
+                Err(e) => {
+                    // If network status fails, provide fallback with error info
+                    serde_json::json!({
+                        "network": config.network_id,
+                        "rpc_url": config.rpc_url,
+                        "block_height": null,
+                        "status": "error",
+                        "error": format!("Failed to get network status: {}", e)
+                    })
+                }
+            }
+        } else {
+            // No client wrapper available - provide basic config info
+            serde_json::json!({
+                "network": config.network_id,
+                "rpc_url": config.rpc_url,
+                "block_height": null,
+                "status": "not_initialized",
+                "error": "Client not initialized"
+            })
+        };
+
+        // Enhance the network status with additional configuration details
+        let mut enhanced_status = network_status.as_object().unwrap().clone();
+        enhanced_status.insert("network_name".to_string(), serde_json::Value::String(config.network_name.clone()));
+        enhanced_status.insert("gas_price".to_string(), serde_json::Value::String(config.gas_price.to_string()));
+        enhanced_status.insert("gas_adjustment".to_string(), serde_json::json!(config.gas_adjustment));
+        enhanced_status.insert("native_denom".to_string(), serde_json::Value::String(config.native_denom.clone()));
+        enhanced_status.insert("timestamp".to_string(), serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
+
+        Ok(serde_json::Value::Object(enhanced_status))
+    }
+
     /// Read pools list resource
     async fn read_pools_list(&self) -> McpResult<serde_json::Value> {
         // TODO: Implement actual pool querying
@@ -1695,6 +2398,7 @@ impl McpServerStateManager for MantraDexMcpServer {
     async fn get_health_status(&self) -> serde_json::Value {
         let client_ready = self.is_ready().await;
         let active_wallet = self.state.active_wallet.lock().await.is_some();
+        let runtime_health = self.state.runtime_manager.health_status().await;
 
         serde_json::json!({
             "status": if client_ready { "healthy" } else { "initializing" },
@@ -1702,7 +2406,8 @@ impl McpServerStateManager for MantraDexMcpServer {
             "components": {
                 "dex_client": client_ready,
                 "active_wallet": active_wallet,
-                "cache": true
+                "cache": true,
+                "runtime": runtime_health.get("runtime").unwrap_or(&serde_json::Value::Null)
             }
         })
     }
@@ -1762,35 +2467,62 @@ impl JsonRpcResponse {
 }
 
 impl JsonRpcError {
+    /// Create internal error with proper MCP error code
     pub fn internal_error(message: String) -> Self {
         Self {
-            code: -32603,
+            code: json_rpc_error_codes::INTERNAL_ERROR,
             message,
             data: None,
         }
     }
 
+    /// Create invalid request error with proper MCP error code
     pub fn invalid_request(message: String) -> Self {
         Self {
-            code: -32600,
+            code: json_rpc_error_codes::INVALID_REQUEST,
             message,
             data: None,
         }
     }
 
+    /// Create method not found error with proper MCP error code
     pub fn method_not_found(method: String) -> Self {
         Self {
-            code: -32601,
+            code: json_rpc_error_codes::METHOD_NOT_FOUND,
             message: format!("Method not found: {}", method),
             data: None,
         }
     }
 
+    /// Create invalid params error with proper MCP error code
     pub fn invalid_params(message: String) -> Self {
         Self {
-            code: -32602,
+            code: json_rpc_error_codes::INVALID_PARAMS,
             message,
             data: None,
+        }
+    }
+
+    /// Create parse error with proper MCP error code
+    pub fn parse_error(message: String) -> Self {
+        Self {
+            code: json_rpc_error_codes::PARSE_ERROR,
+            message,
+            data: None,
+        }
+    }
+
+    /// Create error from MCP server error with full mapping
+    pub fn from_mcp_error(error: &McpServerError) -> Self {
+        error.to_json_rpc_error()
+    }
+
+    /// Create custom error with specific code and additional data
+    pub fn custom_error(code: i32, message: String, data: Option<serde_json::Value>) -> Self {
+        Self {
+            code,
+            message,
+            data,
         }
     }
 }
@@ -2549,4 +3281,506 @@ mod tests {
         let warnings = resource_data["warnings"].as_array().unwrap();
         assert!(!warnings.is_empty());
     }
+
+    #[tokio::test]
+    async fn test_network_status_resource() {
+        let config = McpServerConfig::default();
+        let server = create_mcp_server(config);
+
+        // Test that network://status resource is available
+        let resources = server.get_available_resources();
+        let resource_uris: Vec<&str> = resources
+            .iter()
+            .filter_map(|r| r.get("uri").and_then(|u| u.as_str()))
+            .collect();
+
+        assert!(resource_uris.contains(&"network://status"));
+
+        // Test reading the network://status resource
+        let resource_result = server.handle_resource_read("network://status").await;
+        assert!(resource_result.is_ok());
+
+        let resource_data = resource_result.unwrap();
+
+        // Verify the resource contains expected fields
+        assert!(resource_data["network_name"].is_string());
+        assert!(resource_data["network"].is_string());
+        assert!(resource_data["rpc_url"].is_string());
+        assert!(resource_data["gas_price"].is_string());
+        assert!(resource_data["gas_adjustment"].is_number());
+        assert!(resource_data["native_denom"].is_string());
+        assert!(resource_data["timestamp"].is_string());
+        assert!(resource_data["status"].is_string());
+
+        // Verify basic network information is correct
+        assert_eq!(resource_data["network_name"], "mantra-dukong");
+        assert_eq!(resource_data["network"], "mantra-dukong-1");
+        assert_eq!(resource_data["native_denom"], "uom");
+
+        // The status should be either "connected", "disconnected", "error", or "not_initialized"
+        let status = resource_data["status"].as_str().unwrap();
+        assert!(matches!(status, "connected" | "disconnected" | "error" | "not_initialized"));
+
+        // Verify timestamp is a valid RFC3339 string
+        let timestamp_str = resource_data["timestamp"].as_str().unwrap();
+        assert!(chrono::DateTime::parse_from_rfc3339(timestamp_str).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_async_runtime_configuration() {
+        // Test default runtime configuration
+        let default_config = AsyncRuntimeConfig::default();
+        assert_eq!(default_config.flavor, RuntimeFlavor::MultiThread);
+        assert!(default_config.enable_io);
+        assert!(default_config.enable_time);
+        assert_eq!(default_config.max_blocking_threads, Some(512));
+
+        // Test validation
+        assert!(default_config.validate().is_ok());
+
+        // Test environment loading
+        std::env::set_var("MCP_RUNTIME_FLAVOR", "current_thread");
+        std::env::set_var("MCP_WORKER_THREADS", "4");
+        std::env::set_var("MCP_MAX_BLOCKING_THREADS", "256");
+
+        let env_config = AsyncRuntimeConfig::from_env();
+        assert_eq!(env_config.flavor, RuntimeFlavor::CurrentThread);
+        assert_eq!(env_config.worker_threads, Some(4));
+        assert_eq!(env_config.max_blocking_threads, Some(256));
+
+        // Clean up env vars
+        std::env::remove_var("MCP_RUNTIME_FLAVOR");
+        std::env::remove_var("MCP_WORKER_THREADS");
+        std::env::remove_var("MCP_MAX_BLOCKING_THREADS");
+    }
+
+    #[tokio::test]
+    async fn test_runtime_metrics() {
+        let config = AsyncRuntimeConfig::default();
+        let metrics = RuntimeMetrics::new(&config);
+
+        assert_eq!(metrics.flavor, RuntimeFlavor::MultiThread);
+        assert!(metrics.uptime().as_nanos() > 0);
+
+        let json = metrics.to_json();
+        assert!(json.get("uptime_secs").is_some());
+        assert!(json.get("active_tasks").is_some());
+        assert!(json.get("worker_threads").is_some());
+        assert!(json.get("flavor").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_async_runtime_manager() {
+        let config = AsyncRuntimeConfig::default();
+        let manager = AsyncRuntimeManager::new(config);
+
+        // Test metrics access
+        let metrics = manager.metrics().await;
+        assert_eq!(metrics.flavor, RuntimeFlavor::MultiThread);
+
+        // Test task spawning
+        let handle = manager.spawn_monitored(async {
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+            "test_result"
+        });
+
+        let result = handle.await.expect("Task should complete");
+        assert_eq!(result, "test_result");
+
+        // Test blocking task spawning
+        let blocking_handle = manager.spawn_blocking_monitored(|| {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            42
+        });
+
+        let blocking_result = blocking_handle.await.expect("Blocking task should complete");
+        assert_eq!(blocking_result, 42);
+
+        // Test health status
+        let health = manager.health_status().await;
+        assert!(health.get("status").is_some());
+        assert!(health.get("runtime").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_server_runtime_integration() {
+        let mut config = McpServerConfig::default();
+        config.runtime_config.flavor = RuntimeFlavor::CurrentThread;
+        config.runtime_config.worker_threads = Some(1);
+
+        let server = create_mcp_server(config);
+
+        // Test that runtime manager is properly integrated
+        let runtime_manager = &server.state().runtime_manager;
+        assert_eq!(runtime_manager.config().flavor, RuntimeFlavor::CurrentThread);
+        assert_eq!(runtime_manager.config().worker_threads, Some(1));
+
+        // Test health status includes runtime information
+        let health = server.get_health_status().await;
+        assert!(health.get("components").is_some());
+        let components = health.get("components").unwrap();
+        assert!(components.get("runtime").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_runtime_config_validation() {
+        let mut config = AsyncRuntimeConfig::default();
+
+        // Test valid configuration
+        assert!(config.validate().is_ok());
+
+        // Test invalid worker threads
+        config.worker_threads = Some(0);
+        assert!(config.validate().is_err());
+
+        config.worker_threads = Some(2000); // Too high
+        assert!(config.validate().is_err());
+
+        config.worker_threads = Some(4); // Reset to valid
+
+        // Test invalid blocking threads
+        config.max_blocking_threads = Some(0);
+        assert!(config.validate().is_err());
+
+        config.max_blocking_threads = Some(20000); // Too high
+        assert!(config.validate().is_err());
+
+        config.max_blocking_threads = Some(512); // Reset to valid
+
+        // Test invalid stack size
+        config.thread_stack_size = Some(1024); // Too small
+        assert!(config.validate().is_err());
+
+        config.thread_stack_size = Some(2 * 1024 * 1024); // Valid
+        assert!(config.validate().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_error_mapping_to_json_rpc_codes() {
+        use crate::error::Error as SdkError;
+        use json_rpc_error_codes::*;
+
+        // Test SDK error mapping
+        let sdk_wallet_error = McpServerError::Sdk(SdkError::Wallet("insufficient funds".to_string()));
+        assert_eq!(sdk_wallet_error.to_json_rpc_error_code(), INSUFFICIENT_FUNDS);
+
+        let sdk_network_error = McpServerError::Sdk(SdkError::Network("connection failed".to_string()));
+        assert_eq!(sdk_network_error.to_json_rpc_error_code(), NETWORK_CONNECTION_FAILED);
+
+        let sdk_fee_error = McpServerError::Sdk(SdkError::FeeValidation("fees too high".to_string()));
+        assert_eq!(sdk_fee_error.to_json_rpc_error_code(), FEE_VALIDATION_FAILED);
+
+        // Test MCP server error mapping
+        let wallet_not_configured = McpServerError::WalletNotConfigured;
+        assert_eq!(wallet_not_configured.to_json_rpc_error_code(), WALLET_NOT_CONFIGURED);
+
+        let invalid_args = McpServerError::InvalidArguments("missing parameter".to_string());
+        assert_eq!(invalid_args.to_json_rpc_error_code(), INVALID_PARAMS);
+
+        let unknown_tool = McpServerError::UnknownTool("nonexistent_tool".to_string());
+        assert_eq!(unknown_tool.to_json_rpc_error_code(), METHOD_NOT_FOUND);
+
+        let unknown_resource = McpServerError::UnknownResource("nonexistent://resource".to_string());
+        assert_eq!(unknown_resource.to_json_rpc_error_code(), RESOURCE_NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_error_data_generation() {
+        use crate::error::Error as SdkError;
+
+        // Test SDK error data generation
+        let sdk_error = McpServerError::Sdk(SdkError::Wallet("test wallet error".to_string()));
+        let error_data = sdk_error.get_error_data();
+        assert!(error_data.is_some());
+        
+        let data = error_data.unwrap();
+        assert_eq!(data["category"], "sdk");
+        assert_eq!(data["sdk_error_type"], "Wallet");
+        assert!(data["original_error"].as_str().unwrap().contains("test wallet error"));
+
+        // Test validation error data generation
+        let validation_error = McpServerError::Validation("invalid input format".to_string());
+        let error_data = validation_error.get_error_data();
+        assert!(error_data.is_some());
+        
+        let data = error_data.unwrap();
+        assert_eq!(data["category"], "validation");
+        assert!(data["validation_error"].as_str().unwrap().contains("invalid input format"));
+    }
+
+    #[tokio::test]
+    async fn test_json_rpc_error_creation() {
+        use crate::error::Error as SdkError;
+        use json_rpc_error_codes::*;
+
+        // Test JsonRpcError creation from MCP error
+        let mcp_error = McpServerError::Sdk(SdkError::Network("RPC timeout".to_string()));
+        let json_rpc_error = mcp_error.to_json_rpc_error();
+
+        assert_eq!(json_rpc_error.code, NETWORK_CONNECTION_FAILED);
+        assert!(json_rpc_error.message.contains("RPC timeout"));
+        assert!(json_rpc_error.data.is_some());
+
+        // Test JsonRpcError methods with new error codes
+        let internal_error = JsonRpcError::internal_error("test internal error".to_string());
+        assert_eq!(internal_error.code, INTERNAL_ERROR);
+
+        let parse_error = JsonRpcError::parse_error("invalid JSON".to_string());
+        assert_eq!(parse_error.code, PARSE_ERROR);
+
+        let custom_error = JsonRpcError::custom_error(
+            INSUFFICIENT_FUNDS,
+            "not enough tokens".to_string(),
+            Some(serde_json::json!({"required": 100, "available": 50}))
+        );
+        assert_eq!(custom_error.code, INSUFFICIENT_FUNDS);
+        assert!(custom_error.data.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_sdk_error_type_name_mapping() {
+        use crate::error::Error as SdkError;
+
+        // Test all SDK error type name mappings
+        let test_cases = vec![
+            (SdkError::Rpc("test rpc error".to_string()), "Rpc"),
+            (SdkError::Wallet("test wallet error".to_string()), "Wallet"),
+            (SdkError::Config("test config error".to_string()), "Config"),
+            (SdkError::Contract("test contract error".to_string()), "Contract"),
+            (SdkError::FeeValidation("test fee error".to_string()), "FeeValidation"),
+            (SdkError::Network("test network error".to_string()), "Network"),
+            (SdkError::Timeout("test timeout error".to_string()), "Timeout"),
+            (SdkError::Other("test other error".to_string()), "Other"),
+        ];
+
+        for (sdk_error, expected_name) in test_cases {
+            let mcp_error = McpServerError::Sdk(sdk_error);
+            let error_data = mcp_error.get_error_data().unwrap();
+            assert_eq!(error_data["sdk_error_type"], expected_name);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_wallet_error_code_specificity() {
+        use crate::error::Error as SdkError;
+        use json_rpc_error_codes::*;
+
+        // Test specific wallet error message handling
+        let insufficient_funds_error = McpServerError::Sdk(SdkError::Wallet("insufficient balance for transaction".to_string()));
+        assert_eq!(insufficient_funds_error.to_json_rpc_error_code(), INSUFFICIENT_FUNDS);
+
+        let address_format_error = McpServerError::Sdk(SdkError::Wallet("invalid address format".to_string()));
+        assert_eq!(address_format_error.to_json_rpc_error_code(), INVALID_ADDRESS_FORMAT);
+
+        let generic_wallet_error = McpServerError::Sdk(SdkError::Wallet("wallet not initialized".to_string()));
+        assert_eq!(generic_wallet_error.to_json_rpc_error_code(), WALLET_NOT_CONFIGURED);
+    }
+
+    /// Test the enhanced error mapping functionality
+    #[tokio::test]
+    async fn test_enhanced_error_mapping_and_recovery() {
+        // Test enhanced wallet error context detection
+        let wallet_errors = vec![
+            (SdkError::Wallet("insufficient balance for transaction".to_string()), json_rpc_error_codes::INSUFFICIENT_FUNDS),
+            (SdkError::Wallet("invalid address format provided".to_string()), json_rpc_error_codes::INVALID_ADDRESS_FORMAT),
+            (SdkError::Wallet("invalid mnemonic phrase provided".to_string()), json_rpc_error_codes::INVALID_MNEMONIC_FORMAT),
+            (SdkError::Wallet("invalid public key format".to_string()), json_rpc_error_codes::INVALID_PUBLIC_KEY_FORMAT),
+            (SdkError::Wallet("general wallet error".to_string()), json_rpc_error_codes::WALLET_NOT_CONFIGURED),
+        ];
+
+        for (sdk_error, expected_code) in wallet_errors {
+            let mcp_error = McpServerError::Sdk(sdk_error);
+            assert_eq!(mcp_error.to_json_rpc_error_code(), expected_code);
+            
+            // Test error data generation
+            let error_data = mcp_error.get_error_data().unwrap();
+            assert_eq!(error_data["category"], "sdk");
+            assert!(error_data["recovery_suggestions"].is_array());
+            assert!(error_data["severity"].is_string());
+            assert!(error_data["timestamp"].is_string());
+        }
+
+        // Test enhanced contract error context detection
+        let contract_errors = vec![
+            (SdkError::Contract("pool not found on network".to_string()), json_rpc_error_codes::POOL_NOT_FOUND),
+            (SdkError::Contract("slippage tolerance exceeded".to_string()), json_rpc_error_codes::SWAP_SLIPPAGE_EXCEEDED),
+            (SdkError::Contract("insufficient liquidity in pool".to_string()), json_rpc_error_codes::LIQUIDITY_INSUFFICIENT),
+            (SdkError::Contract("general contract error".to_string()), json_rpc_error_codes::TOOL_EXECUTION_FAILED),
+        ];
+
+        for (sdk_error, expected_code) in contract_errors {
+            let mcp_error = McpServerError::Sdk(sdk_error);
+            assert_eq!(mcp_error.to_json_rpc_error_code(), expected_code);
+        }
+
+        // Test error recovery suggestions
+        let network_error = McpServerError::Sdk(SdkError::Network("connection timeout".to_string()));
+        let recovery_suggestions = McpServerError::get_recovery_suggestions(&SdkError::Network("test".to_string()));
+        assert!(recovery_suggestions.contains(&"Check internet connectivity"));
+        assert!(recovery_suggestions.contains(&"Verify firewall settings"));
+
+        // Test error severity levels
+        assert_eq!(McpServerError::get_error_severity(&SdkError::Wallet("test".to_string())), "high");
+        assert_eq!(McpServerError::get_error_severity(&SdkError::Network("test".to_string())), "medium");
+        assert_eq!(McpServerError::get_error_severity(&SdkError::Timeout("test".to_string())), "low");
+
+        // Test error recoverability
+        assert!(network_error.is_recoverable());
+        assert_eq!(network_error.get_retry_delay(), Some(5));
+
+        let wallet_error = McpServerError::Sdk(SdkError::Wallet("test".to_string()));
+        assert!(!wallet_error.is_recoverable());
+        assert_eq!(wallet_error.get_retry_delay(), None);
+
+        // Test JSON-RPC error generation
+        let json_rpc_error = network_error.to_json_rpc_error();
+        assert_eq!(json_rpc_error.code, json_rpc_error_codes::NETWORK_CONNECTION_FAILED);
+        assert!(json_rpc_error.data.is_some());
+        
+        let error_data = json_rpc_error.data.unwrap();
+        assert_eq!(error_data["category"], "sdk");
+        assert_eq!(error_data["severity"], "medium");
+        assert!(error_data["recovery_suggestions"].is_array());
+    }
+
+    /// Test MCP-specific error types and their data generation
+    #[tokio::test]
+    async fn test_mcp_error_types_data_generation() {
+        // Test InvalidArguments error
+        let invalid_args_error = McpServerError::InvalidArguments("Missing required parameter 'pool_id'".to_string());
+        let error_data = invalid_args_error.get_error_data().unwrap();
+        assert_eq!(error_data["category"], "arguments");
+        assert_eq!(error_data["severity"], "high");
+        assert!(error_data["recovery_suggestions"].is_array());
+
+        // Test UnknownTool error
+        let unknown_tool_error = McpServerError::UnknownTool("invalid_tool_name".to_string());
+        let error_data = unknown_tool_error.get_error_data().unwrap();
+        assert_eq!(error_data["category"], "tool");
+        assert_eq!(error_data["tool_name"], "invalid_tool_name");
+        assert_eq!(error_data["severity"], "medium");
+
+        // Test UnknownResource error
+        let unknown_resource_error = McpServerError::UnknownResource("invalid://resource/uri".to_string());
+        let error_data = unknown_resource_error.get_error_data().unwrap();
+        assert_eq!(error_data["category"], "resource");
+        assert_eq!(error_data["resource_uri"], "invalid://resource/uri");
+        assert_eq!(error_data["severity"], "medium");
+
+        // Test WalletNotConfigured error
+        let wallet_not_configured_error = McpServerError::WalletNotConfigured;
+        let error_data = wallet_not_configured_error.get_error_data().unwrap();
+        assert_eq!(error_data["category"], "wallet");
+        assert_eq!(error_data["severity"], "high");
+
+        // Test Network error
+        let network_error = McpServerError::Network("RPC endpoint unreachable".to_string());
+        let error_data = network_error.get_error_data().unwrap();
+        assert_eq!(error_data["category"], "network");
+        assert_eq!(error_data["severity"], "medium");
+        assert_eq!(error_data["network_error"], "RPC endpoint unreachable");
+
+        // Test Validation error
+        let validation_error = McpServerError::Validation("Invalid amount format: must be numeric".to_string());
+        let error_data = validation_error.get_error_data().unwrap();
+        assert_eq!(error_data["category"], "validation");
+        assert_eq!(error_data["severity"], "high");
+        assert_eq!(error_data["validation_error"], "Invalid amount format: must be numeric");
+    }
+
+    /// Test error code mapping for all SDK error types
+    #[tokio::test]
+    async fn test_comprehensive_sdk_error_code_mapping() {
+        let test_cases = vec![
+            (SdkError::Rpc("RPC connection failed".to_string()), json_rpc_error_codes::BLOCKCHAIN_RPC_ERROR),
+            (SdkError::TxSimulation("Transaction simulation failed".to_string()), json_rpc_error_codes::TRANSACTION_FAILED),
+            (SdkError::Config("Invalid network configuration".to_string()), json_rpc_error_codes::CONFIGURATION_ERROR),
+            (SdkError::FeeValidation("Total fees exceed 20% limit".to_string()), json_rpc_error_codes::FEE_VALIDATION_FAILED),
+            (SdkError::Timeout("Request timeout after 30s".to_string()), json_rpc_error_codes::TIMEOUT_ERROR),
+            (SdkError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "File not found")), json_rpc_error_codes::IO_ERROR),
+            (SdkError::Other("Unexpected error occurred".to_string()), json_rpc_error_codes::INTERNAL_ERROR),
+        ];
+
+        for (sdk_error, expected_code) in test_cases {
+            let mcp_error = McpServerError::Sdk(sdk_error);
+            assert_eq!(mcp_error.to_json_rpc_error_code(), expected_code);
+        }
+
+        // Test serialization error separately with a proper error instance
+        let ser_error = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
+        let mcp_ser_error = McpServerError::Sdk(SdkError::Serialization(ser_error));
+        assert_eq!(mcp_ser_error.to_json_rpc_error_code(), json_rpc_error_codes::SERIALIZATION_ERROR);
+    }
+
+    /// Test error data timestamp generation and format
+    #[tokio::test]
+    async fn test_error_data_timestamp_generation() {
+        let error = McpServerError::Sdk(SdkError::Network("test".to_string()));
+        let error_data = error.get_error_data().unwrap();
+        
+        // Verify timestamp is present and in correct format
+        assert!(error_data["timestamp"].is_string());
+        let timestamp_str = error_data["timestamp"].as_str().unwrap();
+        
+        // Try to parse the timestamp to verify it's valid RFC3339
+        chrono::DateTime::parse_from_rfc3339(timestamp_str).expect("Invalid timestamp format");
+    }
+}
+
+// =============================================================================
+// JSON-RPC Error Code Constants (MCP Specification Compliance)
+// =============================================================================
+
+/// JSON-RPC 2.0 standard error codes as defined in the MCP specification
+/// See: https://spec.modelcontextprotocol.io/specification/2025-03-26/
+pub mod json_rpc_error_codes {
+    // Standard JSON-RPC 2.0 errors (-32768 to -32000 are reserved)
+    pub const PARSE_ERROR: i32 = -32700;
+    pub const INVALID_REQUEST: i32 = -32600;
+    pub const METHOD_NOT_FOUND: i32 = -32601;
+    pub const INVALID_PARAMS: i32 = -32602;
+    pub const INTERNAL_ERROR: i32 = -32603;
+    
+    // Implementation-defined server errors (-32099 to -32000)
+    pub const SERVER_ERROR: i32 = -32000;
+    pub const SERVER_OVERLOADED: i32 = -32001;
+    pub const RATE_LIMIT_EXCEEDED: i32 = -32002;
+    pub const SESSION_EXPIRED: i32 = -32003;
+    pub const METHOD_NOT_READY: i32 = -32004;
+    
+    // MCP-specific error codes (outside reserved range)
+    // Application errors (-31999 to -1)
+    pub const WALLET_NOT_CONFIGURED: i32 = -31999;
+    pub const NETWORK_CONNECTION_FAILED: i32 = -31998;
+    pub const BLOCKCHAIN_RPC_ERROR: i32 = -31997;
+    pub const TRANSACTION_FAILED: i32 = -31996;
+    pub const INSUFFICIENT_PERMISSIONS: i32 = -31995;
+    pub const RESOURCE_NOT_FOUND: i32 = -31994;
+    pub const TOOL_EXECUTION_FAILED: i32 = -31993;
+    pub const CONFIGURATION_ERROR: i32 = -31992;
+    pub const VALIDATION_ERROR: i32 = -31991;
+    pub const TIMEOUT_ERROR: i32 = -31990;
+    
+    // Validation and input errors (1 to 999)
+    pub const INVALID_ADDRESS_FORMAT: i32 = 100;
+    pub const INVALID_MNEMONIC_FORMAT: i32 = 101;
+    pub const INVALID_PUBLIC_KEY_FORMAT: i32 = 102;
+    pub const MISSING_REQUIRED_FIELD: i32 = 103;
+    pub const INVALID_NETWORK_NAME: i32 = 104;
+    pub const INVALID_AMOUNT_FORMAT: i32 = 105;
+    
+    // Business logic errors (1000 to 4999)
+    pub const INSUFFICIENT_FUNDS: i32 = 1000;
+    pub const POOL_NOT_FOUND: i32 = 1001;
+    pub const SWAP_SLIPPAGE_EXCEEDED: i32 = 1002;
+    pub const LIQUIDITY_INSUFFICIENT: i32 = 1003;
+    pub const REWARD_CLAIM_FAILED: i32 = 1004;
+    pub const FEE_VALIDATION_FAILED: i32 = 1005;
+    
+    // System and infrastructure errors (5000+)
+    pub const DATABASE_ERROR: i32 = 5000;
+    pub const CACHE_ERROR: i32 = 5001;
+    pub const SERIALIZATION_ERROR: i32 = 5002;
+    pub const DESERIALIZATION_ERROR: i32 = 5003;
+    pub const IO_ERROR: i32 = 5004;
 }
