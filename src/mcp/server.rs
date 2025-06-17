@@ -1,16 +1,22 @@
 use std::collections::HashMap;
 use std::env;
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::{Mutex, RwLock};
 use tokio::runtime::{Builder, Handle, Runtime};
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, error, info, warn};
 
 // MCP transport and communication types
 use axum::{extract::State, http::StatusCode};
 use tokio::io::{AsyncBufReadExt, BufReader};
+
+// Configuration support
+use config::{Config, ConfigError, Environment, File, FileFormat};
 
 // TODO: Import correct MCP types when API is finalized
 // Current rust-mcp-sdk 0.4.2 has unstable APIs that don't match documentation
@@ -22,6 +28,7 @@ use crate::error::Error as SdkError;
 use crate::wallet::{MantraWallet, WalletInfo};
 
 use super::client_wrapper::McpClientWrapper;
+use super::logging::{LoggingConfig, McpLogger};
 use super::sdk_adapter::McpSdkAdapter;
 
 // =============================================================================
@@ -29,7 +36,7 @@ use super::sdk_adapter::McpSdkAdapter;
 // =============================================================================
 
 /// Configuration for the async runtime
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AsyncRuntimeConfig {
     /// Runtime flavor (single-threaded or multi-threaded)
     pub flavor: RuntimeFlavor,
@@ -52,7 +59,7 @@ pub struct AsyncRuntimeConfig {
 }
 
 /// Runtime flavor options
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RuntimeFlavor {
     /// Single-threaded current thread runtime
     CurrentThread,
@@ -69,9 +76,9 @@ impl Default for AsyncRuntimeConfig {
             enable_time: true,
             max_blocking_threads: Some(512), // Reasonable default for blocking operations
             thread_keep_alive: Some(Duration::from_secs(10)),
-            thread_stack_size: None, // Use system default
+            thread_stack_size: None,         // Use system default
             global_queue_interval: Some(31), // Default Tokio value
-            event_interval: Some(61), // Default Tokio value
+            event_interval: Some(61),        // Default Tokio value
         }
     }
 }
@@ -312,7 +319,7 @@ impl AsyncRuntimeManager {
         T::Output: Send + 'static,
     {
         let metrics = self.metrics.clone();
-        
+
         tokio::spawn(async move {
             // Increment active tasks
             {
@@ -338,8 +345,8 @@ impl AsyncRuntimeManager {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        let metrics = self.metrics.clone();
-        
+        let _metrics = self.metrics.clone();
+
         tokio::task::spawn_blocking(move || {
             // Note: We don't track blocking tasks in active_tasks as they run on separate thread pool
             let result = f();
@@ -638,6 +645,9 @@ pub enum McpServerError {
 
     #[error("Unknown resource: {0}")]
     UnknownResource(String),
+
+    #[error("Configuration error: {0}")]
+    Config(#[from] ConfigError),
 }
 
 impl McpServerError {
@@ -645,40 +655,41 @@ impl McpServerError {
     /// This provides proper error mapping as required by the MCP specification
     pub fn to_json_rpc_error_code(&self) -> i32 {
         use json_rpc_error_codes::*;
-        
+
         match self {
             // SDK error mapping - map based on the underlying SDK error type
             McpServerError::Sdk(sdk_error) => Self::sdk_error_to_code(sdk_error),
-            
+
             // MCP protocol errors
             McpServerError::Mcp(_) => INTERNAL_ERROR,
             McpServerError::WalletNotConfigured => WALLET_NOT_CONFIGURED,
             McpServerError::InvalidArguments(_) => INVALID_PARAMS,
             McpServerError::UnknownTool(_) => METHOD_NOT_FOUND,
             McpServerError::UnknownResource(_) => RESOURCE_NOT_FOUND,
-            
+
             // System errors
             McpServerError::Serialization(_) => SERIALIZATION_ERROR,
             McpServerError::Network(_) => NETWORK_CONNECTION_FAILED,
             McpServerError::Validation(_) => VALIDATION_ERROR,
             McpServerError::Internal(_) => INTERNAL_ERROR,
+            McpServerError::Config(_) => json_rpc_error_codes::CONFIGURATION_ERROR,
         }
     }
-    
+
     /// Map SDK error types to appropriate JSON-RPC error codes
     fn sdk_error_to_code(sdk_error: &SdkError) -> i32 {
         use json_rpc_error_codes::*;
-        
+
         match sdk_error {
             // CosmRS and RPC errors
             SdkError::CosmRs(_) => BLOCKCHAIN_RPC_ERROR,
             SdkError::Rpc(_) => BLOCKCHAIN_RPC_ERROR,
-            
+
             // Transaction errors
             SdkError::TxBroadcast(_) => TRANSACTION_FAILED,
             SdkError::TxSimulation(_) => TRANSACTION_FAILED,
             SdkError::Tx(_) => TRANSACTION_FAILED,
-            
+
             // Wallet errors with enhanced context detection
             SdkError::Wallet(msg) => {
                 let msg_lower = msg.to_lowercase();
@@ -693,8 +704,8 @@ impl McpServerError {
                 } else {
                     WALLET_NOT_CONFIGURED
                 }
-            },
-            
+            }
+
             // Configuration and contract errors
             SdkError::Config(_) => CONFIGURATION_ERROR,
             SdkError::Contract(msg) => {
@@ -708,24 +719,24 @@ impl McpServerError {
                 } else {
                     TOOL_EXECUTION_FAILED
                 }
-            },
-            
+            }
+
             // Fee validation errors (v3.0.0 feature)
             SdkError::FeeValidation(_) => FEE_VALIDATION_FAILED,
-            
+
             // Network and timeout errors
             SdkError::Network(_) => NETWORK_CONNECTION_FAILED,
             SdkError::Timeout(_) => TIMEOUT_ERROR,
-            
+
             // Serialization and IO errors
             SdkError::Serialization(_) => SERIALIZATION_ERROR,
             SdkError::Io(_) => IO_ERROR,
-            
+
             // Generic errors
             SdkError::Other(_) => INTERNAL_ERROR,
         }
     }
-    
+
     /// Get additional error data for JSON-RPC error response
     /// This provides context and helps with debugging and error recovery
     pub fn get_error_data(&self) -> Option<serde_json::Value> {
@@ -739,7 +750,7 @@ impl McpServerError {
                 "severity": Self::get_error_severity(sdk_error),
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
-            
+
             McpServerError::Validation(msg) => Some(serde_json::json!({
                 "validation_error": msg,
                 "category": "validation",
@@ -747,7 +758,7 @@ impl McpServerError {
                 "recovery_suggestions": ["Check input parameters", "Validate data format"],
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
-            
+
             McpServerError::Network(msg) => Some(serde_json::json!({
                 "network_error": msg,
                 "category": "network",
@@ -755,7 +766,7 @@ impl McpServerError {
                 "recovery_suggestions": ["Check network connectivity", "Verify RPC endpoints", "Retry with exponential backoff"],
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
-            
+
             McpServerError::InvalidArguments(msg) => Some(serde_json::json!({
                 "argument_error": msg,
                 "category": "arguments",
@@ -763,14 +774,14 @@ impl McpServerError {
                 "recovery_suggestions": ["Check tool argument schema", "Validate required parameters"],
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
-            
+
             McpServerError::WalletNotConfigured => Some(serde_json::json!({
                 "category": "wallet",
                 "severity": "high",
                 "recovery_suggestions": ["Generate or import a wallet", "Check wallet configuration"],
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
-            
+
             McpServerError::UnknownTool(tool_name) => Some(serde_json::json!({
                 "tool_name": tool_name,
                 "category": "tool",
@@ -778,7 +789,7 @@ impl McpServerError {
                 "recovery_suggestions": ["Check available tools list", "Verify tool name spelling"],
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
-            
+
             McpServerError::UnknownResource(uri) => Some(serde_json::json!({
                 "resource_uri": uri,
                 "category": "resource",
@@ -786,11 +797,11 @@ impl McpServerError {
                 "recovery_suggestions": ["Check available resources list", "Verify resource URI format"],
                 "timestamp": chrono::Utc::now().to_rfc3339()
             })),
-            
-            _ => None
+
+            _ => None,
         }
     }
-    
+
     /// Get recovery suggestions based on SDK error type
     fn get_recovery_suggestions(sdk_error: &SdkError) -> Vec<&'static str> {
         match sdk_error {
@@ -798,68 +809,68 @@ impl McpServerError {
                 "Check network connectivity",
                 "Verify RPC endpoint configuration",
                 "Try alternative RPC endpoints",
-                "Check if blockchain network is operational"
+                "Check if blockchain network is operational",
             ],
             SdkError::TxBroadcast(_) | SdkError::TxSimulation(_) | SdkError::Tx(_) => vec![
                 "Check transaction parameters",
                 "Verify wallet has sufficient balance for gas fees",
                 "Try with higher gas limit",
-                "Check network congestion status"
+                "Check network congestion status",
             ],
             SdkError::Wallet(_) => vec![
                 "Verify wallet is properly configured",
                 "Check wallet balance",
                 "Validate wallet address format",
-                "Regenerate or re-import wallet if corrupted"
+                "Regenerate or re-import wallet if corrupted",
             ],
             SdkError::Config(_) => vec![
                 "Check configuration file syntax",
                 "Verify network configuration parameters",
-                "Reset to default configuration if needed"
+                "Reset to default configuration if needed",
             ],
             SdkError::Contract(_) => vec![
                 "Verify contract addresses are correct",
                 "Check contract is deployed on current network",
                 "Validate method parameters",
-                "Check contract state and availability"
+                "Check contract state and availability",
             ],
             SdkError::FeeValidation(_) => vec![
                 "Review fee structure parameters",
                 "Ensure total fees don't exceed 20% limit",
                 "Validate individual fee components",
-                "Use default fee structure if unsure"
+                "Use default fee structure if unsure",
             ],
             SdkError::Network(_) => vec![
                 "Check internet connectivity",
                 "Verify firewall settings",
                 "Try different network configuration",
-                "Check DNS resolution"
+                "Check DNS resolution",
             ],
             SdkError::Timeout(_) => vec![
                 "Increase timeout duration",
                 "Check network latency",
                 "Retry with exponential backoff",
-                "Switch to faster RPC endpoint"
+                "Switch to faster RPC endpoint",
             ],
             SdkError::Serialization(_) => vec![
                 "Check data format and structure",
                 "Validate JSON syntax",
-                "Ensure all required fields are present"
+                "Ensure all required fields are present",
             ],
             SdkError::Io(_) => vec![
                 "Check file permissions",
                 "Verify file paths are accessible",
                 "Ensure sufficient disk space",
-                "Check directory structure"
+                "Check directory structure",
             ],
             SdkError::Other(_) => vec![
                 "Check application logs for details",
                 "Retry the operation",
-                "Contact support if issue persists"
+                "Contact support if issue persists",
             ],
         }
     }
-    
+
     /// Get error severity level for monitoring and alerting
     fn get_error_severity(sdk_error: &SdkError) -> &'static str {
         match sdk_error {
@@ -876,12 +887,12 @@ impl McpServerError {
             SdkError::Other(_) => "medium",
         }
     }
-    
+
     /// Get SDK error type name for debugging and categorization
     fn get_sdk_error_type_name(sdk_error: &SdkError) -> &'static str {
         match sdk_error {
             SdkError::CosmRs(_) => "CosmRs",
-            SdkError::Rpc(_) => "Rpc", 
+            SdkError::Rpc(_) => "Rpc",
             SdkError::TxBroadcast(_) => "TxBroadcast",
             SdkError::TxSimulation(_) => "TxSimulation",
             SdkError::Wallet(_) => "Wallet",
@@ -896,7 +907,7 @@ impl McpServerError {
             SdkError::Timeout(_) => "Timeout",
         }
     }
-    
+
     /// Create a JSON-RPC error object from this MCP error
     pub fn to_json_rpc_error(&self) -> JsonRpcError {
         JsonRpcError {
@@ -905,7 +916,7 @@ impl McpServerError {
             data: self.get_error_data(),
         }
     }
-    
+
     /// Check if error is recoverable and suggests retry strategy
     pub fn is_recoverable(&self) -> bool {
         match self {
@@ -918,7 +929,7 @@ impl McpServerError {
             _ => false,
         }
     }
-    
+
     /// Get suggested retry delay in seconds for recoverable errors
     pub fn get_retry_delay(&self) -> Option<u64> {
         if self.is_recoverable() {
@@ -940,7 +951,7 @@ impl McpServerError {
 pub type McpResult<T> = std::result::Result<T, McpServerError>;
 
 /// Mantra DEX MCP Server configuration
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
     /// Server name
     pub name: String,
@@ -1172,6 +1183,353 @@ impl McpServerConfig {
         config.validate()?;
         Ok(config)
     }
+
+    /// Load configuration from a file (TOML or JSON)
+    ///
+    /// Supports the following formats based on file extension:
+    /// - `.toml` - TOML format
+    /// - `.json` - JSON format
+    /// - `.yaml`, `.yml` - YAML format
+    ///
+    /// The configuration file can contain any subset of configuration options.
+    /// Missing options will use default values or environment variable overrides.
+    pub fn from_file<P: AsRef<Path>>(file_path: P) -> McpResult<Self> {
+        let path = file_path.as_ref();
+
+        if !path.exists() {
+            return Err(McpServerError::Validation(format!(
+                "Configuration file not found: {}",
+                path.display()
+            )));
+        }
+
+        let file_format = Self::detect_file_format(path)?;
+        info!(
+            "Loading MCP configuration from: {} ({:?})",
+            path.display(),
+            file_format
+        );
+
+        let config_builder = Config::builder()
+            // Start with defaults
+            .set_default("name", "Mantra DEX SDK MCP Server")?
+            .set_default("version", "0.1.0")?
+            .set_default("debug", false)?
+            .set_default("max_concurrent_ops", 10)?
+            .set_default("http_port", 8080)?
+            .set_default("http_host", "127.0.0.1")?
+            .set_default("request_timeout_secs", 30)?
+            .set_default("cache_ttl_secs", 300)?
+            .set_default("auto_load_env", true)?
+            // Add file source
+            .add_source(File::new(path.to_str().unwrap(), file_format))
+            // Add environment variable overrides with MCP_ prefix
+            .add_source(Environment::with_prefix("MCP").separator("_"));
+
+        let settings = config_builder.build().map_err(|e| {
+            McpServerError::Validation(format!("Failed to load configuration: {}", e))
+        })?;
+
+        // Get network name before deserializing (since try_deserialize consumes settings)
+        let network_name = settings
+            .get_string("network")
+            .ok()
+            .or_else(|| env::var("MANTRA_NETWORK").ok());
+
+        // Deserialize into our config struct with custom field handling
+        let mut config: McpServerConfig = settings.try_deserialize().map_err(|e| {
+            McpServerError::Validation(format!("Failed to parse configuration: {}", e))
+        })?;
+
+        // Load network configuration if specified
+        if let Some(network_name) = network_name {
+            Self::apply_network_config(&mut config, &network_name)?;
+        }
+
+        // Validate the configuration
+        config.validate()?;
+
+        info!(
+            "MCP Server configuration successfully loaded from file: {}",
+            path.display()
+        );
+        debug!("Loaded config: {:?}", config);
+
+        Ok(config)
+    }
+
+    /// Save configuration to a file (TOML or JSON)
+    ///
+    /// The format is determined by the file extension:
+    /// - `.toml` - TOML format
+    /// - `.json` - JSON format
+    pub fn save_to_file<P: AsRef<Path>>(&self, file_path: P) -> McpResult<()> {
+        let path = file_path.as_ref();
+        let file_format = Self::detect_file_format(path)?;
+
+        let content = match file_format {
+            FileFormat::Toml => toml::to_string_pretty(self).map_err(|e| {
+                McpServerError::Internal(format!("TOML serialization failed: {}", e))
+            })?,
+            FileFormat::Json => {
+                serde_json::to_string_pretty(self).map_err(McpServerError::Serialization)?
+            }
+            _ => {
+                return Err(McpServerError::Validation(format!(
+                    "Unsupported file format for saving: {}. Use .toml or .json",
+                    path.display()
+                )));
+            }
+        };
+
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                McpServerError::Internal(format!(
+                    "Failed to create directory {}: {}",
+                    parent.display(),
+                    e
+                ))
+            })?;
+        }
+
+        fs::write(path, content).map_err(|e| {
+            McpServerError::Internal(format!(
+                "Failed to write configuration to {}: {}",
+                path.display(),
+                e
+            ))
+        })?;
+
+        info!("Configuration saved to: {}", path.display());
+        Ok(())
+    }
+
+    /// Load configuration with layered sources: defaults -> file -> env vars
+    ///
+    /// This method provides the most flexible configuration loading:
+    /// 1. Start with built-in defaults
+    /// 2. Override with values from configuration file (if provided)
+    /// 3. Override with environment variables (MCP_ prefix)
+    /// 4. Apply network-specific settings
+    pub fn from_sources(config_file: Option<&Path>) -> McpResult<Self> {
+        info!("Loading MCP configuration with layered sources");
+
+        let mut config_builder = Config::builder()
+            // Start with defaults
+            .set_default("name", "Mantra DEX SDK MCP Server")?
+            .set_default("version", "0.1.0")?
+            .set_default("debug", false)?
+            .set_default("max_concurrent_ops", 10)?
+            .set_default("http_port", 8080)?
+            .set_default("http_host", "127.0.0.1")?
+            .set_default("request_timeout_secs", 30)?
+            .set_default("cache_ttl_secs", 300)?
+            .set_default("auto_load_env", true)?;
+
+        // Add file source if provided
+        if let Some(path) = config_file {
+            if path.exists() {
+                let file_format = Self::detect_file_format(path)?;
+                config_builder =
+                    config_builder.add_source(File::new(path.to_str().unwrap(), file_format));
+                info!(
+                    "Added configuration file: {} ({:?})",
+                    path.display(),
+                    file_format
+                );
+            } else {
+                warn!("Configuration file not found: {}", path.display());
+            }
+        }
+
+        // Add environment variable overrides
+        config_builder = config_builder.add_source(Environment::with_prefix("MCP").separator("_"));
+
+        let settings = config_builder.build().map_err(|e| {
+            McpServerError::Validation(format!("Failed to build configuration: {}", e))
+        })?;
+
+        // Get network name before deserializing (since try_deserialize consumes settings)
+        let network_name = settings
+            .get_string("network")
+            .ok()
+            .or_else(|| env::var("MANTRA_NETWORK").ok());
+
+        // Deserialize into our config struct
+        let mut config: McpServerConfig = settings.try_deserialize().map_err(|e| {
+            McpServerError::Validation(format!("Failed to parse configuration: {}", e))
+        })?;
+
+        // Apply network configuration
+        if let Some(network_name) = network_name {
+            Self::apply_network_config(&mut config, &network_name)?;
+        }
+
+        // Validate the final configuration
+        config.validate()?;
+
+        info!("MCP Server configuration successfully loaded from layered sources");
+        debug!("Final config: {:?}", config);
+
+        Ok(config)
+    }
+
+    /// Generate an example configuration file
+    pub fn generate_example_config() -> String {
+        let example_config = Self::default();
+
+        format!(
+            r#"# Mantra DEX SDK MCP Server Configuration
+# This is an example configuration file showing all available options.
+# You can copy this file and modify the values as needed.
+
+# Server identification
+name = "{}"
+version = "{}"
+
+# Network configuration (will be overridden if MANTRA_NETWORK env var is set)
+# Supported values: "mainnet", "testnet", "mantra-dukong", "mantra-testnet"
+network = "testnet"
+
+# Logging configuration
+debug = {}
+
+# Performance settings
+max_concurrent_ops = {}
+request_timeout_secs = {}
+cache_ttl_secs = {}
+
+# HTTP transport settings (used when running with --transport http)
+http_host = "{}"
+http_port = {}
+
+# Environment file loading
+auto_load_env = {}
+
+# Async runtime configuration
+[runtime_config]
+# Runtime flavor: "CurrentThread" or "MultiThread"
+flavor = "MultiThread"
+# Number of worker threads (optional, defaults to CPU count)
+# worker_threads = 4
+# Enable I/O and time support
+enable_io = true
+enable_time = true
+# Maximum blocking threads for blocking operations
+max_blocking_threads = 512
+# Thread keep alive duration in seconds
+thread_keep_alive = 10
+
+# Examples of network-specific overrides:
+# [network_config]
+# rpc_endpoint = "https://rpc.mantra.com"
+# chain_id = "mantra-dukong"
+# gas_price = "0.01uom"
+"#,
+            example_config.name,
+            example_config.version,
+            example_config.debug,
+            example_config.max_concurrent_ops,
+            example_config.request_timeout_secs,
+            example_config.cache_ttl_secs,
+            example_config.http_host,
+            example_config.http_port,
+            example_config.auto_load_env
+        )
+    }
+
+    /// Create example configuration files in common formats
+    pub fn create_example_files(directory: &Path) -> McpResult<()> {
+        fs::create_dir_all(directory).map_err(|e| {
+            McpServerError::Internal(format!(
+                "Failed to create directory {}: {}",
+                directory.display(),
+                e
+            ))
+        })?;
+
+        // Create TOML example
+        let toml_path = directory.join("mcp-server.example.toml");
+        let toml_content = Self::generate_example_config();
+        fs::write(&toml_path, toml_content).map_err(|e| {
+            McpServerError::Internal(format!(
+                "Failed to write TOML example to {}: {}",
+                toml_path.display(),
+                e
+            ))
+        })?;
+
+        // Create JSON example
+        let json_path = directory.join("mcp-server.example.json");
+        let example_config = Self::default();
+        let json_content =
+            serde_json::to_string_pretty(&example_config).map_err(McpServerError::Serialization)?;
+        fs::write(&json_path, json_content).map_err(|e| {
+            McpServerError::Internal(format!(
+                "Failed to write JSON example to {}: {}",
+                json_path.display(),
+                e
+            ))
+        })?;
+
+        info!(
+            "Created example configuration files in: {}",
+            directory.display()
+        );
+        info!("  - {}", toml_path.display());
+        info!("  - {}", json_path.display());
+
+        Ok(())
+    }
+
+    /// Detect file format based on file extension
+    fn detect_file_format(path: &Path) -> McpResult<FileFormat> {
+        let extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        match extension.as_str() {
+            "toml" => Ok(FileFormat::Toml),
+            "json" => Ok(FileFormat::Json),
+            "yaml" | "yml" => Ok(FileFormat::Yaml),
+            _ => Err(McpServerError::Validation(format!(
+                "Unsupported configuration file format: {}. Supported formats: .toml, .json, .yaml, .yml",
+                extension
+            ))),
+        }
+    }
+
+    /// Apply network-specific configuration
+    fn apply_network_config(config: &mut McpServerConfig, network_name: &str) -> McpResult<()> {
+        match network_name {
+            "mainnet" | "mantra-dukong" => {
+                if let Ok(constants) = NetworkConstants::load("mantra-dukong") {
+                    config.network_config = MantraNetworkConfig::from_constants(&constants);
+                    info!("Applied mainnet network configuration");
+                } else {
+                    warn!("Could not load mainnet constants, using default");
+                }
+            }
+            "testnet" | "mantra-testnet" => {
+                if let Ok(constants) = NetworkConstants::load("mantra-testnet") {
+                    config.network_config = MantraNetworkConfig::from_constants(&constants);
+                    info!("Applied testnet network configuration");
+                } else {
+                    warn!("Could not load testnet constants, using default");
+                }
+            }
+            _ => {
+                return Err(McpServerError::Validation(format!(
+                    "Unknown network: {}. Supported networks: mainnet, testnet, mantra-dukong, mantra-testnet",
+                    network_name
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Mantra DEX MCP Server state
@@ -1192,6 +1550,8 @@ pub struct McpServerStateData {
     pub client_wrapper: Arc<Mutex<Option<McpClientWrapper>>>,
     /// Async runtime manager
     pub runtime_manager: Arc<AsyncRuntimeManager>,
+    /// Logging infrastructure
+    pub logger: Arc<McpLogger>,
 }
 
 impl McpServerStateData {
@@ -1200,6 +1560,10 @@ impl McpServerStateData {
         let mut runtime_manager = AsyncRuntimeManager::new(config.runtime_config.clone());
         runtime_manager.handle = Some(tokio::runtime::Handle::current());
         let runtime_manager = Arc::new(runtime_manager);
+
+        // Initialize logging infrastructure
+        let logging_config = LoggingConfig::from_env();
+        let logger = Arc::new(McpLogger::new(logging_config).expect("Failed to create MCP logger"));
 
         Self {
             client: Arc::new(Mutex::new(None)),
@@ -1210,6 +1574,7 @@ impl McpServerStateData {
             sdk_adapter,
             client_wrapper: Arc::new(Mutex::new(None)),
             runtime_manager,
+            logger,
         }
     }
 
@@ -1488,15 +1853,60 @@ impl MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
+                "name": "get_pool",
+                "description": "Get detailed information about a specific liquidity pool",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "pool_id": {
+                            "type": "string",
+                            "description": "The identifier of the pool to query"
+                        }
+                    },
+                    "required": ["pool_id"]
+                }
+            }),
+            serde_json::json!({
                 "name": "get_pools",
-                "description": "List all available liquidity pools",
+                "description": "List liquidity pools with filtering and pagination options",
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "limit": {
                             "type": "integer",
-                            "description": "Maximum number of pools to return",
-                            "default": 50
+                            "description": "Maximum number of pools to return (1-100)",
+                            "minimum": 1,
+                            "maximum": 100,
+                            "default": 20
+                        },
+                        "offset": {
+                            "type": "integer",
+                            "description": "Number of pools to skip for pagination",
+                            "minimum": 0,
+                            "default": 0
+                        },
+                        "status_filter": {
+                            "type": "string",
+                            "description": "Filter pools by operational status",
+                            "enum": ["all", "active", "inactive", "swaps_enabled", "deposits_enabled"],
+                            "default": "all"
+                        },
+                        "sort_by": {
+                            "type": "string",
+                            "description": "Sort pools by specified criteria",
+                            "enum": ["pool_id", "tvl", "total_share", "created_at"],
+                            "default": "pool_id"
+                        },
+                        "sort_order": {
+                            "type": "string",
+                            "description": "Sort order for results",
+                            "enum": ["asc", "desc"],
+                            "default": "asc"
+                        },
+                        "include_details": {
+                            "type": "boolean",
+                            "description": "Include detailed pool information (assets, fees, etc.)",
+                            "default": false
                         }
                     }
                 }
@@ -1557,6 +1967,14 @@ impl MantraDexMcpServer {
                     "required": ["pool_id", "offer_asset", "ask_asset_denom"]
                 }
             }),
+            serde_json::json!({
+                "name": "get_network_status",
+                "description": "Get current network status including connectivity and block height",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }),
         ]
     }
 
@@ -1579,6 +1997,12 @@ impl MantraDexMcpServer {
                 "uri": "pools://list",
                 "name": "Pool List",
                 "description": "List of all available liquidity pools",
+                "mime_type": "application/json"
+            }),
+            serde_json::json!({
+                "uri": "pools://details/{id}",
+                "name": "Pool Details",
+                "description": "Detailed information about a specific pool by ID",
                 "mime_type": "application/json"
             }),
             serde_json::json!({
@@ -1635,6 +2059,12 @@ impl MantraDexMcpServer {
                 "description": "Current blockchain network status including connectivity, block height, and sync status",
                 "mime_type": "application/json"
             }),
+            serde_json::json!({
+                "uri": "contracts://addresses",
+                "name": "Contract Addresses",
+                "description": "Smart contract addresses for the current network including pool manager and fee collector",
+                "mime_type": "application/json"
+            }),
         ]
     }
 
@@ -1652,9 +2082,11 @@ impl MantraDexMcpServer {
             "switch_wallet" => self.handle_switch_wallet(arguments).await,
             "validate_wallet" => self.handle_validate_wallet(arguments).await,
             "switch_network" => self.handle_switch_network(arguments).await,
+            "get_pool" => self.handle_get_pool(arguments).await,
             "get_pools" => self.handle_get_pools(arguments).await,
             "simulate_swap" => self.handle_simulate_swap(arguments).await,
             "execute_swap" => self.handle_execute_swap(arguments).await,
+            "get_network_status" => self.handle_get_network_status(arguments).await,
             _ => Err(McpServerError::UnknownTool(tool_name.to_string())),
         }
     }
@@ -1672,7 +2104,12 @@ impl MantraDexMcpServer {
             "network://config" => self.read_network_config().await,
             "network://switch" => self.read_network_switch().await,
             "network://status" => self.read_network_status().await,
+            "contracts://addresses" => self.read_contracts_addresses().await,
             "pools://list" => self.read_pools_list().await,
+            _ if uri.starts_with("pools://details/") => {
+                let pool_id = uri.strip_prefix("pools://details/").unwrap_or("");
+                self.read_pool_details(pool_id).await
+            }
             "wallet://balance" => self.read_wallet_balance().await,
             _ => Err(McpServerError::UnknownResource(uri.to_string())),
         }
@@ -1974,16 +2411,320 @@ impl MantraDexMcpServer {
         }))
     }
 
-    /// Get pools
-    async fn handle_get_pools(
-        &self,
-        _arguments: serde_json::Value,
-    ) -> McpResult<serde_json::Value> {
-        // TODO: Implement actual pool querying with DEX client
-        Ok(serde_json::json!({
-            "pools": [],
-            "note": "Pool querying not yet implemented - requires blockchain connection"
-        }))
+    /// Get single pool by ID
+    async fn handle_get_pool(&self, arguments: serde_json::Value) -> McpResult<serde_json::Value> {
+        // Extract pool_id from arguments and convert to owned String
+        let pool_id = arguments
+            .get("pool_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("Missing or invalid pool_id parameter".to_string())
+            })?
+            .to_string();
+
+        // Get client through SDK adapter with retry logic
+        let state = &self.state;
+        let network_config = state.config.network_config.clone();
+        let adapter = state.sdk_adapter.clone();
+
+        let pool_id_for_error = pool_id.clone();
+
+        // Use direct async block to avoid complex borrowing issues
+        let result = async {
+            let client = adapter
+                .get_client(&network_config)
+                .await
+                .map_err(|e| McpServerError::Network(format!("Failed to get client: {}", e)))?;
+
+            client
+                .get_pool(&pool_id)
+                .await
+                .map_err(|e| McpServerError::Mcp(format!("Failed to get pool {}: {}", pool_id, e)))
+        }
+        .await;
+
+        match result {
+            Ok(pool_info) => {
+                // Convert pool info to JSON response
+                let pool_status = pool_info.pool_info.status;
+                let assets: Vec<serde_json::Value> = pool_info
+                    .pool_info
+                    .assets
+                    .iter()
+                    .map(|asset| {
+                        serde_json::json!({
+                            "denom": asset.denom,
+                            "amount": asset.amount.to_string()
+                        })
+                    })
+                    .collect();
+
+                Ok(serde_json::json!({
+                    "pool_id": pool_info.pool_info.pool_identifier,
+                    "lp_denom": pool_info.pool_info.lp_denom,
+                    "pool_type": format!("{:?}", pool_info.pool_info.pool_type),
+                    "assets": assets,
+                    "total_share": {
+                        "denom": pool_info.total_share.denom,
+                        "amount": pool_info.total_share.amount.to_string()
+                    },
+                    "status": {
+                        "swaps_enabled": pool_status.swaps_enabled,
+                        "deposits_enabled": pool_status.deposits_enabled,
+                        "withdrawals_enabled": pool_status.withdrawals_enabled
+                    },
+                    "fees": pool_info.pool_info.pool_fees,
+                    "success": true
+                }))
+            }
+            Err(e) => {
+                // Return error information but don't fail completely
+                Ok(serde_json::json!({
+                    "pool_id": pool_id_for_error,
+                    "success": false,
+                    "error": format!("Failed to retrieve pool: {}", e),
+                    "note": "Pool may not exist or network connection failed"
+                }))
+            }
+        }
+    }
+
+    /// Get pools with filtering and pagination
+    async fn handle_get_pools(&self, arguments: serde_json::Value) -> McpResult<serde_json::Value> {
+        // Parse arguments with defaults
+        let limit = arguments
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(100)
+            .max(1) as usize;
+
+        let offset = arguments
+            .get("offset")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        let status_filter = arguments
+            .get("status_filter")
+            .and_then(|v| v.as_str())
+            .unwrap_or("all");
+
+        let sort_by = arguments
+            .get("sort_by")
+            .and_then(|v| v.as_str())
+            .unwrap_or("pool_id");
+
+        let sort_order = arguments
+            .get("sort_order")
+            .and_then(|v| v.as_str())
+            .unwrap_or("asc");
+
+        let include_details = arguments
+            .get("include_details")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Get client through SDK adapter
+        let state = &self.state;
+        let network_config = state.config.network_config.clone();
+        let adapter = state.sdk_adapter.clone();
+
+        // Use direct async block to avoid complex borrowing issues
+        let result = async {
+            let client = adapter
+                .get_client(&network_config)
+                .await
+                .map_err(|e| McpServerError::Network(format!("Failed to get client: {}", e)))?;
+
+            client
+                .get_pools(Some(1000)) // Request up to 1000 pools
+                .await
+                .map_err(|e| McpServerError::Mcp(format!("Failed to get pools: {}", e)))
+        }
+        .await;
+
+        match result {
+            Ok(pools_info) => {
+                // Transform pools to MCP-friendly format with filtering and sorting
+                let mut pools: Vec<serde_json::Value> = pools_info
+                    .into_iter()
+                    .map(|pool| {
+                        let pool_status = &pool.pool_info.status;
+                        let mut pool_json = serde_json::json!({
+                            "pool_id": pool.pool_info.pool_identifier,
+                            "pool_type": format!("{:?}", pool.pool_info.pool_type),
+                            "lp_denom": pool.pool_info.lp_denom,
+                            "pool_status": {
+                                "swaps_enabled": pool_status.swaps_enabled,
+                                "deposits_enabled": pool_status.deposits_enabled,
+                                "withdrawals_enabled": pool_status.withdrawals_enabled
+                            },
+                            "operational_status": {
+                                "is_active": pool_status.swaps_enabled || pool_status.deposits_enabled,
+                                "has_swaps": pool_status.swaps_enabled,
+                                "has_deposits": pool_status.deposits_enabled,
+                                "has_withdrawals": pool_status.withdrawals_enabled
+                            }
+                        });
+
+                        // Add basic asset information
+                        if !pool.pool_info.assets.is_empty() {
+                            pool_json["asset_count"] = serde_json::json!(pool.pool_info.assets.len());
+                            pool_json["primary_assets"] = serde_json::json!(
+                                pool.pool_info.assets.iter()
+                                    .take(2)
+                                    .map(|asset| asset.denom.clone())
+                                    .collect::<Vec<_>>()
+                            );
+                        }
+
+                        // Add detailed information if requested
+                        if include_details {
+                            pool_json["assets"] = serde_json::json!(
+                                pool.pool_info.assets.iter().map(|asset| {
+                                    serde_json::json!({
+                                        "denom": asset.denom,
+                                        "amount": asset.amount.to_string()
+                                    })
+                                }).collect::<Vec<_>>()
+                            );
+
+                            pool_json["total_share"] = serde_json::json!({
+                                "denom": pool.total_share.denom,
+                                "amount": pool.total_share.amount.to_string()
+                            });
+
+                            pool_json["pool_fees"] = serde_json::to_value(&pool.pool_info.pool_fees).unwrap_or(serde_json::json!(null));
+                        }
+
+                        // Add estimated TVL (sum of asset amounts - simplified calculation)
+                        let estimated_tvl: u128 = pool.pool_info.assets.iter()
+                            .map(|asset| asset.amount.u128())
+                            .sum();
+                        pool_json["estimated_tvl"] = serde_json::json!(estimated_tvl.to_string());
+
+                        pool_json
+                    })
+                    .collect();
+
+                // Apply status filter
+                pools.retain(|pool| match status_filter {
+                    "all" => true,
+                    "active" => pool["operational_status"]["is_active"]
+                        .as_bool()
+                        .unwrap_or(false),
+                    "inactive" => !pool["operational_status"]["is_active"]
+                        .as_bool()
+                        .unwrap_or(true),
+                    "swaps_enabled" => pool["pool_status"]["swaps_enabled"]
+                        .as_bool()
+                        .unwrap_or(false),
+                    "deposits_enabled" => pool["pool_status"]["deposits_enabled"]
+                        .as_bool()
+                        .unwrap_or(false),
+                    _ => true,
+                });
+
+                // Apply sorting
+                pools.sort_by(|a, b| {
+                    let comparison = match sort_by {
+                        "pool_id" => {
+                            let id_a = a["pool_id"].as_str().unwrap_or("0");
+                            let id_b = b["pool_id"].as_str().unwrap_or("0");
+                            id_a.cmp(id_b)
+                        }
+                        "tvl" => {
+                            let tvl_a: u128 = a["estimated_tvl"]
+                                .as_str()
+                                .unwrap_or("0")
+                                .parse()
+                                .unwrap_or(0);
+                            let tvl_b: u128 = b["estimated_tvl"]
+                                .as_str()
+                                .unwrap_or("0")
+                                .parse()
+                                .unwrap_or(0);
+                            tvl_a.cmp(&tvl_b)
+                        }
+                        "total_share" => {
+                            let share_a: u128 = a
+                                .get("total_share")
+                                .and_then(|s| s.get("amount"))
+                                .and_then(|a| a.as_str())
+                                .unwrap_or("0")
+                                .parse()
+                                .unwrap_or(0);
+                            let share_b: u128 = b
+                                .get("total_share")
+                                .and_then(|s| s.get("amount"))
+                                .and_then(|a| a.as_str())
+                                .unwrap_or("0")
+                                .parse()
+                                .unwrap_or(0);
+                            share_a.cmp(&share_b)
+                        }
+                        _ => std::cmp::Ordering::Equal,
+                    };
+
+                    if sort_order == "desc" {
+                        comparison.reverse()
+                    } else {
+                        comparison
+                    }
+                });
+
+                // Apply pagination
+                let total_count = pools.len();
+                let paginated_pools: Vec<serde_json::Value> =
+                    pools.into_iter().skip(offset).take(limit).collect();
+
+                // Prepare response with metadata
+                Ok(serde_json::json!({
+                    "pools": paginated_pools,
+                    "pagination": {
+                        "limit": limit,
+                        "offset": offset,
+                        "total_count": total_count,
+                        "returned_count": paginated_pools.len(),
+                        "has_more": offset + paginated_pools.len() < total_count
+                    },
+                    "filters_applied": {
+                        "status_filter": status_filter,
+                        "sort_by": sort_by,
+                        "sort_order": sort_order,
+                        "include_details": include_details
+                    },
+                    "network_info": {
+                        "network_id": network_config.network_id,
+                        "network_name": network_config.network_name
+                    },
+                    "retrieved_at": chrono::Utc::now().to_rfc3339()
+                }))
+            }
+            Err(e) => Ok(serde_json::json!({
+                "pools": [],
+                "error": format!("Failed to retrieve pools: {}", e),
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "total_count": 0,
+                    "returned_count": 0,
+                    "has_more": false
+                },
+                "filters_applied": {
+                    "status_filter": status_filter,
+                    "sort_by": sort_by,
+                    "sort_order": sort_order,
+                    "include_details": include_details
+                },
+                "network_info": {
+                    "network_id": network_config.network_id,
+                    "network_name": network_config.network_name
+                },
+                "retrieved_at": chrono::Utc::now().to_rfc3339(),
+                "note": "Pool querying failed - check network connection and configuration"
+            })),
+        }
     }
 
     /// Simulate swap
@@ -2094,7 +2835,7 @@ impl MantraDexMcpServer {
     async fn read_network_status(&self) -> McpResult<serde_json::Value> {
         // Get network configuration
         let config = &self.state.config.network_config;
-        
+
         // Try to get real-time network status from client wrapper
         let client_wrapper_guard = self.state.client_wrapper.lock().await;
         let network_status = if let Some(wrapper) = client_wrapper_guard.as_ref() {
@@ -2125,22 +2866,286 @@ impl MantraDexMcpServer {
 
         // Enhance the network status with additional configuration details
         let mut enhanced_status = network_status.as_object().unwrap().clone();
-        enhanced_status.insert("network_name".to_string(), serde_json::Value::String(config.network_name.clone()));
-        enhanced_status.insert("gas_price".to_string(), serde_json::Value::String(config.gas_price.to_string()));
-        enhanced_status.insert("gas_adjustment".to_string(), serde_json::json!(config.gas_adjustment));
-        enhanced_status.insert("native_denom".to_string(), serde_json::Value::String(config.native_denom.clone()));
-        enhanced_status.insert("timestamp".to_string(), serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
+        enhanced_status.insert(
+            "network_name".to_string(),
+            serde_json::Value::String(config.network_name.clone()),
+        );
+        enhanced_status.insert(
+            "gas_price".to_string(),
+            serde_json::Value::String(config.gas_price.to_string()),
+        );
+        enhanced_status.insert(
+            "gas_adjustment".to_string(),
+            serde_json::json!(config.gas_adjustment),
+        );
+        enhanced_status.insert(
+            "native_denom".to_string(),
+            serde_json::Value::String(config.native_denom.clone()),
+        );
+        enhanced_status.insert(
+            "timestamp".to_string(),
+            serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+        );
 
         Ok(serde_json::Value::Object(enhanced_status))
     }
 
+    /// Read contract addresses resource - provides smart contract addresses for the current network
+    async fn read_contracts_addresses(&self) -> McpResult<serde_json::Value> {
+        debug!("Reading contract addresses for current network");
+
+        // Check if we have a client wrapper initialized
+        let wrapper_guard = self.state.client_wrapper.lock().await;
+        if let Some(wrapper) = wrapper_guard.as_ref() {
+            match wrapper.get_contract_addresses().await {
+                Ok(contract_data) => {
+                    // Enhance the contract data with additional metadata
+                    let mut enhanced_response = serde_json::Map::new();
+                    enhanced_response.insert(
+                        "resource_type".to_string(),
+                        serde_json::Value::String("contract_addresses".to_string()),
+                    );
+                    enhanced_response.insert(
+                        "description".to_string(),
+                        serde_json::Value::String(
+                            "Smart contract addresses for the Mantra DEX on the current network"
+                                .to_string(),
+                        ),
+                    );
+
+                    // Include the contract data from the wrapper
+                    if let Some(network) = contract_data.get("network") {
+                        enhanced_response.insert("network".to_string(), network.clone());
+                    }
+                    if let Some(contracts) = contract_data.get("contracts") {
+                        enhanced_response.insert("contracts".to_string(), contracts.clone());
+                    }
+                    if let Some(rpc_url) = contract_data.get("rpc_url") {
+                        enhanced_response.insert("rpc_url".to_string(), rpc_url.clone());
+                    }
+
+                    // Add metadata
+                    enhanced_response.insert(
+                        "contract_types".to_string(),
+                        serde_json::json!({
+                            "pool_manager": "Core DEX pool management and operations",
+                            "fee_collector": "Fee collection and distribution"
+                        }),
+                    );
+                    enhanced_response.insert(
+                        "usage_info".to_string(),
+                        serde_json::json!({
+                            "note": "These addresses are required for direct smart contract interaction",
+                            "pool_manager_functions": ["query_pools", "simulate_swap", "execute_swap"],
+                            "fee_collector_functions": ["query_fees", "collect_fees"]
+                        }),
+                    );
+                    enhanced_response.insert(
+                        "retrieved_at".to_string(),
+                        serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+                    );
+
+                    Ok(serde_json::Value::Object(enhanced_response))
+                }
+                Err(e) => {
+                    // Return error information
+                    Ok(serde_json::json!({
+                        "resource_type": "contract_addresses",
+                        "error": format!("Failed to retrieve contract addresses: {}", e),
+                        "network": self.state.config.network_config.network_id,
+                        "available": false,
+                        "note": "Contract addresses may not be configured for this network",
+                        "retrieved_at": chrono::Utc::now().to_rfc3339(),
+                        "fallback_info": {
+                            "pool_manager": self.state.config.network_config.contracts.pool_manager,
+                            "fee_collector": self.state.config.network_config.contracts.fee_collector
+                        }
+                    }))
+                }
+            }
+        } else {
+            // Fallback to configuration data if wrapper not initialized
+            warn!("Client wrapper not initialized, using configuration fallback");
+            Ok(serde_json::json!({
+                "resource_type": "contract_addresses",
+                "network": self.state.config.network_config.network_id,
+                "contracts": {
+                    "pool_manager": self.state.config.network_config.contracts.pool_manager,
+                    "fee_collector": self.state.config.network_config.contracts.fee_collector
+                },
+                "contract_types": {
+                    "pool_manager": "Core DEX pool management and operations",
+                    "fee_collector": "Fee collection and distribution"
+                },
+                "note": "Using configuration fallback - client wrapper not initialized",
+                "retrieved_at": chrono::Utc::now().to_rfc3339()
+            }))
+        }
+    }
+
     /// Read pools list resource
     async fn read_pools_list(&self) -> McpResult<serde_json::Value> {
-        // TODO: Implement actual pool querying
-        Ok(serde_json::json!({
-            "pools": [],
-            "note": "Pool data not yet implemented - requires blockchain connection"
-        }))
+        // Use the get_pools tool implementation with default parameters
+        let default_args = serde_json::json!({
+            "limit": 50,
+            "offset": 0,
+            "status_filter": "all",
+            "sort_by": "pool_id",
+            "sort_order": "asc",
+            "include_details": true
+        });
+
+        // Delegate to the get_pools handler
+        let pools_result = self.handle_get_pools(default_args).await?;
+
+        // Transform the response for resource format
+        if let Some(pools) = pools_result.get("pools") {
+            let mut response = serde_json::json!({
+                "resource_type": "pools_list",
+                "pools": pools,
+                "description": "Complete list of available liquidity pools on Mantra DEX",
+                "usage": "This resource provides comprehensive pool information including assets, status, and TVL estimates"
+            });
+
+            // Copy pagination and metadata if available
+            if let Some(pagination) = pools_result.get("pagination") {
+                response["pagination"] = pagination.clone();
+            }
+            if let Some(network_info) = pools_result.get("network_info") {
+                response["network_info"] = network_info.clone();
+            }
+            if let Some(retrieved_at) = pools_result.get("retrieved_at") {
+                response["retrieved_at"] = retrieved_at.clone();
+            }
+
+            // Add resource-specific metadata
+            response["access_info"] = serde_json::json!({
+                "available_filters": ["all", "active", "inactive", "swaps_enabled", "deposits_enabled"],
+                "sort_options": ["pool_id", "tvl", "total_share", "created_at"],
+                "detail_levels": ["basic", "detailed"],
+                "pagination_support": true,
+                "related_tools": ["get_pools", "get_pool"],
+                "related_resources": ["pools://details/{id}"]
+            });
+
+            Ok(response)
+        } else {
+            // Handle error case
+            Ok(serde_json::json!({
+                "resource_type": "pools_list",
+                "pools": [],
+                "error": pools_result.get("error").unwrap_or(&serde_json::json!("Unknown error")),
+                "description": "Failed to retrieve pool information",
+                "network_info": pools_result.get("network_info"),
+                "retrieved_at": pools_result.get("retrieved_at"),
+                "troubleshooting": [
+                    "Check network connectivity",
+                    "Verify RPC endpoint configuration",
+                    "Ensure DEX contracts are deployed on current network"
+                ]
+            }))
+        }
+    }
+
+    /// Read pool details resource
+    async fn read_pool_details(&self, pool_id: &str) -> McpResult<serde_json::Value> {
+        if pool_id.is_empty() {
+            return Ok(serde_json::json!({
+                "error": "Pool ID is required",
+                "usage": "Use URI format: pools://details/{pool_id}",
+                "example": "pools://details/1"
+            }));
+        }
+
+        // Convert pool_id to owned String
+        let pool_id = pool_id.to_string();
+
+        // Get client through SDK adapter with retry logic
+        let state = &self.state;
+        let network_config = state.config.network_config.clone();
+        let adapter = state.sdk_adapter.clone();
+
+        let pool_id_for_error = pool_id.clone();
+
+        // Use direct async block to avoid complex borrowing issues
+        let result = async {
+            let client = adapter
+                .get_client(&network_config)
+                .await
+                .map_err(|e| McpServerError::Network(format!("Failed to get client: {}", e)))?;
+
+            client
+                .get_pool(&pool_id)
+                .await
+                .map_err(|e| McpServerError::Mcp(format!("Failed to get pool {}: {}", pool_id, e)))
+        }
+        .await;
+
+        match result {
+            Ok(pool_info) => {
+                // Convert pool info to detailed JSON response for resource
+                let pool_status = pool_info.pool_info.status;
+                let assets: Vec<serde_json::Value> = pool_info
+                    .pool_info
+                    .assets
+                    .iter()
+                    .map(|asset| {
+                        serde_json::json!({
+                            "denom": asset.denom,
+                            "amount": asset.amount.to_string(),
+                            "amount_raw": asset.amount.u128()
+                        })
+                    })
+                    .collect();
+
+                // Calculate total value locked (simplified)
+                let total_assets: u128 = pool_info
+                    .pool_info
+                    .assets
+                    .iter()
+                    .map(|asset| asset.amount.u128())
+                    .sum();
+
+                Ok(serde_json::json!({
+                    "resource_type": "pool_details",
+                    "pool_id": pool_info.pool_info.pool_identifier,
+                    "pool_type": format!("{:?}", pool_info.pool_info.pool_type),
+                    "lp_denom": pool_info.pool_info.lp_denom,
+                    "assets": assets,
+                    "asset_count": assets.len(),
+                    "total_share": {
+                        "denom": pool_info.total_share.denom,
+                        "amount": pool_info.total_share.amount.to_string(),
+                        "amount_raw": pool_info.total_share.amount.u128()
+                    },
+                    "status": {
+                        "swaps_enabled": pool_status.swaps_enabled,
+                        "deposits_enabled": pool_status.deposits_enabled,
+                        "withdrawals_enabled": pool_status.withdrawals_enabled,
+                        "operational_status": if pool_status.swaps_enabled && pool_status.deposits_enabled && pool_status.withdrawals_enabled {
+                            "fully_operational"
+                        } else if !pool_status.swaps_enabled && !pool_status.deposits_enabled && !pool_status.withdrawals_enabled {
+                            "disabled"
+                        } else {
+                            "partially_disabled"
+                        }
+                    },
+                    "fees": pool_info.pool_info.pool_fees,
+                    "tvl_estimate": total_assets.to_string(),
+                    "retrieved_at": chrono::Utc::now().to_rfc3339(),
+                    "network": state.config.network_config.network_id
+                }))
+            }
+            Err(e) => Ok(serde_json::json!({
+                "resource_type": "pool_details",
+                "pool_id": pool_id_for_error,
+                "error": format!("Failed to retrieve pool details: {}", e),
+                "available": false,
+                "note": "Pool may not exist or network connection failed",
+                "retrieved_at": chrono::Utc::now().to_rfc3339(),
+                "network": state.config.network_config.network_id
+            })),
+        }
     }
 
     /// Read wallet balance resource
@@ -2242,6 +3247,51 @@ impl MantraDexMcpServer {
                 "total_saved": 0
             }
         }))
+    }
+
+    /// Handle get network status
+    async fn handle_get_network_status(
+        &self,
+        _arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        debug!("Getting network status through MCP tool");
+
+        // Check if we have a client wrapper initialized
+        let wrapper_guard = self.state.client_wrapper.lock().await;
+        if let Some(wrapper) = wrapper_guard.as_ref() {
+            match wrapper.get_network_status().await {
+                Ok(network_status) => {
+                    info!("Network status retrieved successfully");
+                    Ok(serde_json::json!({
+                        "success": true,
+                        "network_status": network_status,
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    }))
+                }
+                Err(e) => {
+                    warn!("Failed to get network status: {}", e);
+                    Ok(serde_json::json!({
+                        "success": false,
+                        "error": format!("Failed to get network status: {}", e),
+                        "timestamp": chrono::Utc::now().to_rfc3339()
+                    }))
+                }
+            }
+        } else {
+            // Fallback to basic network info from config if wrapper not initialized
+            warn!("Client wrapper not initialized, falling back to basic network info");
+            Ok(serde_json::json!({
+                "success": false,
+                "network_status": {
+                    "network": self.state.config.network_config.network_id,
+                    "rpc_url": self.state.config.network_config.rpc_url,
+                    "status": "unknown",
+                    "block_height": null
+                },
+                "error": "Client wrapper not initialized - please ensure the server is properly initialized",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }))
+        }
     }
 }
 
@@ -3319,11 +4369,63 @@ mod tests {
 
         // The status should be either "connected", "disconnected", "error", or "not_initialized"
         let status = resource_data["status"].as_str().unwrap();
-        assert!(matches!(status, "connected" | "disconnected" | "error" | "not_initialized"));
+        assert!(matches!(
+            status,
+            "connected" | "disconnected" | "error" | "not_initialized"
+        ));
 
         // Verify timestamp is a valid RFC3339 string
         let timestamp_str = resource_data["timestamp"].as_str().unwrap();
         assert!(chrono::DateTime::parse_from_rfc3339(timestamp_str).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_contracts_addresses_resource() {
+        let config = McpServerConfig::default();
+        let server = create_mcp_server(config);
+
+        // Test that contracts://addresses resource is available
+        let resources = server.get_available_resources();
+        let resource_uris: Vec<&str> = resources
+            .iter()
+            .filter_map(|r| r.get("uri").and_then(|u| u.as_str()))
+            .collect();
+
+        assert!(resource_uris.contains(&"contracts://addresses"));
+
+        // Test reading the contracts://addresses resource
+        let resource_result = server.handle_resource_read("contracts://addresses").await;
+        assert!(resource_result.is_ok());
+
+        let resource_data = resource_result.unwrap();
+
+        // Should contain basic resource information
+        assert!(resource_data.get("resource_type").is_some());
+        assert_eq!(resource_data["resource_type"], "contract_addresses");
+
+        // Should have network identification
+        assert!(resource_data.get("network").is_some());
+
+        // Should have timestamp
+        assert!(resource_data.get("retrieved_at").is_some());
+
+        // Should have contract types info
+        assert!(resource_data.get("contract_types").is_some());
+
+        // Should have either contracts data or fallback info
+        let has_contracts = resource_data.get("contracts").is_some();
+        let has_fallback = resource_data.get("fallback_info").is_some();
+        assert!(
+            has_contracts || has_fallback,
+            "Should have either contracts or fallback info"
+        );
+
+        // Verify timestamp is a valid RFC3339 string
+        let timestamp_str = resource_data["retrieved_at"].as_str().unwrap();
+        assert!(chrono::DateTime::parse_from_rfc3339(timestamp_str).is_ok());
+
+        // Should have network identification
+        assert_eq!(resource_data["network"], "mantra-dukong-1");
     }
 
     #[tokio::test]
@@ -3393,7 +4495,9 @@ mod tests {
             42
         });
 
-        let blocking_result = blocking_handle.await.expect("Blocking task should complete");
+        let blocking_result = blocking_handle
+            .await
+            .expect("Blocking task should complete");
         assert_eq!(blocking_result, 42);
 
         // Test health status
@@ -3412,7 +4516,10 @@ mod tests {
 
         // Test that runtime manager is properly integrated
         let runtime_manager = &server.state().runtime_manager;
-        assert_eq!(runtime_manager.config().flavor, RuntimeFlavor::CurrentThread);
+        assert_eq!(
+            runtime_manager.config().flavor,
+            RuntimeFlavor::CurrentThread
+        );
         assert_eq!(runtime_manager.config().worker_threads, Some(1));
 
         // Test health status includes runtime information
@@ -3461,18 +4568,33 @@ mod tests {
         use json_rpc_error_codes::*;
 
         // Test SDK error mapping
-        let sdk_wallet_error = McpServerError::Sdk(SdkError::Wallet("insufficient funds".to_string()));
-        assert_eq!(sdk_wallet_error.to_json_rpc_error_code(), INSUFFICIENT_FUNDS);
+        let sdk_wallet_error =
+            McpServerError::Sdk(SdkError::Wallet("insufficient funds".to_string()));
+        assert_eq!(
+            sdk_wallet_error.to_json_rpc_error_code(),
+            INSUFFICIENT_FUNDS
+        );
 
-        let sdk_network_error = McpServerError::Sdk(SdkError::Network("connection failed".to_string()));
-        assert_eq!(sdk_network_error.to_json_rpc_error_code(), NETWORK_CONNECTION_FAILED);
+        let sdk_network_error =
+            McpServerError::Sdk(SdkError::Network("connection failed".to_string()));
+        assert_eq!(
+            sdk_network_error.to_json_rpc_error_code(),
+            NETWORK_CONNECTION_FAILED
+        );
 
-        let sdk_fee_error = McpServerError::Sdk(SdkError::FeeValidation("fees too high".to_string()));
-        assert_eq!(sdk_fee_error.to_json_rpc_error_code(), FEE_VALIDATION_FAILED);
+        let sdk_fee_error =
+            McpServerError::Sdk(SdkError::FeeValidation("fees too high".to_string()));
+        assert_eq!(
+            sdk_fee_error.to_json_rpc_error_code(),
+            FEE_VALIDATION_FAILED
+        );
 
         // Test MCP server error mapping
         let wallet_not_configured = McpServerError::WalletNotConfigured;
-        assert_eq!(wallet_not_configured.to_json_rpc_error_code(), WALLET_NOT_CONFIGURED);
+        assert_eq!(
+            wallet_not_configured.to_json_rpc_error_code(),
+            WALLET_NOT_CONFIGURED
+        );
 
         let invalid_args = McpServerError::InvalidArguments("missing parameter".to_string());
         assert_eq!(invalid_args.to_json_rpc_error_code(), INVALID_PARAMS);
@@ -3480,8 +4602,12 @@ mod tests {
         let unknown_tool = McpServerError::UnknownTool("nonexistent_tool".to_string());
         assert_eq!(unknown_tool.to_json_rpc_error_code(), METHOD_NOT_FOUND);
 
-        let unknown_resource = McpServerError::UnknownResource("nonexistent://resource".to_string());
-        assert_eq!(unknown_resource.to_json_rpc_error_code(), RESOURCE_NOT_FOUND);
+        let unknown_resource =
+            McpServerError::UnknownResource("nonexistent://resource".to_string());
+        assert_eq!(
+            unknown_resource.to_json_rpc_error_code(),
+            RESOURCE_NOT_FOUND
+        );
     }
 
     #[tokio::test]
@@ -3492,20 +4618,26 @@ mod tests {
         let sdk_error = McpServerError::Sdk(SdkError::Wallet("test wallet error".to_string()));
         let error_data = sdk_error.get_error_data();
         assert!(error_data.is_some());
-        
+
         let data = error_data.unwrap();
         assert_eq!(data["category"], "sdk");
         assert_eq!(data["sdk_error_type"], "Wallet");
-        assert!(data["original_error"].as_str().unwrap().contains("test wallet error"));
+        assert!(data["original_error"]
+            .as_str()
+            .unwrap()
+            .contains("test wallet error"));
 
         // Test validation error data generation
         let validation_error = McpServerError::Validation("invalid input format".to_string());
         let error_data = validation_error.get_error_data();
         assert!(error_data.is_some());
-        
+
         let data = error_data.unwrap();
         assert_eq!(data["category"], "validation");
-        assert!(data["validation_error"].as_str().unwrap().contains("invalid input format"));
+        assert!(data["validation_error"]
+            .as_str()
+            .unwrap()
+            .contains("invalid input format"));
     }
 
     #[tokio::test]
@@ -3531,7 +4663,7 @@ mod tests {
         let custom_error = JsonRpcError::custom_error(
             INSUFFICIENT_FUNDS,
             "not enough tokens".to_string(),
-            Some(serde_json::json!({"required": 100, "available": 50}))
+            Some(serde_json::json!({"required": 100, "available": 50})),
         );
         assert_eq!(custom_error.code, INSUFFICIENT_FUNDS);
         assert!(custom_error.data.is_some());
@@ -3546,10 +4678,22 @@ mod tests {
             (SdkError::Rpc("test rpc error".to_string()), "Rpc"),
             (SdkError::Wallet("test wallet error".to_string()), "Wallet"),
             (SdkError::Config("test config error".to_string()), "Config"),
-            (SdkError::Contract("test contract error".to_string()), "Contract"),
-            (SdkError::FeeValidation("test fee error".to_string()), "FeeValidation"),
-            (SdkError::Network("test network error".to_string()), "Network"),
-            (SdkError::Timeout("test timeout error".to_string()), "Timeout"),
+            (
+                SdkError::Contract("test contract error".to_string()),
+                "Contract",
+            ),
+            (
+                SdkError::FeeValidation("test fee error".to_string()),
+                "FeeValidation",
+            ),
+            (
+                SdkError::Network("test network error".to_string()),
+                "Network",
+            ),
+            (
+                SdkError::Timeout("test timeout error".to_string()),
+                "Timeout",
+            ),
             (SdkError::Other("test other error".to_string()), "Other"),
         ];
 
@@ -3566,14 +4710,27 @@ mod tests {
         use json_rpc_error_codes::*;
 
         // Test specific wallet error message handling
-        let insufficient_funds_error = McpServerError::Sdk(SdkError::Wallet("insufficient balance for transaction".to_string()));
-        assert_eq!(insufficient_funds_error.to_json_rpc_error_code(), INSUFFICIENT_FUNDS);
+        let insufficient_funds_error = McpServerError::Sdk(SdkError::Wallet(
+            "insufficient balance for transaction".to_string(),
+        ));
+        assert_eq!(
+            insufficient_funds_error.to_json_rpc_error_code(),
+            INSUFFICIENT_FUNDS
+        );
 
-        let address_format_error = McpServerError::Sdk(SdkError::Wallet("invalid address format".to_string()));
-        assert_eq!(address_format_error.to_json_rpc_error_code(), INVALID_ADDRESS_FORMAT);
+        let address_format_error =
+            McpServerError::Sdk(SdkError::Wallet("invalid address format".to_string()));
+        assert_eq!(
+            address_format_error.to_json_rpc_error_code(),
+            INVALID_ADDRESS_FORMAT
+        );
 
-        let generic_wallet_error = McpServerError::Sdk(SdkError::Wallet("wallet not initialized".to_string()));
-        assert_eq!(generic_wallet_error.to_json_rpc_error_code(), WALLET_NOT_CONFIGURED);
+        let generic_wallet_error =
+            McpServerError::Sdk(SdkError::Wallet("wallet not initialized".to_string()));
+        assert_eq!(
+            generic_wallet_error.to_json_rpc_error_code(),
+            WALLET_NOT_CONFIGURED
+        );
     }
 
     /// Test the enhanced error mapping functionality
@@ -3581,17 +4738,32 @@ mod tests {
     async fn test_enhanced_error_mapping_and_recovery() {
         // Test enhanced wallet error context detection
         let wallet_errors = vec![
-            (SdkError::Wallet("insufficient balance for transaction".to_string()), json_rpc_error_codes::INSUFFICIENT_FUNDS),
-            (SdkError::Wallet("invalid address format provided".to_string()), json_rpc_error_codes::INVALID_ADDRESS_FORMAT),
-            (SdkError::Wallet("invalid mnemonic phrase provided".to_string()), json_rpc_error_codes::INVALID_MNEMONIC_FORMAT),
-            (SdkError::Wallet("invalid public key format".to_string()), json_rpc_error_codes::INVALID_PUBLIC_KEY_FORMAT),
-            (SdkError::Wallet("general wallet error".to_string()), json_rpc_error_codes::WALLET_NOT_CONFIGURED),
+            (
+                SdkError::Wallet("insufficient balance for transaction".to_string()),
+                json_rpc_error_codes::INSUFFICIENT_FUNDS,
+            ),
+            (
+                SdkError::Wallet("invalid address format provided".to_string()),
+                json_rpc_error_codes::INVALID_ADDRESS_FORMAT,
+            ),
+            (
+                SdkError::Wallet("invalid mnemonic phrase provided".to_string()),
+                json_rpc_error_codes::INVALID_MNEMONIC_FORMAT,
+            ),
+            (
+                SdkError::Wallet("invalid public key format".to_string()),
+                json_rpc_error_codes::INVALID_PUBLIC_KEY_FORMAT,
+            ),
+            (
+                SdkError::Wallet("general wallet error".to_string()),
+                json_rpc_error_codes::WALLET_NOT_CONFIGURED,
+            ),
         ];
 
         for (sdk_error, expected_code) in wallet_errors {
             let mcp_error = McpServerError::Sdk(sdk_error);
             assert_eq!(mcp_error.to_json_rpc_error_code(), expected_code);
-            
+
             // Test error data generation
             let error_data = mcp_error.get_error_data().unwrap();
             assert_eq!(error_data["category"], "sdk");
@@ -3602,10 +4774,22 @@ mod tests {
 
         // Test enhanced contract error context detection
         let contract_errors = vec![
-            (SdkError::Contract("pool not found on network".to_string()), json_rpc_error_codes::POOL_NOT_FOUND),
-            (SdkError::Contract("slippage tolerance exceeded".to_string()), json_rpc_error_codes::SWAP_SLIPPAGE_EXCEEDED),
-            (SdkError::Contract("insufficient liquidity in pool".to_string()), json_rpc_error_codes::LIQUIDITY_INSUFFICIENT),
-            (SdkError::Contract("general contract error".to_string()), json_rpc_error_codes::TOOL_EXECUTION_FAILED),
+            (
+                SdkError::Contract("pool not found on network".to_string()),
+                json_rpc_error_codes::POOL_NOT_FOUND,
+            ),
+            (
+                SdkError::Contract("slippage tolerance exceeded".to_string()),
+                json_rpc_error_codes::SWAP_SLIPPAGE_EXCEEDED,
+            ),
+            (
+                SdkError::Contract("insufficient liquidity in pool".to_string()),
+                json_rpc_error_codes::LIQUIDITY_INSUFFICIENT,
+            ),
+            (
+                SdkError::Contract("general contract error".to_string()),
+                json_rpc_error_codes::TOOL_EXECUTION_FAILED,
+            ),
         ];
 
         for (sdk_error, expected_code) in contract_errors {
@@ -3614,15 +4798,26 @@ mod tests {
         }
 
         // Test error recovery suggestions
-        let network_error = McpServerError::Sdk(SdkError::Network("connection timeout".to_string()));
-        let recovery_suggestions = McpServerError::get_recovery_suggestions(&SdkError::Network("test".to_string()));
+        let network_error =
+            McpServerError::Sdk(SdkError::Network("connection timeout".to_string()));
+        let recovery_suggestions =
+            McpServerError::get_recovery_suggestions(&SdkError::Network("test".to_string()));
         assert!(recovery_suggestions.contains(&"Check internet connectivity"));
         assert!(recovery_suggestions.contains(&"Verify firewall settings"));
 
         // Test error severity levels
-        assert_eq!(McpServerError::get_error_severity(&SdkError::Wallet("test".to_string())), "high");
-        assert_eq!(McpServerError::get_error_severity(&SdkError::Network("test".to_string())), "medium");
-        assert_eq!(McpServerError::get_error_severity(&SdkError::Timeout("test".to_string())), "low");
+        assert_eq!(
+            McpServerError::get_error_severity(&SdkError::Wallet("test".to_string())),
+            "high"
+        );
+        assert_eq!(
+            McpServerError::get_error_severity(&SdkError::Network("test".to_string())),
+            "medium"
+        );
+        assert_eq!(
+            McpServerError::get_error_severity(&SdkError::Timeout("test".to_string())),
+            "low"
+        );
 
         // Test error recoverability
         assert!(network_error.is_recoverable());
@@ -3634,9 +4829,12 @@ mod tests {
 
         // Test JSON-RPC error generation
         let json_rpc_error = network_error.to_json_rpc_error();
-        assert_eq!(json_rpc_error.code, json_rpc_error_codes::NETWORK_CONNECTION_FAILED);
+        assert_eq!(
+            json_rpc_error.code,
+            json_rpc_error_codes::NETWORK_CONNECTION_FAILED
+        );
         assert!(json_rpc_error.data.is_some());
-        
+
         let error_data = json_rpc_error.data.unwrap();
         assert_eq!(error_data["category"], "sdk");
         assert_eq!(error_data["severity"], "medium");
@@ -3647,7 +4845,8 @@ mod tests {
     #[tokio::test]
     async fn test_mcp_error_types_data_generation() {
         // Test InvalidArguments error
-        let invalid_args_error = McpServerError::InvalidArguments("Missing required parameter 'pool_id'".to_string());
+        let invalid_args_error =
+            McpServerError::InvalidArguments("Missing required parameter 'pool_id'".to_string());
         let error_data = invalid_args_error.get_error_data().unwrap();
         assert_eq!(error_data["category"], "arguments");
         assert_eq!(error_data["severity"], "high");
@@ -3661,7 +4860,8 @@ mod tests {
         assert_eq!(error_data["severity"], "medium");
 
         // Test UnknownResource error
-        let unknown_resource_error = McpServerError::UnknownResource("invalid://resource/uri".to_string());
+        let unknown_resource_error =
+            McpServerError::UnknownResource("invalid://resource/uri".to_string());
         let error_data = unknown_resource_error.get_error_data().unwrap();
         assert_eq!(error_data["category"], "resource");
         assert_eq!(error_data["resource_uri"], "invalid://resource/uri");
@@ -3681,24 +4881,52 @@ mod tests {
         assert_eq!(error_data["network_error"], "RPC endpoint unreachable");
 
         // Test Validation error
-        let validation_error = McpServerError::Validation("Invalid amount format: must be numeric".to_string());
+        let validation_error =
+            McpServerError::Validation("Invalid amount format: must be numeric".to_string());
         let error_data = validation_error.get_error_data().unwrap();
         assert_eq!(error_data["category"], "validation");
         assert_eq!(error_data["severity"], "high");
-        assert_eq!(error_data["validation_error"], "Invalid amount format: must be numeric");
+        assert_eq!(
+            error_data["validation_error"],
+            "Invalid amount format: must be numeric"
+        );
     }
 
     /// Test error code mapping for all SDK error types
     #[tokio::test]
     async fn test_comprehensive_sdk_error_code_mapping() {
         let test_cases = vec![
-            (SdkError::Rpc("RPC connection failed".to_string()), json_rpc_error_codes::BLOCKCHAIN_RPC_ERROR),
-            (SdkError::TxSimulation("Transaction simulation failed".to_string()), json_rpc_error_codes::TRANSACTION_FAILED),
-            (SdkError::Config("Invalid network configuration".to_string()), json_rpc_error_codes::CONFIGURATION_ERROR),
-            (SdkError::FeeValidation("Total fees exceed 20% limit".to_string()), json_rpc_error_codes::FEE_VALIDATION_FAILED),
-            (SdkError::Timeout("Request timeout after 30s".to_string()), json_rpc_error_codes::TIMEOUT_ERROR),
-            (SdkError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "File not found")), json_rpc_error_codes::IO_ERROR),
-            (SdkError::Other("Unexpected error occurred".to_string()), json_rpc_error_codes::INTERNAL_ERROR),
+            (
+                SdkError::Rpc("RPC connection failed".to_string()),
+                json_rpc_error_codes::BLOCKCHAIN_RPC_ERROR,
+            ),
+            (
+                SdkError::TxSimulation("Transaction simulation failed".to_string()),
+                json_rpc_error_codes::TRANSACTION_FAILED,
+            ),
+            (
+                SdkError::Config("Invalid network configuration".to_string()),
+                json_rpc_error_codes::CONFIGURATION_ERROR,
+            ),
+            (
+                SdkError::FeeValidation("Total fees exceed 20% limit".to_string()),
+                json_rpc_error_codes::FEE_VALIDATION_FAILED,
+            ),
+            (
+                SdkError::Timeout("Request timeout after 30s".to_string()),
+                json_rpc_error_codes::TIMEOUT_ERROR,
+            ),
+            (
+                SdkError::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "File not found",
+                )),
+                json_rpc_error_codes::IO_ERROR,
+            ),
+            (
+                SdkError::Other("Unexpected error occurred".to_string()),
+                json_rpc_error_codes::INTERNAL_ERROR,
+            ),
         ];
 
         for (sdk_error, expected_code) in test_cases {
@@ -3709,7 +4937,10 @@ mod tests {
         // Test serialization error separately with a proper error instance
         let ser_error = serde_json::from_str::<serde_json::Value>("invalid json").unwrap_err();
         let mcp_ser_error = McpServerError::Sdk(SdkError::Serialization(ser_error));
-        assert_eq!(mcp_ser_error.to_json_rpc_error_code(), json_rpc_error_codes::SERIALIZATION_ERROR);
+        assert_eq!(
+            mcp_ser_error.to_json_rpc_error_code(),
+            json_rpc_error_codes::SERIALIZATION_ERROR
+        );
     }
 
     /// Test error data timestamp generation and format
@@ -3717,13 +4948,375 @@ mod tests {
     async fn test_error_data_timestamp_generation() {
         let error = McpServerError::Sdk(SdkError::Network("test".to_string()));
         let error_data = error.get_error_data().unwrap();
-        
+
         // Verify timestamp is present and in correct format
         assert!(error_data["timestamp"].is_string());
         let timestamp_str = error_data["timestamp"].as_str().unwrap();
-        
+
         // Try to parse the timestamp to verify it's valid RFC3339
         chrono::DateTime::parse_from_rfc3339(timestamp_str).expect("Invalid timestamp format");
+    }
+
+    #[tokio::test]
+    async fn test_config_file_toml_support() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for test files
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("test-config.toml");
+
+        // Create a sample TOML configuration
+        let toml_content = r#"
+name = "Test MCP Server"
+version = "0.2.0"
+debug = true
+max_concurrent_ops = 20
+http_port = 9090
+http_host = "0.0.0.0"
+request_timeout_secs = 60
+cache_ttl_secs = 600
+auto_load_env = true
+
+[network_config]
+network_name = "mantra-dukong"
+network_id = "mantra-dukong-1"
+rpc_url = "https://rpc.dukong.mantrachain.io"
+gas_price = 0.01
+gas_adjustment = 1.5
+native_denom = "uaum"
+
+[network_config.contracts]
+pool_manager = ""
+
+[runtime_config]
+flavor = "MultiThread"
+enable_io = true
+enable_time = true
+max_blocking_threads = 1024
+"#;
+
+        fs::write(&config_path, toml_content).unwrap();
+
+        // Load configuration from TOML file
+        let loaded_config = McpServerConfig::from_file(&config_path).unwrap();
+
+        assert_eq!(loaded_config.name, "Test MCP Server");
+        assert_eq!(loaded_config.version, "0.2.0");
+        assert_eq!(loaded_config.debug, true);
+        assert_eq!(loaded_config.max_concurrent_ops, 20);
+        assert_eq!(loaded_config.http_port, 9090);
+        assert_eq!(loaded_config.http_host, "0.0.0.0");
+        assert_eq!(loaded_config.request_timeout_secs, 60);
+        assert_eq!(loaded_config.cache_ttl_secs, 600);
+        assert_eq!(
+            loaded_config.runtime_config.flavor,
+            RuntimeFlavor::MultiThread
+        );
+        assert_eq!(
+            loaded_config.runtime_config.max_blocking_threads,
+            Some(1024)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_config_file_json_support() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for test files
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("test-config.json");
+
+        // Create a sample JSON configuration
+        let json_content = r#"{
+  "name": "Test JSON MCP Server",
+  "version": "0.3.0",
+  "debug": false,
+  "max_concurrent_ops": 15,
+  "http_port": 8888,
+  "http_host": "127.0.0.1",
+  "request_timeout_secs": 45,
+  "cache_ttl_secs": 450,
+  "auto_load_env": false,
+  "network_config": {
+    "network_name": "mantra-dukong",
+    "network_id": "mantra-dukong-1",
+    "rpc_url": "https://rpc.dukong.mantrachain.io",
+    "gas_price": 0.01,
+    "gas_adjustment": 1.5,
+    "native_denom": "uaum",
+    "contracts": {
+      "pool_manager": ""
+    }
+  },
+  "runtime_config": {
+    "flavor": "CurrentThread",
+    "enable_io": true,
+    "enable_time": false,
+    "max_blocking_threads": 256
+  }
+}"#;
+
+        fs::write(&config_path, json_content).unwrap();
+
+        // Load configuration from JSON file
+        let loaded_config = McpServerConfig::from_file(&config_path).unwrap();
+
+        assert_eq!(loaded_config.name, "Test JSON MCP Server");
+        assert_eq!(loaded_config.version, "0.3.0");
+        assert_eq!(loaded_config.debug, false);
+        assert_eq!(loaded_config.max_concurrent_ops, 15);
+        assert_eq!(loaded_config.http_port, 8888);
+        assert_eq!(loaded_config.http_host, "127.0.0.1");
+        assert_eq!(loaded_config.request_timeout_secs, 45);
+        assert_eq!(loaded_config.cache_ttl_secs, 450);
+        assert_eq!(loaded_config.auto_load_env, false);
+        assert_eq!(
+            loaded_config.runtime_config.flavor,
+            RuntimeFlavor::CurrentThread
+        );
+        assert_eq!(loaded_config.runtime_config.enable_time, false);
+        assert_eq!(loaded_config.runtime_config.max_blocking_threads, Some(256));
+    }
+
+    #[tokio::test]
+    async fn test_config_save_to_file() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for test files
+        let temp_dir = TempDir::new().unwrap();
+
+        let mut config = McpServerConfig::default();
+        config.name = "Save Test Server".to_string();
+        config.version = "1.0.0".to_string();
+        config.debug = true;
+        config.max_concurrent_ops = 25;
+
+        // Test TOML save
+        let toml_path = temp_dir.path().join("saved-config.toml");
+        config.save_to_file(&toml_path).unwrap();
+
+        assert!(toml_path.exists());
+        let toml_content = fs::read_to_string(&toml_path).unwrap();
+        assert!(toml_content.contains("Save Test Server"));
+        assert!(toml_content.contains("1.0.0"));
+        assert!(toml_content.contains("debug = true"));
+        assert!(toml_content.contains("max_concurrent_ops = 25"));
+
+        // Test JSON save
+        let json_path = temp_dir.path().join("saved-config.json");
+        config.save_to_file(&json_path).unwrap();
+
+        assert!(json_path.exists());
+        let json_content = fs::read_to_string(&json_path).unwrap();
+        assert!(json_content.contains("Save Test Server"));
+        assert!(json_content.contains("1.0.0"));
+        assert!(json_content.contains("\"debug\": true"));
+        assert!(json_content.contains("\"max_concurrent_ops\": 25"));
+
+        // Verify saved files can be loaded back
+        let loaded_toml = McpServerConfig::from_file(&toml_path).unwrap();
+        let loaded_json = McpServerConfig::from_file(&json_path).unwrap();
+
+        assert_eq!(loaded_toml.name, config.name);
+        assert_eq!(loaded_json.name, config.name);
+        assert_eq!(loaded_toml.debug, config.debug);
+        assert_eq!(loaded_json.debug, config.debug);
+    }
+
+    #[tokio::test]
+    async fn test_config_from_sources_layering() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory for test files
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("layered-config.toml");
+
+        // Create a configuration file with some values
+        let toml_content = r#"
+name = "File Config Server"
+debug = true
+max_concurrent_ops = 50
+http_port = 7777
+
+[network_config]
+network_name = "mantra-testnet"
+network_id = "mantra-testnet-1"
+rpc_url = "https://rpc.testnet.mantrachain.io"
+gas_price = 0.01
+gas_adjustment = 1.5
+native_denom = "uaum"
+
+[network_config.contracts]
+pool_manager = ""
+"#;
+        fs::write(&config_path, toml_content).unwrap();
+
+        // Set environment variables that should override file values
+        env::set_var("MCP_SERVER_NAME", "Env Override Server");
+        env::set_var("MCP_HTTP_PORT", "6666");
+        env::set_var("MCP_MAX_CONCURRENT_OPS", "100");
+
+        // Load configuration with layering
+        let config = McpServerConfig::from_sources(Some(&config_path)).unwrap();
+
+        // Environment variables should override file values
+        assert_eq!(config.name, "Env Override Server"); // From env
+        assert_eq!(config.http_port, 6666); // From env
+        assert_eq!(config.max_concurrent_ops, 100); // From env
+        assert_eq!(config.debug, true); // From file (no env override)
+
+        // Clean up environment variables
+        env::remove_var("MCP_SERVER_NAME");
+        env::remove_var("MCP_HTTP_PORT");
+        env::remove_var("MCP_MAX_CONCURRENT_OPS");
+    }
+
+    #[tokio::test]
+    async fn test_config_file_error_handling() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Test non-existent file
+        let temp_dir = TempDir::new().unwrap();
+        let non_existent_path = temp_dir.path().join("does-not-exist.toml");
+        let result = McpServerConfig::from_file(&non_existent_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not found"));
+
+        // Test unsupported file format (create the file first so it exists)
+        let unsupported_path = temp_dir.path().join("config.xml");
+        fs::write(&unsupported_path, "<xml>test</xml>").unwrap();
+        let result = McpServerConfig::from_file(&unsupported_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unsupported"));
+
+        // Test invalid TOML content
+        let invalid_toml_path = temp_dir.path().join("invalid.toml");
+        fs::write(&invalid_toml_path, "invalid toml [[[content").unwrap();
+        let result = McpServerConfig::from_file(&invalid_toml_path);
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err().to_string();
+        assert!(
+            error_msg.contains("Failed to parse")
+                || error_msg.contains("Failed to build")
+                || error_msg.contains("Failed to load")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_generate_example_config() {
+        let example_toml = McpServerConfig::generate_example_config();
+
+        // Verify the example contains expected sections and comments
+        assert!(example_toml.contains("# Mantra DEX SDK MCP Server Configuration"));
+        assert!(example_toml.contains("# Server identification"));
+        assert!(example_toml.contains("name = \"Mantra DEX SDK MCP Server\""));
+        assert!(example_toml.contains("version = \"0.1.0\""));
+        assert!(example_toml.contains("# Network configuration"));
+        assert!(example_toml.contains("# Performance settings"));
+        assert!(example_toml.contains("# HTTP transport settings"));
+        assert!(example_toml.contains("[runtime_config]"));
+        assert!(example_toml.contains("flavor = \"MultiThread\""));
+        assert!(example_toml.contains("max_blocking_threads = 512"));
+
+        // Verify the example can be parsed as valid TOML
+        let parsed_toml: toml::Value = toml::from_str(&example_toml).unwrap();
+        assert!(parsed_toml.get("name").is_some());
+        assert!(parsed_toml.get("runtime_config").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_create_example_files() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let result = McpServerConfig::create_example_files(temp_dir.path());
+        assert!(result.is_ok());
+
+        // Verify both example files were created
+        let toml_example = temp_dir.path().join("mcp-server.example.toml");
+        let json_example = temp_dir.path().join("mcp-server.example.json");
+
+        assert!(toml_example.exists());
+        assert!(json_example.exists());
+
+        // Verify the files can be loaded successfully
+        let toml_config = McpServerConfig::from_file(&toml_example).unwrap();
+        let json_config = McpServerConfig::from_file(&json_example).unwrap();
+
+        assert_eq!(toml_config.name, "Mantra DEX SDK MCP Server");
+        assert_eq!(json_config.name, "Mantra DEX SDK MCP Server");
+        assert_eq!(toml_config.version, json_config.version);
+    }
+
+    #[tokio::test]
+    async fn test_network_config_from_file() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("network-config.toml");
+
+        // Create configuration with network specification
+        let toml_content = r#"
+name = "Network Test Server"
+network = "testnet"
+debug = false
+
+[network_config]
+network_name = "mantra-testnet"
+network_id = "mantra-testnet-1"
+rpc_url = "https://rpc.testnet.mantrachain.io"
+gas_price = 0.01
+gas_adjustment = 1.5
+native_denom = "uaum"
+
+[network_config.contracts]
+pool_manager = ""
+"#;
+        fs::write(&config_path, toml_content).unwrap();
+
+        // Load configuration
+        let config = McpServerConfig::from_file(&config_path).unwrap();
+
+        assert_eq!(config.name, "Network Test Server");
+        assert_eq!(config.debug, false);
+        // Network config should be applied (exact values depend on network constants)
+        assert!(!config.network_config.network_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_detect_file_format() {
+        use std::path::Path;
+
+        // Test TOML format detection
+        let toml_path = Path::new("config.toml");
+        let format = McpServerConfig::detect_file_format(toml_path).unwrap();
+        assert_eq!(format, FileFormat::Toml);
+
+        // Test JSON format detection
+        let json_path = Path::new("config.json");
+        let format = McpServerConfig::detect_file_format(json_path).unwrap();
+        assert_eq!(format, FileFormat::Json);
+
+        // Test YAML format detection
+        let yaml_path = Path::new("config.yaml");
+        let format = McpServerConfig::detect_file_format(yaml_path).unwrap();
+        assert_eq!(format, FileFormat::Yaml);
+
+        let yml_path = Path::new("config.yml");
+        let format = McpServerConfig::detect_file_format(yml_path).unwrap();
+        assert_eq!(format, FileFormat::Yaml);
+
+        // Test unsupported format
+        let xml_path = Path::new("config.xml");
+        let result = McpServerConfig::detect_file_format(xml_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unsupported"));
     }
 }
 
@@ -3740,14 +5333,14 @@ pub mod json_rpc_error_codes {
     pub const METHOD_NOT_FOUND: i32 = -32601;
     pub const INVALID_PARAMS: i32 = -32602;
     pub const INTERNAL_ERROR: i32 = -32603;
-    
+
     // Implementation-defined server errors (-32099 to -32000)
     pub const SERVER_ERROR: i32 = -32000;
     pub const SERVER_OVERLOADED: i32 = -32001;
     pub const RATE_LIMIT_EXCEEDED: i32 = -32002;
     pub const SESSION_EXPIRED: i32 = -32003;
     pub const METHOD_NOT_READY: i32 = -32004;
-    
+
     // MCP-specific error codes (outside reserved range)
     // Application errors (-31999 to -1)
     pub const WALLET_NOT_CONFIGURED: i32 = -31999;
@@ -3760,7 +5353,7 @@ pub mod json_rpc_error_codes {
     pub const CONFIGURATION_ERROR: i32 = -31992;
     pub const VALIDATION_ERROR: i32 = -31991;
     pub const TIMEOUT_ERROR: i32 = -31990;
-    
+
     // Validation and input errors (1 to 999)
     pub const INVALID_ADDRESS_FORMAT: i32 = 100;
     pub const INVALID_MNEMONIC_FORMAT: i32 = 101;
@@ -3768,7 +5361,7 @@ pub mod json_rpc_error_codes {
     pub const MISSING_REQUIRED_FIELD: i32 = 103;
     pub const INVALID_NETWORK_NAME: i32 = 104;
     pub const INVALID_AMOUNT_FORMAT: i32 = 105;
-    
+
     // Business logic errors (1000 to 4999)
     pub const INSUFFICIENT_FUNDS: i32 = 1000;
     pub const POOL_NOT_FOUND: i32 = 1001;
@@ -3776,7 +5369,7 @@ pub mod json_rpc_error_codes {
     pub const LIQUIDITY_INSUFFICIENT: i32 = 1003;
     pub const REWARD_CLAIM_FAILED: i32 = 1004;
     pub const FEE_VALIDATION_FAILED: i32 = 1005;
-    
+
     // System and infrastructure errors (5000+)
     pub const DATABASE_ERROR: i32 = 5000;
     pub const CACHE_ERROR: i32 = 5001;

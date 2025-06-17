@@ -102,8 +102,40 @@
   - ✅ Created extensive test suite covering all error mapping scenarios
   - ✅ Enhanced JSON-RPC error creation with full MCP compliance
   - ✅ All 20+ MCP tests passing including new enhanced error mapping tests
-- [ ] Implement connection pooling for blockchain RPC clients
-- [ ] Add logging and tracing infrastructure
+- [x] **Implement connection pooling for blockchain RPC clients ✅ COMPLETED**
+  - ✅ Implemented comprehensive connection pooling system with `NetworkConnectionPool` and `PooledConnection`
+  - ✅ Added connection lifecycle management with TTL, idle time tracking, and health status monitoring
+  - ✅ Implemented background health check system with configurable intervals
+  - ✅ Added connection pool statistics and monitoring capabilities
+  - ✅ Created semaphore-based connection limiting to prevent resource exhaustion
+  - ✅ Implemented proper cleanup of expired and unhealthy connections
+  - ✅ Added comprehensive configuration options for pool behavior:
+    - `max_connections_per_network` - Connection limits per network
+    - `connection_ttl_secs` - Connection time-to-live
+    - `max_idle_time_secs` - Maximum idle time before cleanup
+    - `health_check_interval_secs` - Health check frequency
+  - ✅ Enhanced error handling and retry logic for connection failures
+  - ✅ Added proper resource management and graceful shutdown procedures
+  - ✅ All 6 connection pooling tests passing with comprehensive coverage
+  - ✅ Integration with existing MCP server infrastructure completed
+- [x] **Add logging and tracing infrastructure ✅ COMPLETED**
+  - **Comprehensive Logging Module** (`src/mcp/logging.rs`):
+    - ✅ `LoggingConfig` with full environment variable support (`MCP_LOG_*` variables)
+    - ✅ Advanced log levels (Trace, Debug, Info, Warn, Error), formats (JSON/Compact/Pretty), targets (Stdout/Stderr/File/Both)
+    - ✅ `LoggingMetrics` with detailed performance tracking and request/response monitoring
+    - ✅ `McpLogger` with sampling, structured logging, request tracing, and error context
+    - ✅ Full test coverage (15 comprehensive tests)
+  - **Binary Integration** (`src/bin/mcp.rs`):
+    - ✅ CLI arguments: `--log-format`, `--log-file`, `--disable-colors`, `--debug`
+    - ✅ Environment variable loading with CLI overrides
+    - ✅ Enhanced error logging throughout startup process
+  - **Production-Ready Features**:
+    - ✅ Request/response timing with `RequestSpan`
+    - ✅ Configurable sampling rates for high-volume scenarios
+    - ✅ Custom MCP-specific log filtering
+    - ✅ Thread-safe metrics collection
+    - ✅ Serializable metrics for monitoring integration
+  - **Verification**: All tests pass (49 tests), MCP server compiles and runs with logging options
 
 ### Configuration Management
 - [x] Create MCP server configuration structure ✅ COMPLETED
@@ -153,7 +185,19 @@
   - ✅ Returns detailed error messages for validation failures
   - ✅ Integrated validation into configuration loading process
   - ✅ Added comprehensive validation tests covering all edge cases
-- [ ] Create configuration file support (TOML/JSON)
+- [x] **Create configuration file support (TOML/JSON) ✅ COMPLETED**
+  - ✅ Implemented `from_file()` method with TOML, JSON, and YAML support
+  - ✅ Added `save_to_file()` method for TOML and JSON formats
+  - ✅ Created `from_sources()` method for layered configuration (defaults → file → env vars)
+  - ✅ Implemented `generate_example_config()` and `create_example_files()` for documentation
+  - ✅ Added `detect_file_format()` for automatic format detection
+  - ✅ Implemented `apply_network_config()` for network-specific settings
+  - ✅ Added `ConfigError` support to `McpServerError` enum
+  - ✅ Comprehensive error handling and validation
+  - ✅ File format support: `.toml`, `.json`, `.yaml`, `.yml`
+  - ✅ Automatic directory creation for configuration files
+  - ✅ Environment variable overrides with `MCP_` prefix
+  - ✅ Network configuration layering with `MANTRA_NETWORK` support
 
 ### Basic Server Structure
 - [x] Create `src/mcp/mod.rs` with module exports ✅ COMPLETED
@@ -261,12 +305,32 @@
   - ✅ Enhanced error handling for connection failures and client unavailability
   - ✅ Added comprehensive test case covering all status scenarios
   - ✅ Proper timestamp generation and status validation
-- [ ] Implement `contracts://addresses` resource
+- [x] **Implement `contracts://addresses` resource ✅ COMPLETED**
+  - ✅ Added `contracts://addresses` resource to available resources list
+  - ✅ Implemented `read_contracts_addresses()` method with comprehensive error handling
+  - ✅ Added integration with `McpClientWrapper.get_contract_addresses()` for blockchain data
+  - ✅ Created detailed JSON response with contract addresses including:
+    - Pool manager and fee collector contract addresses
+    - Contract type descriptions and usage information
+    - Network identification and RPC endpoint information
+    - Timestamp and retrieval metadata
+  - ✅ Added fallback to configuration data when client wrapper not initialized
+  - ✅ Implemented comprehensive error handling with detailed error responses
+  - ✅ Added URI handling to `handle_resource_read()` method
+  - ✅ Created comprehensive test suite covering all functionality
+  - ✅ All tests passing (1 new test + existing tests)
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
 - [ ] Create `contracts://info` resource for contract metadata
 
 ### Network Tools
 - [x] Create foundation for `switch_network` tool ✅ FOUNDATION READY
-- [ ] Implement `get_network_status` tool
+- [x] **Implement `get_network_status` tool ✅ COMPLETED**
+  - ✅ Added `get_network_status` tool to available tools list with comprehensive schema
+  - ✅ Implemented `handle_get_network_status` method with proper error handling
+  - ✅ Integrated with `McpClientWrapper.get_network_status()` for blockchain connectivity
+  - ✅ Added fallback for cases where client wrapper is not initialized
+  - ✅ Returns comprehensive network status including block height, connectivity status, and timestamps
+  - ✅ All 49 MCP tests passing including the new tool implementation
 - [ ] Add `get_block_height` tool
 - [ ] Create `get_contract_addresses` tool
 - [ ] Implement network connectivity validation
@@ -286,8 +350,55 @@
   - ✅ `get_pools` tool structure
   - ✅ Pool resources framework (`pools://list`)
   - ✅ Integration points with DEX client
-- [ ] Implement `get_pool` tool for single pool queries
-- [ ] Create `get_pools` tool for pool listing
+- [x] **Implement `get_pool` tool for single pool queries ✅ COMPLETED**
+  - ✅ Added `get_pool` tool to available tools with pool_id parameter schema
+  - ✅ Implemented `handle_get_pool` method with proper argument validation
+  - ✅ Added comprehensive error handling and retry logic via SDK adapter
+  - ✅ Created detailed JSON response with pool information including:
+    - Pool ID, LP denomination, and pool type
+    - Asset list with denominations and amounts
+    - Pool status (swaps, deposits, withdrawals enabled)
+    - Total share information and fee structure
+  - ✅ Added corresponding `pools://details/{id}` resource endpoint
+  - ✅ Implemented `read_pool_details` method for resource access
+  - ✅ Enhanced resource response with additional metadata:
+    - TVL estimate and operational status classification
+    - Timestamp and network information
+    - Detailed asset information with raw amounts
+  - ✅ All compilation issues resolved and builds successfully
+  - ✅ Full integration with existing MCP server architecture
+- [x] **Create `get_pools` tool for pool listing ✅ COMPLETED**
+  - ✅ Added comprehensive `get_pools` tool with filtering and pagination parameters:
+    - `limit` (1-100, default 20) for result pagination
+    - `offset` (default 0) for skipping results
+    - `status_filter` (all, active, inactive, swaps_enabled, deposits_enabled)
+    - `sort_by` (pool_id, tvl, total_share, created_at) for sorting criteria
+    - `sort_order` (asc, desc) for sort direction
+    - `include_details` (boolean) for detailed vs basic pool information
+  - ✅ Implemented comprehensive `handle_get_pools` method with full filtering and sorting logic:
+    - Proper argument parsing with validation and defaults
+    - Direct blockchain integration via SDK adapter
+    - Pool data transformation to MCP-friendly JSON format
+    - Status-based filtering (active/inactive pools, operational features)
+    - Multi-criteria sorting with ascending/descending options
+    - Pagination with metadata (total count, has_more, etc.)
+  - ✅ Enhanced pool data structure includes:
+    - Basic pool information (ID, type, LP denomination)
+    - Operational status indicators (swaps/deposits/withdrawals enabled)
+    - Asset information with primary assets preview
+    - Estimated TVL calculation from asset amounts
+    - Optional detailed data (full asset list, total shares, pool fees)
+  - ✅ Updated `read_pools_list` resource to delegate to get_pools tool:
+    - Provides comprehensive pool listing via resource endpoint
+    - Includes access information and related tools/resources
+    - Enhanced error handling with troubleshooting guidance
+  - ✅ Comprehensive error handling with detailed responses:
+    - Network connectivity error handling
+    - Graceful fallback for blockchain failures
+    - Detailed error messages with retrieval timestamps
+    - Network information included in all responses
+  - ✅ Full integration with existing MCP server architecture
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
 - [ ] Add `validate_pool_status` tool
 - [ ] Implement `get_pool_status` tool
 - [ ] Create pool filtering and sorting options

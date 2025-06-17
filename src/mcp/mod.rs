@@ -31,10 +31,10 @@
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //!     let config = McpServerConfig::default();
-//!     let server = create_stdio_server(config).await?;
+//!     let _server = create_stdio_server(config).await?;
 //!
 //!     // Server is now initialized and ready for MCP communication
-//!     println!("MCP Server initialized: {}", server.get_server_info()["name"]);
+//!     println!("MCP Server initialized successfully");
 //!     Ok(())
 //! }
 //! ```
@@ -75,6 +75,13 @@ pub const MCP_SERVER_NAME: &str = "Mantra DEX SDK MCP Server";
 
 /// Supported MCP protocol versions
 pub const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26"];
+
+pub mod logging;
+
+pub use logging::{
+    configure_tracing_subscriber, get_default_log_filter, get_mcp_specific_filter, setup_logging,
+    LogFormat, LogLevel, LoggingConfig, LoggingMetrics, McpLogger, RequestSpan,
+};
 
 #[cfg(test)]
 mod tests {

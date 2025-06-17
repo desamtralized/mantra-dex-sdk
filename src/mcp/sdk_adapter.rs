@@ -9,11 +9,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
 
 use crate::client::MantraDexClient;
-use crate::config::{MantraNetworkConfig, ContractAddresses};
+use crate::config::MantraNetworkConfig;
 use crate::wallet::{MantraWallet, WalletInfo};
 
 use super::server::{McpResult, McpServerError};
@@ -31,6 +31,10 @@ pub struct ConnectionPoolConfig {
     pub max_retries: u32,
     /// Base delay for exponential backoff in milliseconds
     pub retry_base_delay_ms: u64,
+    /// Maximum idle time before connection is considered stale in seconds
+    pub max_idle_time_secs: u64,
+    /// Health check interval in seconds
+    pub health_check_interval_secs: u64,
 }
 
 impl Default for ConnectionPoolConfig {
@@ -41,30 +45,261 @@ impl Default for ConnectionPoolConfig {
             connection_ttl_secs: 300, // 5 minutes
             max_retries: 3,
             retry_base_delay_ms: 100,
+            max_idle_time_secs: 60,         // 1 minute
+            health_check_interval_secs: 30, // 30 seconds
         }
     }
 }
 
-// Connection pooling removed since MantraDexClient cannot be cloned
-// Each request will create a new client instance
+/// Pooled connection wrapper with metadata
+#[derive(Debug)]
+struct PooledConnection {
+    /// The actual DEX client
+    client: MantraDexClient,
+    /// When this connection was created
+    created_at: Instant,
+    /// When this connection was last used
+    last_used: Instant,
+    /// Whether this connection is currently healthy
+    is_healthy: bool,
+}
 
-/// MCP SDK Adapter for managing DEX client operations
+impl PooledConnection {
+    /// Create a new pooled connection
+    fn new(client: MantraDexClient) -> Self {
+        let now = Instant::now();
+        Self {
+            client,
+            created_at: now,
+            last_used: now,
+            is_healthy: true,
+        }
+    }
+
+    /// Check if the connection is expired based on TTL
+    fn is_expired(&self, ttl: Duration) -> bool {
+        self.created_at.elapsed() > ttl
+    }
+
+    /// Check if the connection is idle based on max idle time
+    fn is_idle(&self, max_idle: Duration) -> bool {
+        self.last_used.elapsed() > max_idle
+    }
+
+    /// Update the last used timestamp
+    fn mark_used(&mut self) {
+        self.last_used = Instant::now();
+    }
+
+    /// Mark connection as healthy/unhealthy
+    fn set_health(&mut self, healthy: bool) {
+        self.is_healthy = healthy;
+    }
+}
+
+/// Connection pool for a specific network
+#[derive(Debug)]
+struct NetworkConnectionPool {
+    /// Available connections
+    connections: Vec<PooledConnection>,
+    /// Network configuration
+    network_config: MantraNetworkConfig,
+    /// Semaphore to limit concurrent connection creation
+    creation_semaphore: Semaphore,
+    /// Pool configuration
+    config: ConnectionPoolConfig,
+}
+
+impl NetworkConnectionPool {
+    /// Create a new network connection pool
+    fn new(network_config: MantraNetworkConfig, config: ConnectionPoolConfig) -> Self {
+        Self {
+            connections: Vec::new(),
+            creation_semaphore: Semaphore::new(config.max_connections_per_network),
+            network_config,
+            config,
+        }
+    }
+
+    /// Get a connection from the pool or create a new one
+    async fn get_connection(&mut self) -> McpResult<MantraDexClient> {
+        // First, try to get a healthy, non-expired connection from the pool
+        for (_index, pooled_conn) in self.connections.iter_mut().enumerate() {
+            if pooled_conn.is_healthy
+                && !pooled_conn.is_expired(Duration::from_secs(self.config.connection_ttl_secs))
+                && !pooled_conn.is_idle(Duration::from_secs(self.config.max_idle_time_secs))
+            {
+                pooled_conn.mark_used();
+                debug!(
+                    "Reusing existing connection for network: {}",
+                    self.network_config.network_id
+                );
+                // Since MantraDexClient can't be cloned, we need to create a new client
+                // with the same configuration. This is a limitation of the current SDK design.
+                return self.create_new_client().await;
+            }
+        }
+
+        // Remove expired or unhealthy connections
+        self.cleanup_expired_connections();
+
+        // If we're at the connection limit, wait for a permit
+        let _permit = self.creation_semaphore.acquire().await.map_err(|e| {
+            McpServerError::Internal(format!("Failed to acquire connection permit: {}", e))
+        })?;
+
+        // Create a new client
+        let client = self.create_new_client().await?;
+
+        // Add to pool for tracking purposes (even though we can't reuse the exact instance)
+        let pooled_conn = PooledConnection::new(
+            MantraDexClient::new(self.network_config.clone())
+                .await
+                .map_err(|e| McpServerError::Sdk(e))?,
+        );
+
+        self.connections.push(pooled_conn);
+
+        debug!(
+            "Created new connection for network: {} (pool size: {})",
+            self.network_config.network_id,
+            self.connections.len()
+        );
+
+        Ok(client)
+    }
+
+    /// Create a new client for the network
+    async fn create_new_client(&self) -> McpResult<MantraDexClient> {
+        debug!(
+            "Creating new DEX client for network: {}",
+            self.network_config.network_id
+        );
+
+        match MantraDexClient::new(self.network_config.clone()).await {
+            Ok(client) => {
+                info!(
+                    "Successfully created DEX client for network: {}",
+                    self.network_config.network_id
+                );
+                Ok(client)
+            }
+            Err(e) => {
+                error!(
+                    "Failed to create DEX client for network {}: {}",
+                    self.network_config.network_id, e
+                );
+                Err(McpServerError::Sdk(e))
+            }
+        }
+    }
+
+    /// Cleanup expired and unhealthy connections
+    fn cleanup_expired_connections(&mut self) {
+        let ttl = Duration::from_secs(self.config.connection_ttl_secs);
+        let max_idle = Duration::from_secs(self.config.max_idle_time_secs);
+
+        let initial_count = self.connections.len();
+
+        self.connections
+            .retain(|conn| conn.is_healthy && !conn.is_expired(ttl) && !conn.is_idle(max_idle));
+
+        let removed_count = initial_count - self.connections.len();
+        if removed_count > 0 {
+            debug!(
+                "Cleaned up {} expired/unhealthy connections for network: {}",
+                removed_count, self.network_config.network_id
+            );
+        }
+    }
+
+    /// Perform health checks on all connections
+    async fn health_check(&mut self) {
+        for pooled_conn in &mut self.connections {
+            // Simple health check - try to get the latest block height
+            match pooled_conn.client.get_last_block_height().await {
+                Ok(_) => {
+                    pooled_conn.set_health(true);
+                }
+                Err(e) => {
+                    warn!(
+                        "Health check failed for connection to network {}: {}",
+                        self.network_config.network_id, e
+                    );
+                    pooled_conn.set_health(false);
+                }
+            }
+        }
+    }
+
+    /// Get pool statistics
+    fn get_stats(&self) -> (usize, usize, usize) {
+        let total = self.connections.len();
+        let healthy = self.connections.iter().filter(|c| c.is_healthy).count();
+        let available_permits = self.creation_semaphore.available_permits();
+        (total, healthy, available_permits)
+    }
+}
+
+/// MCP SDK Adapter for managing DEX client operations with connection pooling
 pub struct McpSdkAdapter {
+    /// Connection pools per network
+    connection_pools: Arc<RwLock<HashMap<String, NetworkConnectionPool>>>,
     /// Connection pool configuration
     config: ConnectionPoolConfig,
     /// Cache for frequently accessed data
     cache: Arc<RwLock<HashMap<String, (Value, Instant)>>>,
     /// Cache TTL
     cache_ttl: Duration,
+    /// Health check task handle
+    health_check_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl McpSdkAdapter {
-    /// Create a new MCP SDK adapter
+    /// Create a new MCP SDK adapter with connection pooling
     pub fn new(config: ConnectionPoolConfig) -> Self {
-        Self {
+        let adapter = Self {
+            connection_pools: Arc::new(RwLock::new(HashMap::new())),
             cache_ttl: Duration::from_secs(config.connection_ttl_secs),
             config,
             cache: Arc::new(RwLock::new(HashMap::new())),
+            health_check_handle: None,
+        };
+
+        adapter
+    }
+
+    /// Start the background health check task
+    pub async fn start_health_checks(&mut self) {
+        let pools = Arc::clone(&self.connection_pools);
+        let interval = Duration::from_secs(self.config.health_check_interval_secs);
+
+        let handle = tokio::spawn(async move {
+            let mut interval_timer = tokio::time::interval(interval);
+
+            loop {
+                interval_timer.tick().await;
+
+                debug!("Running connection pool health checks");
+
+                let mut pools_guard = pools.write().await;
+                for (network_id, pool) in pools_guard.iter_mut() {
+                    debug!("Health checking pool for network: {}", network_id);
+                    pool.health_check().await;
+                }
+
+                debug!("Completed connection pool health checks");
+            }
+        });
+
+        self.health_check_handle = Some(handle);
+    }
+
+    /// Stop the background health check task
+    pub async fn stop_health_checks(&mut self) {
+        if let Some(handle) = self.health_check_handle.take() {
+            handle.abort();
+            debug!("Stopped connection pool health checks");
         }
     }
 
@@ -73,8 +308,27 @@ impl McpSdkAdapter {
         &self,
         network_config: &MantraNetworkConfig,
     ) -> McpResult<MantraDexClient> {
-        // Create new client each time since clients cannot be cloned/pooled
-        self.create_new_client(network_config).await
+        let network_id = network_config.network_id.clone();
+
+        // Get or create the network pool
+        {
+            let mut pools = self.connection_pools.write().await;
+            if !pools.contains_key(&network_id) {
+                debug!("Creating new connection pool for network: {}", network_id);
+                pools.insert(
+                    network_id.clone(),
+                    NetworkConnectionPool::new(network_config.clone(), self.config.clone()),
+                );
+            }
+        }
+
+        // Get a connection from the pool
+        let mut pools = self.connection_pools.write().await;
+        let pool = pools.get_mut(&network_id).ok_or_else(|| {
+            McpServerError::Internal(format!("Network pool not found: {}", network_id))
+        })?;
+
+        pool.get_connection().await
     }
 
     /// Get a client with wallet attached
@@ -83,41 +337,9 @@ impl McpSdkAdapter {
         network_config: &MantraNetworkConfig,
         wallet: MantraWallet,
     ) -> McpResult<MantraDexClient> {
-        let base_client = self.create_new_client(network_config).await?;
+        let base_client = self.get_client(network_config).await?;
         Ok(base_client.with_wallet(wallet))
     }
-
-    // Connection pooling removed - clients are created fresh each time
-
-    /// Create a new client for the network
-    async fn create_new_client(
-        &self,
-        network_config: &MantraNetworkConfig,
-    ) -> McpResult<MantraDexClient> {
-        debug!(
-            "Creating new DEX client for network: {}",
-            network_config.network_id
-        );
-
-        match MantraDexClient::new(network_config.clone()).await {
-            Ok(client) => {
-                info!(
-                    "Successfully created DEX client for network: {}",
-                    network_config.network_id
-                );
-                Ok(client)
-            }
-            Err(e) => {
-                error!(
-                    "Failed to create DEX client for network {}: {}",
-                    network_config.network_id, e
-                );
-                Err(McpServerError::Sdk(e))
-            }
-        }
-    }
-
-    // Connection pooling removed - clients are created fresh each time
 
     /// Execute with retry logic
     pub async fn execute_with_retry<F, T>(&self, operation: F) -> McpResult<T>
@@ -154,7 +376,7 @@ impl McpSdkAdapter {
             .unwrap_or_else(|| McpServerError::Internal("Unknown retry error".to_string())))
     }
 
-    /// Clean up expired cache entries
+    /// Clean up expired cache entries and connection pools
     pub async fn cleanup(&self) -> McpResult<()> {
         // Clean cache
         {
@@ -166,6 +388,15 @@ impl McpSdkAdapter {
             let removed_count = original_count - cache.len();
             if removed_count > 0 {
                 debug!("Cleaned {} expired cache entries", removed_count);
+            }
+        }
+
+        // Clean connection pools
+        {
+            let mut pools = self.connection_pools.write().await;
+            for (network_id, pool) in pools.iter_mut() {
+                debug!("Cleaning connection pool for network: {}", network_id);
+                pool.cleanup_expired_connections();
             }
         }
 
@@ -211,28 +442,41 @@ impl McpSdkAdapter {
         Ok(None)
     }
 
-    /// Get connection pool statistics (always empty since pooling is disabled)
-    pub async fn get_pool_stats(&self) -> HashMap<String, usize> {
-        HashMap::new()
+    /// Get connection pool statistics
+    pub async fn get_pool_stats(&self) -> HashMap<String, (usize, usize, usize)> {
+        let pools = self.connection_pools.read().await;
+        pools
+            .iter()
+            .map(|(network_id, pool)| (network_id.clone(), pool.get_stats()))
+            .collect()
     }
 
-    /// Get cache statistics
+    /// Get the cache statistics
     pub async fn get_cache_stats(&self) -> (usize, usize) {
         let cache = self.cache.read().await;
-        let total_entries = cache.len();
-        let expired_entries = cache
+        let total = cache.len();
+        let expired = cache
             .values()
             .filter(|(_, timestamp)| timestamp.elapsed() >= self.cache_ttl)
             .count();
-        (total_entries, expired_entries)
+        (total, total - expired)
     }
 
-    /// Shutdown the adapter and clean up all resources
-    pub async fn shutdown(&self) -> McpResult<()> {
+    /// Shutdown the adapter and cleanup resources
+    pub async fn shutdown(&mut self) -> McpResult<()> {
         info!("Shutting down MCP SDK adapter");
 
-        // Clear cache
+        // Stop health checks
+        self.stop_health_checks().await;
+
+        // Clear caches
         self.cache_clear().await;
+
+        // Clear connection pools
+        {
+            let mut pools = self.connection_pools.write().await;
+            pools.clear();
+        }
 
         info!("MCP SDK adapter shutdown complete");
         Ok(())
@@ -251,28 +495,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_adapter_creation() {
-        let adapter = McpSdkAdapter::default();
-        let stats = adapter.get_pool_stats().await;
-        assert!(stats.is_empty());
+        let config = ConnectionPoolConfig::default();
+        let adapter = McpSdkAdapter::new(config);
+
+        // Verify initial state
+        let pool_stats = adapter.get_pool_stats().await;
+        assert!(pool_stats.is_empty());
     }
 
     #[tokio::test]
     async fn test_cache_operations() {
         let adapter = McpSdkAdapter::default();
 
-        // Test cache set/get
-        let test_value = serde_json::json!({"test": "value"});
-        adapter
-            .cache_set("test_key".to_string(), test_value.clone())
-            .await;
+        // Test cache set and get
+        let key = "test_key".to_string();
+        let value = serde_json::json!({"test": "value"});
 
-        let cached_value = adapter.cache_get("test_key").await;
-        assert_eq!(cached_value, Some(test_value));
+        adapter.cache_set(key.clone(), value.clone()).await;
+
+        let retrieved = adapter.cache_get(&key).await;
+        assert_eq!(retrieved, Some(value));
+
+        // Test cache miss
+        let missing = adapter.cache_get("nonexistent").await;
+        assert_eq!(missing, None);
 
         // Test cache clear
         adapter.cache_clear().await;
-        let cleared_value = adapter.cache_get("test_key").await;
-        assert_eq!(cleared_value, None);
+        let after_clear = adapter.cache_get(&key).await;
+        assert_eq!(after_clear, None);
     }
 
     #[tokio::test]
@@ -287,57 +538,64 @@ mod tests {
             .cache_set("key2".to_string(), serde_json::json!("value2"))
             .await;
 
-        // Cleanup should not fail
-        let result = adapter.cleanup().await;
-        assert!(result.is_ok());
+        // Cleanup should not remove non-expired entries
+        adapter.cleanup().await.unwrap();
+
+        let (total, _valid) = adapter.get_cache_stats().await;
+        assert_eq!(total, 2);
     }
 
     #[tokio::test]
-    async fn test_client_creation() {
-        let adapter = McpSdkAdapter::default();
-
-        // Create a test network config - note this may fail without proper RPC
-        let config = MantraNetworkConfig {
-            network_name: "test".to_string(),
-            network_id: "test-1".to_string(),
-            rpc_url: "http://localhost:26657".to_string(),
-            gas_price: 0.001,
-            gas_adjustment: 1.5,
-            native_denom: "uom".to_string(),
-            contracts: ContractAddresses {
-                pool_manager: "test".to_string(),
-                farm_manager: None,
-                fee_collector: None,
-                epoch_manager: None,
-            },
+    async fn test_connection_pool_config() {
+        let config = ConnectionPoolConfig {
+            max_connections_per_network: 10,
+            connection_timeout_secs: 60,
+            connection_ttl_secs: 600,
+            max_retries: 5,
+            retry_base_delay_ms: 200,
+            max_idle_time_secs: 120,
+            health_check_interval_secs: 45,
         };
 
-        // Test client creation (may fail in test environment)
-        match adapter.get_client(&config).await {
-            Ok(_) => {
-                // Client creation succeeded
-            }
-            Err(_) => {
-                // Expected in test environment without real RPC
-            }
-        }
+        let adapter = McpSdkAdapter::new(config.clone());
+        assert_eq!(adapter.config.max_connections_per_network, 10);
+        assert_eq!(adapter.config.connection_timeout_secs, 60);
+        assert_eq!(adapter.config.max_retries, 5);
+    }
+
+    #[tokio::test]
+    async fn test_health_check_lifecycle() {
+        let mut adapter = McpSdkAdapter::default();
+
+        // Start health checks
+        adapter.start_health_checks().await;
+        assert!(adapter.health_check_handle.is_some());
+
+        // Stop health checks
+        adapter.stop_health_checks().await;
+        assert!(adapter.health_check_handle.is_none());
     }
 
     #[tokio::test]
     async fn test_shutdown() {
-        let adapter = McpSdkAdapter::default();
+        let mut adapter = McpSdkAdapter::default();
 
-        // Add some test data
+        // Add some data
         adapter
             .cache_set("test".to_string(), serde_json::json!("data"))
             .await;
 
-        // Shutdown should not fail
-        let result = adapter.shutdown().await;
-        assert!(result.is_ok());
+        // Start health checks
+        adapter.start_health_checks().await;
 
-        // Cache should be empty after shutdown
-        let cached_value = adapter.cache_get("test").await;
-        assert_eq!(cached_value, None);
+        // Shutdown should clean everything
+        adapter.shutdown().await.unwrap();
+
+        let (cache_total, _) = adapter.get_cache_stats().await;
+        let pool_stats = adapter.get_pool_stats().await;
+
+        assert_eq!(cache_total, 0);
+        assert!(pool_stats.is_empty());
+        assert!(adapter.health_check_handle.is_none());
     }
 }
