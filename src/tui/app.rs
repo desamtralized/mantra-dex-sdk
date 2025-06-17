@@ -786,6 +786,32 @@ impl App {
                 pool_id,
                 slippage_tolerance,
             } => {
+                // Set loading state immediately so UI can render it
+                self.set_loading(format!(
+                    "Executing swap: {} {} → {}",
+                    amount, from_asset, to_asset
+                ));
+
+                // Execute the swap asynchronously by sending it to the background
+                if let Some(sender) = &self.event_sender {
+                    // Send the swap execution to be handled in the background
+                    let _ = sender.send(Event::ExecuteSwapAsync {
+                        from_asset: from_asset.clone(),
+                        to_asset: to_asset.clone(),
+                        amount: amount.clone(),
+                        pool_id: pool_id.clone(),
+                        slippage_tolerance: slippage_tolerance.clone(),
+                    });
+                }
+                return Ok(false);
+            }
+            Event::ExecuteSwapAsync {
+                from_asset,
+                to_asset,
+                amount,
+                pool_id,
+                slippage_tolerance,
+            } => {
                 // Execute real swap transaction
                 self.execute_real_swap(
                     from_asset.clone(),
@@ -821,11 +847,17 @@ impl App {
                         // TODO: Implement actual liquidity provision
                         // Simulate the process with progress updates
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        
+
                         // For now, create a mock successful response
                         // In real implementation, this would call self.client.provide_liquidity()
-                        let mock_tx_hash = format!("0x{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs());
-                        
+                        let mock_tx_hash = format!(
+                            "0x{:x}",
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs()
+                        );
+
                         Ok(mock_tx_hash)
                     })
                     .await;
@@ -835,12 +867,21 @@ impl App {
                         // Show success modal for liquidity provision
                         let transaction_details = vec![
                             ("Transaction Hash".to_string(), tx_hash.clone()),
-                            ("Operation Type".to_string(), "Provide Liquidity".to_string()),
+                            (
+                                "Operation Type".to_string(),
+                                "Provide Liquidity".to_string(),
+                            ),
                             ("Pool ID".to_string(), pool_id_val.to_string()),
                             ("Asset 1 Amount".to_string(), asset_1_amount_val),
                             ("Asset 2 Amount".to_string(), asset_2_amount_val),
-                            ("Slippage Tolerance".to_string(), slippage_tolerance_val.unwrap_or_else(|| "1.0%".to_string())),
-                            ("Status".to_string(), "✅ Completed Successfully".to_string()),
+                            (
+                                "Slippage Tolerance".to_string(),
+                                slippage_tolerance_val.unwrap_or_else(|| "1.0%".to_string()),
+                            ),
+                            (
+                                "Status".to_string(),
+                                "✅ Completed Successfully".to_string(),
+                            ),
                         ];
 
                         self.state.modal_state = Some(
@@ -874,11 +915,7 @@ impl App {
                     "Claiming rewards".to_string()
                 };
 
-                self.set_loading_with_progress(
-                    operation_description.clone(),
-                    Some(10.0),
-                    true,
-                );
+                self.set_loading_with_progress(operation_description.clone(), Some(10.0), true);
 
                 let operation_name = "claim_rewards";
                 let pool_id_val = *pool_id;
@@ -890,11 +927,18 @@ impl App {
                         // TODO: Implement actual rewards claiming
                         // Simulate the process
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        
+
                         // For now, create a mock successful response
                         // In real implementation, this would call self.client.claim_rewards()
-                        let mock_tx_hash = format!("0x{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 1);
-                        
+                        let mock_tx_hash = format!(
+                            "0x{:x}",
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs()
+                                + 1
+                        );
+
                         Ok(mock_tx_hash)
                     })
                     .await;
@@ -908,19 +952,30 @@ impl App {
                         ];
 
                         if claim_all_val {
-                            transaction_details.push(("Claim Type".to_string(), "All Available Rewards".to_string()));
+                            transaction_details.push((
+                                "Claim Type".to_string(),
+                                "All Available Rewards".to_string(),
+                            ));
                         } else if let Some(pool_id_val) = pool_id_val {
-                            transaction_details.push(("Pool ID".to_string(), pool_id_val.to_string()));
+                            transaction_details
+                                .push(("Pool ID".to_string(), pool_id_val.to_string()));
                         }
 
                         if let Some(epochs_val) = epochs_val {
-                            let epochs_str = epochs_val.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
+                            let epochs_str = epochs_val
+                                .iter()
+                                .map(|e| e.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ");
                             transaction_details.push(("Epochs".to_string(), epochs_str));
                         }
 
                         transaction_details.extend(vec![
                             ("Estimated Rewards".to_string(), "~0.5 OM".to_string()), // Mock value
-                            ("Status".to_string(), "✅ Completed Successfully".to_string()),
+                            (
+                                "Status".to_string(),
+                                "✅ Completed Successfully".to_string(),
+                            ),
                         ]);
 
                         self.state.modal_state = Some(
@@ -1070,10 +1125,8 @@ impl App {
                         _ => Event::MoveFocus(direction), // Keep other directions as-is
                     };
 
-                    if let Some(focused_component) = self
-                        .state
-                        .focus_manager
-                        .handle_event(&focus_event)
+                    if let Some(focused_component) =
+                        self.state.focus_manager.handle_event(&focus_event)
                     {
                         self.update_component_focus(&focused_component);
                     }
@@ -1762,7 +1815,8 @@ impl App {
                                 swap_state.input_focus,
                                 crate::tui::screens::swap::SwapInputFocus::Pool
                                     | crate::tui::screens::swap::SwapInputFocus::FromToken
-                            ) && swap_state.is_any_list_editing() {
+                            ) && swap_state.is_any_list_editing()
+                            {
                                 // Let the dropdown handle the navigation
                                 let key = crossterm::event::KeyEvent::new(
                                     crossterm::event::KeyCode::Up,
@@ -1782,7 +1836,8 @@ impl App {
                                 swap_state.input_focus,
                                 crate::tui::screens::swap::SwapInputFocus::Pool
                                     | crate::tui::screens::swap::SwapInputFocus::FromToken
-                            ) && swap_state.is_any_list_editing() {
+                            ) && swap_state.is_any_list_editing()
+                            {
                                 // Let the dropdown handle the navigation
                                 let key = crossterm::event::KeyEvent::new(
                                     crossterm::event::KeyCode::Down,
@@ -2230,15 +2285,13 @@ impl App {
             operation_id: None,
         };
 
-        // Show loading modal for long operations
-        if can_cancel || progress.is_some() {
-            self.state.modal_state = Some(ModalState::loading(
-                "Processing".to_string(),
-                message,
-                progress,
-                can_cancel,
-            ));
-        }
+        // Always show loading modal for user feedback
+        self.state.modal_state = Some(ModalState::loading(
+            "Processing".to_string(),
+            message,
+            progress,
+            can_cancel,
+        ));
     }
 
     /// Update loading progress
@@ -2343,22 +2396,29 @@ impl App {
                     match &modal.modal_type {
                         crate::tui::components::modals::ModalType::Confirmation { .. } => {
                             let is_confirmed = modal.selected_option == 0; // 0 = confirm, 1 = cancel
-                            
-                            // Clear modal first
-                            self.state.modal_state = None;
-                            
+
                             if is_confirmed {
-                                // Handle confirmation actions
+                                // Handle confirmation actions (this will clear the modal)
                                 self.handle_confirmation();
+                            } else {
+                                // User cancelled - just clear modal and handle cancellation
+                                self.state.modal_state = None;
+                                if self.state.current_screen == Screen::Swap {
+                                    let _ = crate::tui::screens::swap::handle_confirmation_response(
+                                        false,
+                                    );
+                                }
+                                self.set_status("Action cancelled".to_string());
                             }
-                            // If not confirmed (cancel), just close modal (already done above)
                         }
-                        crate::tui::components::modals::ModalType::Error { retry_action, .. } => {
+                        crate::tui::components::modals::ModalType::Error {
+                            retry_action, ..
+                        } => {
                             let should_retry = retry_action.is_some() && modal.selected_option == 0;
-                            
+
                             // Clear modal first
                             self.state.modal_state = None;
-                            
+
                             if should_retry {
                                 // Implement retry logic based on the last failed operation
                                 self.retry_last_operation();
@@ -2410,8 +2470,11 @@ impl App {
 
     /// Handle confirmation actions
     fn handle_confirmation(&mut self) {
-        // Check if this is a quit confirmation by examining the modal title
-        if let Some(ref modal_state) = self.state.modal_state {
+        // Clone the modal state to check its contents before clearing it
+        let modal_state_clone = self.state.modal_state.clone();
+
+        if let Some(ref modal_state) = modal_state_clone {
+            // Check if this is a quit confirmation by examining the modal title
             if let crate::tui::components::modals::ModalType::Confirmation { title, .. } =
                 &modal_state.modal_type
             {
@@ -2422,35 +2485,31 @@ impl App {
                     return;
                 }
             }
-        }
 
-        // Handle confirmation dialog result based on current screen
-        if let Some(ref modal_state) = self.state.modal_state.clone() {
-            if modal_state.is_confirmed() {
-                // Check if this is a swap confirmation modal
-                if self.state.current_screen == Screen::Swap {
-                    // Handle swap confirmation
-                    if let Some(swap_event) =
-                        crate::tui::screens::swap::handle_confirmation_response(true)
-                    {
-                        // Process the swap event immediately
-                        if let Some(sender) = self.event_sender.as_ref() {
-                            let _ = sender.send(swap_event);
-                        }
+            // Check if this is a swap confirmation modal
+            if self.state.current_screen == Screen::Swap {
+                // Clear modal first
+                self.state.modal_state = None;
+
+                // Handle swap confirmation
+                if let Some(swap_event) =
+                    crate::tui::screens::swap::handle_confirmation_response(true)
+                {
+                    // Process the swap event immediately
+                    if let Some(sender) = self.event_sender.as_ref() {
+                        let _ = sender.send(swap_event);
                     }
-                } else {
-                    // Handle other confirmation types
-                    self.set_status("Action confirmed".to_string());
                 }
             } else {
-                // Handle cancellation
-                if self.state.current_screen == Screen::Swap {
-                    let _ = crate::tui::screens::swap::handle_confirmation_response(false);
-                }
-                self.set_status("Action cancelled".to_string());
+                // Handle other confirmation types
+                self.state.modal_state = None;
+                self.set_status("Action confirmed".to_string());
             }
+        } else {
+            // No modal state available - just clear and set cancelled status
+            self.state.modal_state = None;
+            self.set_status("Action cancelled".to_string());
         }
-        self.state.modal_state = None;
     }
 
     /// Navigate to a specific screen
@@ -2833,42 +2892,42 @@ impl App {
 
         let mut errors = Vec::new();
 
-                    // Update progress - fetching balances
-            self.update_loading_progress(30.0, Some("Fetching wallet balances...".to_string()));
+        // Update progress - fetching balances
+        self.update_loading_progress(30.0, Some("Fetching wallet balances...".to_string()));
 
-            // Refresh balances if wallet is connected
-            if let Some(address) = &self.state.wallet_address.clone() {
-                match self.client.get_balances().await {
-                    Ok(balances) => {
-                        // Clear existing balances
-                        self.state.balances.clear();
-                        // Update with new balances
-                        for balance in balances {
-                            self.state
-                                .balances
-                                .insert(balance.denom, balance.amount.to_string());
-                        }
+        // Refresh balances if wallet is connected
+        if let Some(address) = &self.state.wallet_address.clone() {
+            match self.client.get_balances().await {
+                Ok(balances) => {
+                    // Clear existing balances
+                    self.state.balances.clear();
+                    // Update with new balances
+                    for balance in balances {
+                        self.state
+                            .balances
+                            .insert(balance.denom, balance.amount.to_string());
                     }
-                    Err(e) => {
-                        errors.push(format!("Failed to fetch balances: {}", e));
-                    }
-                }
-            }
-
-                    // Update progress - fetching network info
-            self.update_loading_progress(60.0, Some("Fetching network information...".to_string()));
-
-            // Refresh network info
-            match self.client.get_last_block_height().await {
-                Ok(height) => {
-                    self.state.block_height = Some(height);
-                    self.state.network_info.last_sync_time = Some(chrono::Utc::now());
-                    self.state.network_info.is_syncing = false;
                 }
                 Err(e) => {
-                    errors.push(format!("Failed to fetch block height: {}", e));
+                    errors.push(format!("Failed to fetch balances: {}", e));
                 }
             }
+        }
+
+        // Update progress - fetching network info
+        self.update_loading_progress(60.0, Some("Fetching network information...".to_string()));
+
+        // Refresh network info
+        match self.client.get_last_block_height().await {
+            Ok(height) => {
+                self.state.block_height = Some(height);
+                self.state.network_info.last_sync_time = Some(chrono::Utc::now());
+                self.state.network_info.is_syncing = false;
+            }
+            Err(e) => {
+                errors.push(format!("Failed to fetch block height: {}", e));
+            }
+        }
 
         // Refresh pool data (limited to avoid overwhelming)
         match self.client.get_pools(Some(20)).await {
@@ -3476,16 +3535,6 @@ impl App {
             slippage_tolerance
         ));
 
-        // Show loading modal with progress for better user experience
-        self.set_loading_with_progress(
-            format!("Executing swap: {} {} → {}", amount, from_asset, to_asset),
-            Some(10.0), // Initial progress
-            true, // Allow cancellation
-        );
-
-        // Update progress - validating inputs
-        self.update_loading_progress(20.0, Some("Validating swap parameters...".to_string()));
-
         // Validate that we have a valid pool ID
         let pool_id_str = match pool_id {
             Some(id) => {
@@ -3501,9 +3550,6 @@ impl App {
                 return Err(Error::Other("No pool selected for swap".to_string()));
             }
         };
-
-        // Update progress - checking pool availability
-        self.update_loading_progress(30.0, Some("Checking pool availability...".to_string()));
 
         // Validate that the pool exists in our cache
         crate::tui::utils::logger::log_info(&format!(
@@ -3558,9 +3604,6 @@ impl App {
             from_asset, actual_from_denom, to_asset, actual_to_denom
         ));
 
-        // Update progress - preparing transaction
-        self.update_loading_progress(50.0, Some("Preparing transaction parameters...".to_string()));
-
         // Parse amount
         crate::tui::utils::logger::log_info(&format!("Parsing amount: {}", amount));
         let amount_f64 = amount.parse::<f64>().map_err(|e| {
@@ -3606,9 +3649,6 @@ impl App {
         ));
         crate::tui::utils::logger::log_info(&format!("Target denomination: {}", actual_to_denom));
 
-        // Update progress - executing on blockchain
-        self.update_loading_progress(70.0, Some("Executing swap on blockchain...".to_string()));
-
         // Execute the swap using actual denominations
         crate::tui::utils::logger::log_info("=== CALLING BLOCKCHAIN SWAP METHOD ===");
         crate::tui::utils::logger::log_info(&format!("Calling client.swap() with parameters:"));
@@ -3627,9 +3667,6 @@ impl App {
             .await
         {
             Ok(tx_response) => {
-                // Update progress - processing response
-                self.update_loading_progress(90.0, Some("Processing transaction response...".to_string()));
-
                 let elapsed = swap_start_time.elapsed();
                 crate::tui::utils::logger::log_info("=== BLOCKCHAIN SWAP SUCCESS ===");
                 crate::tui::utils::logger::log_info(&format!("Swap execution time: {:?}", elapsed));
@@ -3683,44 +3720,27 @@ impl App {
                 }
 
                 // Final progress update
-                self.update_loading_progress(100.0, Some("Swap completed successfully!".to_string()));
-                
+                self.update_loading_progress(
+                    100.0,
+                    Some("Swap completed successfully!".to_string()),
+                );
+
                 // Give users a moment to see the completion before showing success modal
                 tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-                // Swap succeeded - show comprehensive success modal
-                let tx_hash = tx_response.txhash.clone();
+                // Swap succeeded - show comprehensive success modal with improved transaction parsing
                 let execution_time = format!("{:.2}s", elapsed.as_secs_f64());
-                
-                // Calculate approximate received amount (this is estimated, real amount would come from events)
-                let estimated_received = amount_f64 * 0.997; // Assuming ~0.3% fees
-                
-                // Create detailed transaction info for the success modal
-                let transaction_details = vec![
-                    ("Transaction Hash".to_string(), tx_hash.clone()),
-                    ("Operation Type".to_string(), "Token Swap".to_string()),
-                    ("From Asset".to_string(), format!("{} {}", amount, from_asset)),
-                    ("To Asset".to_string(), format!("~{:.6} {}", estimated_received, to_asset)),
-                    ("Pool ID".to_string(), pool_id_str.clone()),
-                    ("Execution Time".to_string(), execution_time),
-                    ("Block Height".to_string(), tx_response.height.to_string()),
-                    ("Gas Used".to_string(), tx_response.gas_used.to_string()),
-                    ("Gas Wanted".to_string(), tx_response.gas_wanted.to_string()),
-                    ("Status".to_string(), "✅ Completed Successfully".to_string()),
-                ];
-
-                // Show enhanced success modal with comprehensive transaction details
-                self.state.modal_state = Some(
-                    crate::tui::components::modals::ModalState::transaction_details(
-                        tx_hash.clone(),
-                        "Swap Successful".to_string(),
-                        transaction_details,
-                    ),
+                self.show_swap_success_modal(
+                    &tx_response,
+                    &from_asset,
+                    &to_asset,
+                    &amount,
+                    &execution_time,
                 );
 
                 // Add to transaction history
                 let tx_info = TransactionInfo {
-                    hash: tx_hash.clone(),
+                    hash: tx_response.txhash.clone(),
                     status: TransactionStatus::Success,
                     operation_type: "Swap".to_string(),
                     timestamp: chrono::Utc::now(),
@@ -3728,9 +3748,6 @@ impl App {
                     gas_wanted: Some(tx_response.gas_wanted),
                 };
                 self.add_transaction(tx_info);
-
-                // Update loading state to success
-                self.state.loading_state = LoadingState::success("Swap completed successfully!".to_string());
 
                 // Reset swap form
                 crate::tui::screens::swap::reset_swap_form();
@@ -3745,14 +3762,14 @@ impl App {
                 );
                 crate::tui::utils::logger::log_info(&format!(
                     "Final transaction hash: {}",
-                    tx_hash
+                    tx_response.txhash
                 ));
                 crate::tui::utils::logger::log_info(
                     "Transaction should be visible on Mantra testnet explorer",
                 );
                 crate::tui::utils::logger::log_info(&format!(
                     "Explorer URL: https://explorer.mantrachain.io/Mantra-Dukong/tx/{}",
-                    tx_hash
+                    tx_response.txhash
                 ));
 
                 Ok(())
@@ -4211,5 +4228,108 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Show swap success modal with comprehensive transaction details
+    pub fn show_swap_success_modal(
+        &mut self,
+        tx_response: &TxResponse,
+        from_asset: &str,
+        to_asset: &str,
+        from_amount: &str,
+        execution_time: &str,
+    ) {
+        // Parse transaction events to get actual received amount
+        let mut actual_received_amount = "Calculating...".to_string();
+        let mut fee_amount = "N/A".to_string();
+
+        // Look for swap-related events in the transaction
+        for event in &tx_response.events {
+            if event.r#type == "wasm" {
+                let mut found_swap_event = false;
+                let mut received_amount = None;
+                let mut fee = None;
+
+                for attr in &event.attributes {
+                    match attr.key.as_str() {
+                        "action" if attr.value == "swap" => {
+                            found_swap_event = true;
+                        }
+                        "offer_amount" | "ask_amount" => {
+                            // This might be the received amount
+                            if found_swap_event && attr.key == "ask_amount" {
+                                if let Ok(amount) = attr.value.parse::<u128>() {
+                                    let decimals = self.get_token_decimals(
+                                        &self.map_token_name_to_denom(to_asset).unwrap_or_default(),
+                                    );
+                                    let display_amount =
+                                        (amount as f64) / (10_f64.powi(decimals as i32));
+                                    received_amount = Some(format!("{:.6}", display_amount));
+                                }
+                            }
+                        }
+                        "swap_fee" | "fee_amount" => {
+                            fee = Some(attr.value.clone());
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let Some(amount) = received_amount {
+                    actual_received_amount = format!("{} {}", amount, to_asset);
+                }
+                if let Some(f) = fee {
+                    fee_amount = f;
+                }
+            }
+        }
+
+        // If we couldn't parse the actual amount, provide an estimate
+        if actual_received_amount == "Calculating..." {
+            if let Ok(from_amount_f64) = from_amount.parse::<f64>() {
+                let estimated = from_amount_f64 * 0.997; // Assuming ~0.3% fees
+                actual_received_amount = format!("~{:.6} {}", estimated, to_asset);
+            }
+        }
+
+        // Create comprehensive transaction details
+        let transaction_details = vec![
+            ("Transaction Hash".to_string(), tx_response.txhash.clone()),
+            ("Operation Type".to_string(), "Token Swap".to_string()),
+            (
+                "From Asset".to_string(),
+                format!("{} {}", from_amount, from_asset),
+            ),
+            ("To Asset (Received)".to_string(), actual_received_amount),
+            ("Execution Time".to_string(), execution_time.to_string()),
+            ("Block Height".to_string(), tx_response.height.to_string()),
+            ("Gas Used".to_string(), tx_response.gas_used.to_string()),
+            ("Gas Wanted".to_string(), tx_response.gas_wanted.to_string()),
+            ("Transaction Fee".to_string(), fee_amount),
+            (
+                "Status".to_string(),
+                "✅ Completed Successfully".to_string(),
+            ),
+            (
+                "Explorer".to_string(),
+                format!(
+                    "https://explorer.mantrachain.io/Mantra-Dukong/tx/{}",
+                    tx_response.txhash
+                ),
+            ),
+        ];
+
+        // Show the success modal
+        self.state.modal_state = Some(
+            crate::tui::components::modals::ModalState::transaction_details(
+                tx_response.txhash.clone(),
+                "Swap Completed Successfully!".to_string(),
+                transaction_details,
+            ),
+        );
+
+        // Update loading state to success
+        self.state.loading_state =
+            LoadingState::success("Swap completed successfully!".to_string());
     }
 }

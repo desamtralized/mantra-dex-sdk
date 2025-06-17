@@ -122,6 +122,14 @@ pub enum Event {
         pool_id: Option<String>,
         slippage_tolerance: Option<String>,
     },
+    /// Execute a swap operation asynchronously
+    ExecuteSwapAsync {
+        from_asset: String,
+        to_asset: String,
+        amount: String,
+        pool_id: Option<String>,
+        slippage_tolerance: Option<String>,
+    },
     /// Provide liquidity to a pool
     ProvideLiquidity {
         pool_id: u64,
@@ -142,9 +150,7 @@ pub enum Event {
         claim_all: bool,
     },
     /// Execute multi-hop swap
-    ExecuteMultiHopSwap {
-        operations: Vec<SwapOperation>,
-    },
+    ExecuteMultiHopSwap { operations: Vec<SwapOperation> },
     /// Create a new pool (admin)
     CreatePool {
         asset_1: String,
@@ -181,10 +187,7 @@ pub enum Event {
         transaction_hash: Option<String>,
     },
     /// Blockchain operation failed
-    BlockchainError {
-        operation: String,
-        error: String,
-    },
+    BlockchainError { operation: String, error: String },
     /// Blockchain operation is in progress
     BlockchainProgress {
         operation: String,
@@ -765,6 +768,7 @@ impl EventHandler {
         matches!(
             event,
             Event::ExecuteSwap { .. }
+                | Event::ExecuteSwapAsync { .. }
                 | Event::ProvideLiquidity { .. }
                 | Event::WithdrawLiquidity { .. }
                 | Event::ClaimRewards { .. }
