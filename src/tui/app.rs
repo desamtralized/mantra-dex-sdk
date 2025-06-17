@@ -1237,14 +1237,14 @@ impl App {
                         }
                         "liquidity_slippage_swap" => {
                             liquidity_state.input_focus =
-                                crate::tui::screens::liquidity::LiquidityInputFocus::SlippageSwap
+                                crate::tui::screens::liquidity::LiquidityInputFocus::SlippageAmount
                         }
                         _ => {}
                     },
                     FocusableComponent::Dropdown(id) => {
                         if id == "liquidity_pool" {
                             liquidity_state.input_focus =
-                                crate::tui::screens::liquidity::LiquidityInputFocus::PoolSelection
+                                crate::tui::screens::liquidity::LiquidityInputFocus::Pool
                         }
                     }
                     FocusableComponent::Button(id) => match id.as_str() {
@@ -1368,6 +1368,8 @@ impl App {
                         error: None,
                     });
                 }
+                // Update liquidity screen pool dropdown with cached pools
+                self.update_liquidity_screen_pools();
             }
             _ => {}
         }
@@ -1480,6 +1482,80 @@ impl App {
 
         // Note: Real balances should be loaded from blockchain via refresh_balances()
         // The hardcoded test balances have been removed to show actual wallet balances
+    }
+
+    /// Update liquidity screen pools dropdown with available pools
+    fn update_liquidity_screen_pools(&mut self) {
+        // Extract available pools from cache for liquidity operations
+        let available_pools: Vec<(String, String)> = self
+            .state
+            .pool_cache
+            .values()
+            .filter(|entry| {
+                // Only include pools that have liquidity features enabled
+                let pool = &entry.pool_info;
+                pool.pool_info.status.deposits_enabled
+            })
+            .map(|entry| {
+                let pool = &entry.pool_info;
+                let pool_id = pool.pool_info.pool_identifier.to_string();
+
+                // Create display name showing asset pair with amounts
+                let asset_pair_with_amounts = if pool.pool_info.assets.len() >= 2 {
+                    let asset1 = &pool.pool_info.assets[0];
+                    let asset2 = &pool.pool_info.assets[1];
+
+                    // Get proper token symbols instead of micro denominations
+                    let asset1_symbol = self.denom_to_symbol(&asset1.denom);
+                    let asset2_symbol = self.denom_to_symbol(&asset2.denom);
+
+                    // Convert micro amounts to actual token amounts
+                    let asset1_amount =
+                        self.micro_to_token_amount(&asset1.amount.to_string(), &asset1.denom);
+                    let asset2_amount =
+                        self.micro_to_token_amount(&asset2.amount.to_string(), &asset2.denom);
+
+                    // Format with proper symbols and amounts
+                    format!(
+                        "{} ({}) / {} ({})",
+                        asset1_symbol, asset1_amount, asset2_symbol, asset2_amount
+                    )
+                } else {
+                    "Unknown Pair".to_string()
+                };
+
+                let display_name = format!("Pool {}: {}", pool_id, asset_pair_with_amounts);
+                (pool_id, display_name)
+            })
+            .collect();
+
+        // Debug output to understand what pools are available
+        crate::tui::utils::logger::log_debug(&format!(
+            "Total pools in cache: {}",
+            self.state.pool_cache.len()
+        ));
+        crate::tui::utils::logger::log_debug(&format!(
+            "Available liquidity-enabled pools: {}",
+            available_pools.len()
+        ));
+        for (pool_id, display_name) in &available_pools {
+            crate::tui::utils::logger::log_debug(&format!(
+                "Pool ID: '{}', Display: '{}'",
+                pool_id, display_name
+            ));
+        }
+
+        // Note: If no pools are available from cache, dropdowns will remain empty
+        // This is normal during initial loading or when no pools exist
+        if available_pools.is_empty() {
+            // Log warning that no pools are available
+            crate::tui::utils::logger::log_warning(
+                "No pools available for liquidity operations. Pool data may still be loading from blockchain.",
+            );
+        }
+
+        // Update the liquidity screen with available pools
+        crate::tui::screens::liquidity::update_liquidity_pools(available_pools);
     }
 
     /// Handle enter key based on current focus
@@ -2536,6 +2612,8 @@ impl App {
             Screen::Liquidity => {
                 // Initialize liquidity screen focus state
                 crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
+                // Update liquidity screen pools when entering screen
+                self.update_liquidity_screen_pools();
             }
             _ => {}
         }
@@ -2562,6 +2640,8 @@ impl App {
             Screen::Liquidity => {
                 // Initialize liquidity screen focus state
                 crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
+                // Update liquidity screen pools when entering screen
+                self.update_liquidity_screen_pools();
             }
             _ => {}
         }
@@ -2592,6 +2672,8 @@ impl App {
             Screen::Liquidity => {
                 // Initialize liquidity screen focus state
                 crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
+                // Update liquidity screen pools when entering screen
+                self.update_liquidity_screen_pools();
             }
             _ => {}
         }
@@ -2643,6 +2725,10 @@ impl App {
                     // Update swap screen pools if currently on swap screen
                     if self.state.current_screen == Screen::Swap {
                         self.update_swap_screen_pools();
+                    }
+                    // Update liquidity screen pools if currently on liquidity screen
+                    if self.state.current_screen == Screen::Liquidity {
+                        self.update_liquidity_screen_pools();
                     }
                 }
             }

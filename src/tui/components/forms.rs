@@ -254,13 +254,13 @@ impl TextInput {
             ])
             .split(area);
 
-        // Render label
+        // Render label with better visibility
         let label_style = if self.required {
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::Gray)
+            Style::default().fg(Color::LightBlue)
         };
 
         let label_text = if self.required {
@@ -271,16 +271,18 @@ impl TextInput {
 
         frame.render_widget(Paragraph::new(label_text).style(label_style), chunks[0]);
 
-        // Render input box
-        let input_style = if self.focused {
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        // Render input box with improved styling
+        let border_style = if self.focused {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else if self.error.is_some() {
             Style::default().fg(Color::Red)
         } else {
-            Style::default().fg(Color::Gray)
+            Style::default().fg(Color::Blue)
         };
 
-        let block = Block::default().borders(Borders::ALL).style(input_style);
+        let block = Block::default().borders(Borders::ALL).style(border_style);
 
         let display_value = if self.input_type == InputType::Password {
             "*".repeat(self.input.value().len())
@@ -290,11 +292,19 @@ impl TextInput {
             self.input.value().to_string()
         };
 
+        // Improved text styling for better readability
         let text_style = if self.input.value().is_empty() && !self.focused {
-            Style::default().fg(Color::DarkGray)
+            // Placeholder text - more visible
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC)
         } else if self.focused {
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            // Focused text - high contrast white on dark background
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
         } else {
+            // Normal text - bright white for good contrast
             Style::default().fg(Color::White)
         };
 
@@ -309,10 +319,11 @@ impl TextInput {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
 
-        // Render error message
+        // Render error message with better visibility
         if let Some(error) = &self.error {
             frame.render_widget(
-                Paragraph::new(format!("⚠ {}", error)).style(Style::default().fg(Color::Red)),
+                Paragraph::new(format!("⚠ {}", error))
+                    .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
                 chunks[2],
             );
         }
@@ -596,13 +607,13 @@ impl<T: Clone> Dropdown<T> {
                     } else {
                         Style::default().fg(Color::White)
                     };
-                    
+
                     let text = if Some(idx) == self.selected {
                         format!("✓ {}", opt.text)
                     } else {
                         format!("  {}", opt.text)
                     };
-                    
+
                     ListItem::new(text).style(style)
                 })
                 .collect();
@@ -612,7 +623,7 @@ impl<T: Clone> Dropdown<T> {
                     Block::default()
                         .borders(Borders::ALL)
                         .title("Select Option")
-                        .border_style(Style::default().fg(Color::Yellow))
+                        .border_style(Style::default().fg(Color::Yellow)),
                 )
                 .highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
 
