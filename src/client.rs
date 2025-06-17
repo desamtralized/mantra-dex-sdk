@@ -53,6 +53,7 @@ impl PoolStatus {
 ///
 /// This client provides methods to interact with the Mantra DEX v3.0.0,
 /// including pool operations, swapping, liquidity provision, and rewards management.
+#[derive(Debug)]
 pub struct MantraDexClient {
     /// RPC client for the Mantra network
     rpc_client: Arc<Mutex<HttpClient>>,
@@ -914,7 +915,7 @@ impl MantraDexClient {
     ///
     /// * `pool_identifier` - The identifier of the pool to update features for
     /// * `withdrawals_enabled` - Optional flag to enable/disable withdrawals for this pool
-    /// * `deposits_enabled` - Optional flag to enable/disable deposits for this pool  
+    /// * `deposits_enabled` - Optional flag to enable/disable deposits for this pool
     /// * `swaps_enabled` - Optional flag to enable/disable swaps for this pool
     ///
     /// # Returns
@@ -1068,7 +1069,7 @@ impl MantraDexClient {
     ///
     /// The v3.0.0 fee structure includes:
     /// - `protocol_fee`: Fee for the protocol
-    /// - `swap_fee`: Fee for swaps  
+    /// - `swap_fee`: Fee for swaps
     /// - `burn_fee`: Optional fee that gets burned
     /// - `extra_fees`: Optional array of additional fees
     pub fn validate_pool_fees(
@@ -1135,7 +1136,7 @@ impl MantraDexClient {
     /// # Arguments
     ///
     /// * `protocol_fee` - Protocol fee percentage
-    /// * `swap_fee` - Swap fee percentage  
+    /// * `swap_fee` - Swap fee percentage
     /// * `burn_fee` - Optional burn fee percentage
     /// * `extra_fees` - Optional vector of additional fee percentages
     ///

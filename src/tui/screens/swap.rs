@@ -355,7 +355,9 @@ impl SwapScreenState {
                     self.next_focus();
                 }
 
-                list_event != ListEvent::Ignored
+                // Always return true to prevent event from bubbling up to main app
+                // This fixes the issue where Down arrow after token selection was causing app exit
+                true
             }
             SwapInputFocus::FromToken => {
                 let old_selection = self.from_token_dropdown.selected_index;
@@ -371,9 +373,29 @@ impl SwapScreenState {
                     self.next_focus();
                 }
 
-                list_event != ListEvent::Ignored
+                // Always return true to prevent event from bubbling up to main app
+                // This fixes the issue where Down arrow after token selection was causing app exit
+                true
             }
             SwapInputFocus::FromAmount => {
+                // Handle navigation keys first
+                match key.code {
+                    KeyCode::Down | KeyCode::Tab => {
+                        self.next_focus();
+                        return true;
+                    }
+                    KeyCode::Up => {
+                        self.previous_focus();
+                        return true;
+                    }
+                    KeyCode::Enter => {
+                        self.next_focus();
+                        return true;
+                    }
+                    _ => {}
+                }
+
+                // Handle text input
                 let input_request = match key.code {
                     KeyCode::Char(c) => Some(InputRequest::InsertChar(c)),
                     KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
@@ -391,9 +413,30 @@ impl SwapScreenState {
                         return true;
                     }
                 }
-                false
+
+                // Always return true to prevent event bubbling for any unhandled keys
+                // This prevents Down arrow from causing app exit
+                true
             }
             SwapInputFocus::Slippage => {
+                // Handle navigation keys first
+                match key.code {
+                    KeyCode::Down | KeyCode::Tab => {
+                        self.next_focus();
+                        return true;
+                    }
+                    KeyCode::Up => {
+                        self.previous_focus();
+                        return true;
+                    }
+                    KeyCode::Enter => {
+                        self.next_focus();
+                        return true;
+                    }
+                    _ => {}
+                }
+
+                // Handle text input
                 let input_request = match key.code {
                     KeyCode::Char(c) => Some(InputRequest::InsertChar(c)),
                     KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
@@ -411,7 +454,10 @@ impl SwapScreenState {
                         return true;
                     }
                 }
-                false
+
+                // Always return true to prevent event bubbling for any unhandled keys
+                // This prevents navigation keys from causing app exit
+                true
             }
             SwapInputFocus::Execute => {
                 // Handle execute button activation

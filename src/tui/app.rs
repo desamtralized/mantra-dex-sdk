@@ -998,15 +998,9 @@ impl App {
                     let should_handle_as_focus = match self.state.current_screen {
                         Screen::Swap => {
                             let swap_state = crate::tui::screens::swap::get_swap_screen_state();
-                            // When pool or token dropdown is focused, keep arrow keys inside list
-                            let is_list_focus = matches!(
-                                swap_state.input_focus,
-                                crate::tui::screens::swap::SwapInputFocus::Pool
-                                    | crate::tui::screens::swap::SwapInputFocus::FromToken
-                            );
-
-                            // Allow focus movement only if we're NOT inside list focus/editing state
-                            !(is_list_focus || swap_state.is_any_list_editing())
+                            // Always let the swap screen handle all navigation events
+                            // The swap screen has its own internal navigation logic
+                            false
                         }
                         Screen::Liquidity => {
                             let liquidity_state =
