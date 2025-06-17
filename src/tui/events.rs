@@ -132,20 +132,20 @@ pub enum Event {
     },
     /// Provide liquidity to a pool
     ProvideLiquidity {
-        pool_id: u64,
+        pool_id: String,
         asset_1_amount: String,
         asset_2_amount: String,
         slippage_tolerance: Option<String>,
     },
     /// Withdraw liquidity from a pool
     WithdrawLiquidity {
-        pool_id: u64,
+        pool_id: String,
         lp_token_amount: String,
         slippage_tolerance: Option<String>,
     },
     /// Claim rewards for specific epochs
     ClaimRewards {
-        pool_id: Option<u64>,
+        pool_id: Option<String>,
         epochs: Option<Vec<u64>>,
         claim_all: bool,
     },
@@ -161,7 +161,7 @@ pub enum Event {
     },
     /// Update pool features (admin)
     UpdatePoolFeatures {
-        pool_id: u64,
+        pool_id: String,
         features: Vec<String>,
         enabled: bool,
     },
@@ -170,11 +170,11 @@ pub enum Event {
         from_asset: String,
         to_asset: String,
         amount: String,
-        pool_id: Option<u64>,
+        pool_id: Option<String>,
     },
     /// Simulate liquidity provision
     SimulateLiquidity {
-        pool_id: u64,
+        pool_id: String,
         asset_1_amount: String,
         asset_2_amount: String,
     },
@@ -215,7 +215,7 @@ pub enum Event {
 pub struct SwapOperation {
     pub from_asset: String,
     pub to_asset: String,
-    pub pool_id: u64,
+    pub pool_id: String,
     pub amount: String,
 }
 
@@ -302,7 +302,7 @@ impl AsyncBlockchainProcessor {
     /// Provide liquidity to a pool asynchronously
     pub async fn provide_liquidity(
         &self,
-        pool_id: u64,
+        pool_id: String,
         _asset_1_amount: String,
         _asset_2_amount: String,
         _slippage_tolerance: Option<String>,
@@ -347,7 +347,7 @@ impl AsyncBlockchainProcessor {
     /// Withdraw liquidity from a pool asynchronously
     pub async fn withdraw_liquidity(
         &self,
-        pool_id: u64,
+        pool_id: String,
         lp_token_amount: String,
         _slippage_tolerance: Option<String>,
     ) {
@@ -383,7 +383,7 @@ impl AsyncBlockchainProcessor {
     /// Claim rewards asynchronously
     pub async fn claim_rewards(
         &self,
-        pool_id: Option<u64>,
+        pool_id: Option<String>,
         _epochs: Option<Vec<u64>>,
         claim_all: bool,
     ) {

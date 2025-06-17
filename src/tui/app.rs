@@ -829,6 +829,14 @@ impl App {
                 asset_2_amount,
                 slippage_tolerance,
             } => {
+                crate::tui::utils::logger::log_info(&format!(
+                    "=== PROCESSING PROVIDE LIQUIDITY EVENT ===",
+                ));
+                crate::tui::utils::logger::log_info(&format!(
+                    "Pool ID: {}, Asset 1: {}, Asset 2: {}, Slippage: {:?}",
+                    pool_id, asset_1_amount, asset_2_amount, slippage_tolerance
+                ));
+
                 // Show loading modal for liquidity provision
                 self.set_loading_with_progress(
                     format!("Providing liquidity to pool {}", pool_id),
@@ -837,7 +845,7 @@ impl App {
                 );
 
                 let operation_name = "provide_liquidity";
-                let pool_id_val = *pool_id;
+                let pool_id_val = pool_id.clone();
                 let asset_1_amount_val = asset_1_amount.clone();
                 let asset_2_amount_val = asset_2_amount.clone();
                 let slippage_tolerance_val = slippage_tolerance.clone();
@@ -871,7 +879,7 @@ impl App {
                                 "Operation Type".to_string(),
                                 "Provide Liquidity".to_string(),
                             ),
-                            ("Pool ID".to_string(), pool_id_val.to_string()),
+                            ("Pool ID".to_string(), pool_id_val),
                             ("Asset 1 Amount".to_string(), asset_1_amount_val),
                             ("Asset 2 Amount".to_string(), asset_2_amount_val),
                             (
@@ -918,7 +926,7 @@ impl App {
                 self.set_loading_with_progress(operation_description.clone(), Some(10.0), true);
 
                 let operation_name = "claim_rewards";
-                let pool_id_val = *pool_id;
+                let pool_id_val = pool_id.clone();
                 let epochs_val = epochs.clone();
                 let claim_all_val = *claim_all;
 
@@ -957,8 +965,7 @@ impl App {
                                 "All Available Rewards".to_string(),
                             ));
                         } else if let Some(pool_id_val) = pool_id_val {
-                            transaction_details
-                                .push(("Pool ID".to_string(), pool_id_val.to_string()));
+                            transaction_details.push(("Pool ID".to_string(), pool_id_val));
                         }
 
                         if let Some(epochs_val) = epochs_val {
@@ -1620,7 +1627,7 @@ impl App {
                     if let Ok(pool_id) = pool_id_str.parse::<u64>() {
                         if let Some(sender) = &self.event_sender {
                             let _ = sender.send(Event::ProvideLiquidity {
-                                pool_id,
+                                pool_id: pool_id.to_string(),
                                 asset_1_amount: liquidity_state.first_asset_amount,
                                 asset_2_amount: liquidity_state.second_asset_amount,
                                 slippage_tolerance: Some(liquidity_state.slippage_amount),
@@ -2125,6 +2132,17 @@ impl App {
         // Handle the event using the new key event system (similar to swap screen)
         if let Some(key_event) = key_event {
             if liquidity_state.handle_key_event(key_event, self.state.navigation_mode) {
+                // Check if execute button was pressed by examining the current focus
+                if matches!(
+                    liquidity_state.input_focus,
+                    crate::tui::screens::liquidity::LiquidityInputFocus::Execute
+                ) && matches!(event, Event::Enter)
+                {
+                    // Trigger liquidity confirmation
+                    if let Err(e) = self.handle_liquidity_execute_confirmation() {
+                        self.set_error(format!("Liquidity preparation failed: {}", e));
+                    }
+                }
                 return Ok(true);
             }
         }
@@ -2483,6 +2501,10 @@ impl App {
                                     let _ = crate::tui::screens::swap::handle_confirmation_response(
                                         false,
                                     );
+                                } else if self.state.current_screen == Screen::Liquidity {
+                                    let _ = crate::tui::screens::liquidity::handle_liquidity_confirmation_response(
+                                        false,
+                                    );
                                 }
                                 self.set_status("Action cancelled".to_string());
                             }
@@ -2575,6 +2597,46 @@ impl App {
                     if let Some(sender) = self.event_sender.as_ref() {
                         let _ = sender.send(swap_event);
                     }
+                }
+            } else if self.state.current_screen == Screen::Liquidity {
+                // Clear modal first
+                self.state.modal_state = None;
+
+                // Handle liquidity confirmation
+                if let Some(liquidity_event) =
+                    crate::tui::screens::liquidity::handle_liquidity_confirmation_response(true)
+                {
+                    // Process the liquidity event immediately
+                    if let Some(sender) = self.event_sender.as_ref() {
+                        crate::tui::utils::logger::log_info(&format!(
+                            "Sending liquidity event: {:?}",
+                            liquidity_event
+                        ));
+                        match sender.send(liquidity_event) {
+                            Ok(_) => {
+                                crate::tui::utils::logger::log_info(
+                                    "Liquidity event sent successfully",
+                                );
+                            }
+                            Err(e) => {
+                                crate::tui::utils::logger::log_error(&format!(
+                                    "Failed to send liquidity event: {}",
+                                    e
+                                ));
+                                self.set_error(
+                                    "Failed to process liquidity confirmation".to_string(),
+                                );
+                            }
+                        }
+                    } else {
+                        crate::tui::utils::logger::log_error("No event sender available");
+                        self.set_error("Internal error: No event sender available".to_string());
+                    }
+                } else {
+                    crate::tui::utils::logger::log_error(
+                        "Liquidity confirmation response returned None",
+                    );
+                    self.set_error("Failed to create liquidity operation".to_string());
                 }
             } else {
                 // Handle other confirmation types
@@ -4417,5 +4479,91 @@ impl App {
         // Update loading state to success
         self.state.loading_state =
             LoadingState::success("Swap completed successfully!".to_string());
+    }
+
+    /// Handle liquidity execute button - show confirmation modal (similar to swap screen)
+    pub fn handle_liquidity_execute_confirmation(&mut self) -> Result<(), Error> {
+        let liquidity_state = crate::tui::screens::liquidity::get_liquidity_screen_state();
+
+        // Check if any pools are available
+        if self.state.pool_cache.is_empty() {
+            self.show_validation_error(
+                "No Pools Available".to_string(),
+                "No pools are currently loaded for liquidity operations".to_string(),
+                vec![
+                    "Wait for pool data to load from blockchain".to_string(),
+                    "Check network connection".to_string(),
+                    "Refresh the pools data".to_string(),
+                ],
+            );
+            return Ok(());
+        }
+
+        // Validate liquidity inputs
+        if !liquidity_state.validate() {
+            let errors = liquidity_state.clone().get_validation_errors();
+            self.show_validation_error(
+                "Liquidity Validation".to_string(),
+                "Please fill in all required fields".to_string(),
+                errors,
+            );
+            return Ok(());
+        }
+
+        // Execute the enhanced liquidity operation confirmation
+        crate::tui::screens::liquidity::execute_liquidity_operation_with_confirmation();
+
+        // Get liquidity details for confirmation based on mode
+        let confirmation_message = match liquidity_state.mode {
+            crate::tui::screens::liquidity::LiquidityMode::Provide => {
+                let first_amount = liquidity_state.first_asset_input.value();
+                let second_amount = liquidity_state.second_asset_input.value();
+                let pool_name = liquidity_state
+                    .pool_dropdown
+                    .get_selected_label()
+                    .unwrap_or("Unknown Pool");
+                let slippage = liquidity_state.slippage_input.value();
+
+                // Extract asset names from pool
+                let (first_asset, second_asset) =
+                    crate::tui::screens::liquidity::extract_assets_from_pool_label(pool_name);
+
+                format!(
+                    "Confirm Provide Liquidity:\n\n• First Asset: {} {}\n• Second Asset: {} {}\n• Pool: {}\n• Slippage: {}%\n\nProceed with transaction?",
+                    first_amount, first_asset, second_amount, second_asset, pool_name, slippage
+                )
+            }
+            crate::tui::screens::liquidity::LiquidityMode::Withdraw => {
+                let lp_amount = liquidity_state.withdraw_amount_input.value();
+                let pool_name = liquidity_state
+                    .pool_dropdown
+                    .get_selected_label()
+                    .unwrap_or("Unknown Pool");
+
+                format!(
+                    "Confirm Withdraw Liquidity:\n\n• LP Token Amount: {}\n• Pool: {}\n\nProceed with transaction?",
+                    lp_amount, pool_name
+                )
+            }
+            crate::tui::screens::liquidity::LiquidityMode::Positions => {
+                return Ok(()); // No operation for positions mode
+            }
+        };
+
+        // Show global confirmation modal
+        let title = match liquidity_state.mode {
+            crate::tui::screens::liquidity::LiquidityMode::Provide => "Confirm Provide Liquidity",
+            crate::tui::screens::liquidity::LiquidityMode::Withdraw => "Confirm Withdraw Liquidity",
+            _ => "Confirm Liquidity Operation",
+        };
+
+        self.show_confirmation(
+            title.to_string(),
+            confirmation_message,
+            Some("Execute".to_string()),
+            Some("Cancel".to_string()),
+        );
+
+        Ok(())
     }
 }

@@ -192,9 +192,8 @@ impl LiquidityScreenState {
         }
     }
 
-    /// Move focus to next input (simplified like swap screen)
+    /// Move focus to next input (fixed to match swap screen pattern)
     pub fn next_focus(&mut self) {
-        self.clear_focus();
         self.input_focus = match self.mode {
             LiquidityMode::Provide => match self.input_focus {
                 LiquidityInputFocus::Pool => LiquidityInputFocus::FirstAssetAmount,
@@ -212,12 +211,12 @@ impl LiquidityScreenState {
             },
             LiquidityMode::Positions => LiquidityInputFocus::Pool, // No navigation in positions mode
         };
-        self.apply_focus();
+        self.clear_focus();
+        self.set_focus();
     }
 
-    /// Move focus to previous input (simplified like swap screen)
+    /// Move focus to previous input (fixed to match swap screen pattern)
     pub fn previous_focus(&mut self) {
-        self.clear_focus();
         self.input_focus = match self.mode {
             LiquidityMode::Provide => match self.input_focus {
                 LiquidityInputFocus::Pool => LiquidityInputFocus::Execute,
@@ -235,7 +234,8 @@ impl LiquidityScreenState {
             },
             LiquidityMode::Positions => LiquidityInputFocus::Pool, // No navigation in positions mode
         };
-        self.apply_focus();
+        self.clear_focus();
+        self.set_focus();
     }
 
     /// Clear focus from all inputs (simplified like swap screen)
@@ -1385,8 +1385,8 @@ pub fn switch_liquidity_mode(mode: LiquidityMode) {
     liquidity_state.set_mode(mode);
 }
 
-/// Execute liquidity operation with confirmation (simplified like swap screen)
-pub fn execute_liquidity_operation() {
+/// Execute liquidity operation with confirmation (enhanced to match swap screen)
+pub fn execute_liquidity_operation_with_confirmation() {
     let liquidity_state = get_liquidity_screen_state();
 
     crate::tui::utils::logger::log_info("=== LIQUIDITY EXECUTION ATTEMPT ===");
@@ -1401,50 +1401,138 @@ pub fn execute_liquidity_operation() {
     }
 
     let operation_details = match liquidity_state.mode {
-        LiquidityMode::Provide => LiquidityOperationDetails {
-            first_amount: liquidity_state.first_asset_input.value().to_string(),
-            first_asset: "Asset1".to_string(), // This would come from pool info
-            second_amount: liquidity_state.second_asset_input.value().to_string(),
-            second_asset: "Asset2".to_string(), // This would come from pool info
-            pool_name: liquidity_state
+        LiquidityMode::Provide => {
+            // Get current values from the form
+            let first_amount = liquidity_state.first_asset_input.value();
+            let second_amount = liquidity_state.second_asset_input.value();
+            let pool_id_str = liquidity_state
+                .pool_dropdown
+                .get_selected_value()
+                .unwrap_or_default();
+            let slippage = liquidity_state.slippage_input.value();
+
+            // Get pool name for asset extraction
+            let pool_name = liquidity_state
                 .pool_dropdown
                 .get_selected_label()
-                .unwrap_or("Unknown Pool")
-                .to_string(),
-            slippage_amount: liquidity_state.slippage_input.value().to_string(),
-            expected_lp_tokens: liquidity_state
-                .expected_lp_tokens
-                .as_ref()
-                .map(|t| t.to_string()),
-            withdraw_amount: None,
-            expected_assets: None,
-        },
-        LiquidityMode::Withdraw => LiquidityOperationDetails {
-            first_amount: String::new(),
-            first_asset: String::new(),
-            second_amount: String::new(),
-            second_asset: String::new(),
-            pool_name: liquidity_state
+                .unwrap_or("Unknown Pool");
+
+            // Extract asset names from pool label
+            let (first_asset, second_asset) = extract_assets_from_pool_label(pool_name);
+
+            // Log liquidity parameters
+            crate::tui::utils::logger::log_info("Provide Liquidity parameters:");
+            crate::tui::utils::logger::log_info(&format!(
+                "  First Amount: {} {}",
+                first_amount, first_asset
+            ));
+            crate::tui::utils::logger::log_info(&format!(
+                "  Second Amount: {} {}",
+                second_amount, second_asset
+            ));
+            crate::tui::utils::logger::log_info(&format!("  Pool ID: {}", pool_id_str));
+            crate::tui::utils::logger::log_info(&format!("  Slippage Tolerance: {}%", slippage));
+
+            LiquidityOperationDetails {
+                first_amount: first_amount.to_string(),
+                first_asset,
+                second_amount: second_amount.to_string(),
+                second_asset,
+                pool_name: pool_name.to_string(),
+                slippage_amount: slippage.to_string(),
+                expected_lp_tokens: liquidity_state
+                    .expected_lp_tokens
+                    .as_ref()
+                    .map(|t| t.to_string()),
+                withdraw_amount: None,
+                expected_assets: None,
+            }
+        }
+        LiquidityMode::Withdraw => {
+            // Get current values from the form
+            let lp_amount = liquidity_state.withdraw_amount_input.value();
+            let pool_id_str = liquidity_state
+                .pool_dropdown
+                .get_selected_value()
+                .unwrap_or_default();
+
+            // Get pool name
+            let pool_name = liquidity_state
                 .pool_dropdown
                 .get_selected_label()
-                .unwrap_or("Unknown Pool")
-                .to_string(),
-            slippage_amount: String::new(),
-            expected_lp_tokens: None,
-            withdraw_amount: Some(liquidity_state.withdraw_amount_input.value().to_string()),
-            expected_assets: liquidity_state
-                .expected_assets
-                .as_ref()
-                .map(|(a1, a2, d1, d2)| format!("{} {}, {} {}", a1, d1, a2, d2)),
-        },
-        LiquidityMode::Positions => return, // No operation for positions view
+                .unwrap_or("Unknown Pool");
+
+            // Log withdraw parameters
+            crate::tui::utils::logger::log_info("Withdraw Liquidity parameters:");
+            crate::tui::utils::logger::log_info(&format!("  LP Token Amount: {}", lp_amount));
+            crate::tui::utils::logger::log_info(&format!("  Pool ID: {}", pool_id_str));
+
+            LiquidityOperationDetails {
+                first_amount: String::new(),
+                first_asset: String::new(),
+                second_amount: String::new(),
+                second_asset: String::new(),
+                pool_name: pool_name.to_string(),
+                slippage_amount: String::new(),
+                expected_lp_tokens: None,
+                withdraw_amount: Some(lp_amount.to_string()),
+                expected_assets: liquidity_state
+                    .expected_assets
+                    .as_ref()
+                    .map(|(a1, a2, d1, d2)| format!("{} {}, {} {}", a1, d1, a2, d2)),
+            }
+        }
+        LiquidityMode::Positions => {
+            crate::tui::utils::logger::log_warning("No execution operation for positions view");
+            return;
+        }
     };
 
     let confirmation_message = liquidity_state.show_confirmation_modal(&operation_details);
+
+    crate::tui::utils::logger::log_info("Liquidity confirmation modal prepared");
+    crate::tui::utils::logger::log_debug(&format!(
+        "Confirmation message: {}",
+        confirmation_message
+    ));
     crate::tui::utils::logger::log_info(&format!(
         "Liquidity confirmation ready: {}",
         confirmation_message
     ));
+}
+
+/// Extract asset names from pool label (similar to swap screen token extraction)
+pub fn extract_assets_from_pool_label(pool_label: &str) -> (String, String) {
+    if !pool_label.contains(':') {
+        return ("Unknown".to_string(), "Unknown".to_string());
+    }
+
+    // Parse "Pool X: TokenA (amount) / TokenB (amount)" format
+    let parts: Vec<&str> = pool_label.split(':').collect();
+    if parts.len() >= 2 {
+        let token_part = parts[1].trim();
+        let tokens: Vec<&str> = token_part.split(" / ").collect();
+        if tokens.len() >= 2 {
+            // Extract token symbols before the parentheses
+            let first_token = tokens[0].trim();
+            let first_asset = if let Some(paren_pos) = first_token.find('(') {
+                first_token[..paren_pos].trim().to_string()
+            } else {
+                first_token.to_string()
+            };
+
+            let second_token = tokens[1].trim();
+            let second_asset = if let Some(paren_pos) = second_token.find('(') {
+                second_token[..paren_pos].trim().to_string()
+            } else {
+                second_token.to_string()
+            };
+
+            return (first_asset, second_asset);
+        }
+    }
+
+    ("Unknown".to_string(), "Unknown".to_string())
 }
 
 /// Handle confirmation response (like swap screen)
@@ -1472,21 +1560,33 @@ pub fn handle_liquidity_confirmation_response(
                     .unwrap_or_default();
                 let slippage = liquidity_state.slippage_input.value();
 
-                // Parse pool_id as u64
-                if let Ok(pool_id) = pool_id_str.parse::<u64>() {
-                    Some(crate::tui::events::Event::ProvideLiquidity {
-                        asset_1_amount: first_amount.to_string(),
-                        asset_2_amount: second_amount.to_string(),
-                        pool_id,
-                        slippage_tolerance: Some(slippage.to_string()),
-                    })
-                } else {
-                    crate::tui::utils::logger::log_error(&format!(
-                        "Invalid pool ID: {}",
-                        pool_id_str
-                    ));
-                    None
+                // Use pool_id as string (no parsing needed like swap screen)
+                crate::tui::utils::logger::log_info(&format!(
+                    "Using pool ID as string: '{}'",
+                    pool_id_str
+                ));
+
+                // Validate that we have a valid pool ID before proceeding
+                if pool_id_str.is_empty() {
+                    crate::tui::utils::logger::log_error(
+                        "Liquidity execution failed: No pool selected",
+                    );
+                    return None;
                 }
+
+                let event = crate::tui::events::Event::ProvideLiquidity {
+                    asset_1_amount: first_amount.to_string(),
+                    asset_2_amount: second_amount.to_string(),
+                    pool_id: pool_id_str.to_string(),
+                    slippage_tolerance: Some(slippage.to_string()),
+                };
+
+                crate::tui::utils::logger::log_info(&format!(
+                    "Created ProvideLiquidity event: asset_1={}, asset_2={}, pool_id={}, slippage={:?}",
+                    first_amount, second_amount, pool_id_str, slippage
+                ));
+
+                Some(event)
             }
             LiquidityMode::Withdraw => {
                 // Return WithdrawLiquidity event
@@ -1496,20 +1596,19 @@ pub fn handle_liquidity_confirmation_response(
                     .get_selected_value()
                     .unwrap_or_default();
 
-                // Parse pool_id as u64
-                if let Ok(pool_id) = pool_id_str.parse::<u64>() {
-                    Some(crate::tui::events::Event::WithdrawLiquidity {
-                        lp_token_amount: lp_amount.to_string(),
-                        pool_id,
-                        slippage_tolerance: None, // Optional for withdraw
-                    })
-                } else {
-                    crate::tui::utils::logger::log_error(&format!(
-                        "Invalid pool ID: {}",
-                        pool_id_str
-                    ));
-                    None
+                // Use pool_id as string (no parsing needed like swap screen)
+                if pool_id_str.is_empty() {
+                    crate::tui::utils::logger::log_error(
+                        "Withdraw execution failed: No pool selected",
+                    );
+                    return None;
                 }
+
+                Some(crate::tui::events::Event::WithdrawLiquidity {
+                    lp_token_amount: lp_amount.to_string(),
+                    pool_id: pool_id_str.to_string(),
+                    slippage_tolerance: None, // Optional for withdraw
+                })
             }
             LiquidityMode::Positions => None, // No operation for positions view
         }
