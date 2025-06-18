@@ -60,11 +60,6 @@ pub enum Event {
     Enter,
     /// Escape/cancel action
     Escape,
-    /// Arrow key navigation
-    Up,
-    Down,
-    Left,
-    Right,
     /// Character input
     Char(char),
     /// Backspace key

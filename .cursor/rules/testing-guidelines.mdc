@@ -5,6 +5,55 @@ alwaysApply: false
 ---
 # Testing Guidelines
 
+## Never Run TUI Applications
+
+**CRITICAL: AI agents must never attempt to run the TUI application or any interactive terminal applications.**
+
+### Restrictions
+- **NEVER** run `cargo run --bin tui --features tui` or similar commands
+- **NEVER** run any interactive terminal applications that require user input or navigation
+- **NEVER** attempt to interact with Terminal User Interfaces
+- The AI agent cannot navigate TUIs and this will cause timeouts or hanging processes
+
+### Instead of Running TUI Applications
+When making code changes, provide the user with:
+
+1. **Compilation Check**: Run `cargo check --features tui` to ensure no errors
+2. **Testing Instructions**: Give step-by-step instructions for the user to test the changes
+3. **Expected Behavior**: Clearly describe what should happen when the user tests
+
+### Testing Instructions Template
+When providing testing instructions, use this format:
+
+```
+## Testing Instructions
+
+### Build Check
+First, ensure the code compiles:
+```bash
+cargo check --features tui
+```
+
+### Manual Testing Steps
+1. Run the TUI application:
+   ```bash
+   cargo run --bin tui --features tui
+   ```
+
+2. Navigate to [specific screen/feature]
+3. Test the specific functionality:
+   - [Step-by-step actions]
+   - [Expected behavior]
+   - [How to verify the fix worked]
+
+4. Exit the application with `Ctrl+C` or the quit command
+
+### What to Look For
+- [Specific behaviors to verify]
+- [Error conditions that should be resolved]
+- [Performance or usability improvements]
+```
+
 ## Core Testing Policy
 
 **IMPORTANT: Do not implement automated tests for TUI components, screens, or user interface elements.**

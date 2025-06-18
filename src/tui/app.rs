@@ -854,42 +854,25 @@ impl App {
             _ => {}
         }
 
-        // Handle focus management events (but allow screens to steal arrow keys when needed)
+        // Handle modal events FIRST - they take priority over everything else
+        if self.state.modal_state.is_some() {
+            if self.handle_modal_event(&event) {
+                return Ok(false); // Modal handled the event, don't process further
+            }
+        }
+
+        // Handle focus management events
         let mut focus_handled = false;
 
-        if let Event::MoveFocus(direction) = &event {
-            if self.state.navigation_mode == NavigationMode::WithinScreen {
-                // Decide whether to let the FocusManager process this directional move.
-                let allow_focus_move = match self.state.current_screen {
-                    Screen::Swap => {
-                        let swap_state = crate::tui::screens::swap::get_swap_screen_state();
-                        let is_list_focus = matches!(
-                            swap_state.input_focus,
-                            crate::tui::screens::swap::SwapInputFocus::Pool
-                                | crate::tui::screens::swap::SwapInputFocus::FromToken
-                        );
+        // Let screen-specific handlers process events first
+        if self.handle_screen_specific_event(event.clone()).await? {
+            return Ok(true);
+        }
 
-                        !(is_list_focus || swap_state.is_any_list_editing())
-                    }
-                    _ => true,
-                };
-
-                if allow_focus_move {
-                    if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
-                        self.update_component_focus(&focused_component);
-                        focus_handled = true;
-                    }
-                }
-            }
-        } else {
-            // Non-directional focus related events can be passed through directly.
-            // However, exclude ESC events to let the main handler manage navigation mode switches
-            if !matches!(event, Event::Escape) {
-                if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
-                    self.update_component_focus(&focused_component);
-                    focus_handled = true;
-                }
-            }
+        // If screen didn't handle it, try global focus management
+        if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
+            self.update_component_focus(&focused_component);
+            focus_handled = true;
         }
 
         // Handle wizard events first if wizard is active
@@ -969,12 +952,7 @@ impl App {
             }
             Event::Enter => {
                 // Handle enter key based on navigation mode
-                if let Some(modal) = &self.state.modal_state {
-                    if modal.is_confirmed() {
-                        self.handle_confirmation();
-                        self.state.modal_state = None;
-                    }
-                } else if self.state.current_screen == Screen::WalletSelection {
+                if self.state.current_screen == Screen::WalletSelection {
                     // Special case: Wallet selection screen should handle Enter directly
                     // without needing to switch to WithinScreen mode first
                     self.handle_screen_specific_event(Event::Enter).await?;
@@ -993,66 +971,23 @@ impl App {
                 }
             }
             Event::MoveFocus(direction) => {
-                if self.state.navigation_mode == NavigationMode::WithinScreen {
-                    // Check if any list is in editing mode - if so, let screen handle the event
-                    let should_handle_as_focus = match self.state.current_screen {
-                        Screen::Swap => {
-                            let swap_state = crate::tui::screens::swap::get_swap_screen_state();
-                            // When pool or token dropdown is focused, keep arrow keys inside list
-                            let is_list_focus = matches!(
-                                swap_state.input_focus,
-                                crate::tui::screens::swap::SwapInputFocus::Pool
-                                    | crate::tui::screens::swap::SwapInputFocus::FromToken
-                            );
-
-                            // Allow focus movement only if we're NOT inside list focus/editing state
-                            !(is_list_focus || swap_state.is_any_list_editing())
-                        }
-                        Screen::Liquidity => {
-                            let liquidity_state =
-                                crate::tui::screens::liquidity::get_liquidity_screen_state();
-                            // When pool dropdown is focused or in Mode focus, keep arrow keys inside screen
-                            let is_list_or_mode_focus = matches!(
-                                liquidity_state.input_focus,
-                                crate::tui::screens::liquidity::LiquidityInputFocus::PoolSelection
-                                    | crate::tui::screens::liquidity::LiquidityInputFocus::Mode
-                            );
-
-                            // Allow focus movement only if we're NOT inside list/mode focus or editing state
-                            !(is_list_or_mode_focus || liquidity_state.is_any_list_editing())
-                        }
-                        _ => true, // Other screens use normal focus management
+                // MoveFocus events should already be handled by screen-specific handlers above
+                // If we reach here, it means the screen didn't handle it, so we fall back to global navigation
+                if self.state.navigation_mode == NavigationMode::WithinScreen && !focus_handled {
+                    // Convert Up/Down arrows to Tab/Shift+Tab behavior for consistent navigation
+                    let focus_event = match direction {
+                        crate::tui::events::FocusDirection::Up => Event::FocusPrevious,
+                        crate::tui::events::FocusDirection::Down => Event::FocusNext,
+                        _ => Event::MoveFocus(direction), // Keep other directions as-is
                     };
 
-                    if should_handle_as_focus {
-                        if let Some(focused_component) = self
-                            .state
-                            .focus_manager
-                            .handle_event(&Event::MoveFocus(direction))
-                        {
-                            self.update_component_focus(&focused_component);
-                        }
-                    } else {
-                        // Let the screen-specific handler deal with it
-                        if !self
-                            .handle_screen_specific_event(Event::MoveFocus(direction.clone()))
-                            .await?
-                        {
-                            // If screen didn't handle it, fall back to focus management
-                            if let Some(focused_component) = self
-                                .state
-                                .focus_manager
-                                .handle_event(&Event::MoveFocus(direction))
-                            {
-                                self.update_component_focus(&focused_component);
-                            }
-                        }
+                    if let Some(focused_component) = self
+                        .state
+                        .focus_manager
+                        .handle_event(&focus_event)
+                    {
+                        self.update_component_focus(&focused_component);
                     }
-                } else if self.state.current_screen == Screen::WalletSelection {
-                    // Special case: Allow wallet selection screen to handle MoveFocus events even in ScreenLevel mode
-                    // This is needed because wallet selection is often the first screen and needs arrow key navigation
-                    self.handle_screen_specific_event(Event::MoveFocus(direction))
-                        .await?;
                 }
             }
             Event::ContextAction => {
@@ -1066,18 +1001,6 @@ impl App {
                 self.refresh_current_screen_data().await?;
             }
             _ => {
-                // Handle modal events if modal is open
-                if self.state.modal_state.is_some() {
-                    if self.handle_modal_event(&event) {
-                        return Ok(false);
-                    }
-                }
-
-                // Screen-specific handlers should be checked before general navigation
-                if self.handle_screen_specific_event(event.clone()).await? {
-                    return Ok(false);
-                }
-
                 // Handle number key navigation for tab switching (1-8) when in ScreenLevel mode
                 if let Event::Char(c) = &event {
                     if self.state.navigation_mode == NavigationMode::ScreenLevel {
@@ -1558,14 +1481,14 @@ impl App {
         use crate::tui::screens::wallet_selection::{WalletSelectionAction, WalletSelectionState};
 
         match event {
-            Event::Up | Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
                 if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet
                 {
                     self.state.wallet_selection_state.move_selection_up();
                     return Ok(true);
                 }
             }
-            Event::Down | Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
                 if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet
                 {
                     self.state.wallet_selection_state.move_selection_down();
@@ -1738,46 +1661,58 @@ impl App {
     async fn handle_swap_screen_event(&mut self, event: Event) -> Result<bool, Error> {
         let swap_state = crate::tui::screens::swap::get_swap_screen_state();
 
-        // Convert Event to KeyEvent for the new list system
-        let key_event = match &event {
+        // Handle MoveFocus events directly for better arrow key navigation
+        match &event {
             Event::MoveFocus(direction) => {
-                // Convert focus events to direct key events for list navigation
-                match direction {
-                    crate::tui::events::FocusDirection::Up => {
-                        Some(crossterm::event::KeyEvent::new(
-                            crossterm::event::KeyCode::Up,
-                            crossterm::event::KeyModifiers::NONE,
-                        ))
+                // Only handle arrow keys when we're in content mode and focused on interactive elements
+                if self.state.navigation_mode == NavigationMode::WithinScreen {
+                    match direction {
+                        crate::tui::events::FocusDirection::Up => {
+                            // Check if we're in a dropdown that should handle up/down
+                            if matches!(
+                                swap_state.input_focus,
+                                crate::tui::screens::swap::SwapInputFocus::Pool
+                                    | crate::tui::screens::swap::SwapInputFocus::FromToken
+                            ) && swap_state.is_any_list_editing() {
+                                // Let the dropdown handle the navigation
+                                let key = crossterm::event::KeyEvent::new(
+                                    crossterm::event::KeyCode::Up,
+                                    crossterm::event::KeyModifiers::NONE,
+                                );
+                                if swap_state.handle_key_event(key, self.state.navigation_mode) {
+                                    self.sync_swap_state_to_app(swap_state);
+                                    return Ok(true);
+                                }
+                            }
+                            // Otherwise, let global focus management handle it
+                            return Ok(false);
+                        }
+                        crate::tui::events::FocusDirection::Down => {
+                            // Check if we're in a dropdown that should handle up/down
+                            if matches!(
+                                swap_state.input_focus,
+                                crate::tui::screens::swap::SwapInputFocus::Pool
+                                    | crate::tui::screens::swap::SwapInputFocus::FromToken
+                            ) && swap_state.is_any_list_editing() {
+                                // Let the dropdown handle the navigation
+                                let key = crossterm::event::KeyEvent::new(
+                                    crossterm::event::KeyCode::Down,
+                                    crossterm::event::KeyModifiers::NONE,
+                                );
+                                if swap_state.handle_key_event(key, self.state.navigation_mode) {
+                                    self.sync_swap_state_to_app(swap_state);
+                                    return Ok(true);
+                                }
+                            }
+                            // Otherwise, let global focus management handle it
+                            return Ok(false);
+                        }
+                        _ => return Ok(false), // Let global focus handle other directions
                     }
-                    crate::tui::events::FocusDirection::Down => {
-                        Some(crossterm::event::KeyEvent::new(
-                            crossterm::event::KeyCode::Down,
-                            crossterm::event::KeyModifiers::NONE,
-                        ))
-                    }
-                    _ => None,
                 }
+                return Ok(false);
             }
-            _ => None,
-        };
-
-        if let Some(key) = key_event {
-            // Use the new key event handler
-            if swap_state.handle_key_event(key, self.state.navigation_mode) {
-                // Update app state with changes from swap screen
-                if let Some(selected_value) = swap_state.pool_dropdown.get_selected_value() {
-                    if let Ok(pool_id) = selected_value.parse::<u64>() {
-                        self.state.swap_state.selected_pool_id = Some(pool_id.to_string());
-                    }
-                }
-                if let Some(selected_token) = swap_state.from_token_dropdown.get_selected_value() {
-                    self.state.swap_state.from_asset = Some(selected_token.to_string());
-                }
-                self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
-                self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
-
-                return Ok(true);
-            }
+            _ => {}
         }
 
         // Handle other swap-specific events
@@ -1785,11 +1720,13 @@ impl App {
             Event::Tab => {
                 // Handle Tab navigation between form fields
                 swap_state.next_focus();
+                self.sync_swap_state_to_app(swap_state);
                 return Ok(true);
             }
             Event::BackTab => {
                 // Handle Shift+Tab (reverse navigation) between form fields
                 swap_state.previous_focus();
+                self.sync_swap_state_to_app(swap_state);
                 return Ok(true);
             }
             Event::Enter => {
@@ -1799,6 +1736,7 @@ impl App {
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    self.sync_swap_state_to_app(swap_state);
                     // Check if execute button was pressed by examining the current focus
                     if matches!(
                         swap_state.input_focus,
@@ -1831,6 +1769,7 @@ impl App {
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    self.sync_swap_state_to_app(swap_state);
                     return Ok(true);
                 }
             }
@@ -1841,26 +1780,7 @@ impl App {
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
-                    return Ok(true);
-                }
-            }
-            Event::Up => {
-                // Handle up arrow for lists
-                let key_event = crossterm::event::KeyEvent::new(
-                    crossterm::event::KeyCode::Up,
-                    crossterm::event::KeyModifiers::NONE,
-                );
-                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
-                    return Ok(true);
-                }
-            }
-            Event::Down => {
-                // Handle down arrow for lists
-                let key_event = crossterm::event::KeyEvent::new(
-                    crossterm::event::KeyCode::Down,
-                    crossterm::event::KeyModifiers::NONE,
-                );
-                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    self.sync_swap_state_to_app(swap_state);
                     return Ok(true);
                 }
             }
@@ -1898,6 +1818,21 @@ impl App {
         }
 
         Ok(false)
+    }
+
+    /// Sync swap screen state back to app state
+    fn sync_swap_state_to_app(&mut self, swap_state: &crate::tui::screens::swap::SwapScreenState) {
+        // Update app state with changes from swap screen
+        if let Some(selected_value) = swap_state.pool_dropdown.get_selected_value() {
+            if let Ok(pool_id) = selected_value.parse::<u64>() {
+                self.state.swap_state.selected_pool_id = Some(pool_id.to_string());
+            }
+        }
+        if let Some(selected_token) = swap_state.from_token_dropdown.get_selected_value() {
+            self.state.swap_state.from_asset = Some(selected_token.to_string());
+        }
+        self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
+        self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
     }
 
     /// Handle liquidity screen specific events. Returns `true` if the event was handled.
@@ -1976,7 +1911,7 @@ impl App {
 
         // Handle specific events that don't need key conversion
         match event {
-            Event::Right => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Right) => {
                 // Handle direct right arrow for tab switching
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Right,
@@ -1986,7 +1921,7 @@ impl App {
                     return Ok(true);
                 }
             }
-            Event::Left => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Left) => {
                 // Handle direct left arrow for tab switching
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Left,
@@ -1996,7 +1931,7 @@ impl App {
                     return Ok(true);
                 }
             }
-            Event::Up => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
                 // Handle up arrow for lists
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Up,
@@ -2006,7 +1941,7 @@ impl App {
                     return Ok(true);
                 }
             }
-            Event::Down => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
                 // Handle down arrow for lists
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Down,
@@ -2298,36 +2233,53 @@ impl App {
     pub fn handle_modal_event(&mut self, event: &Event) -> bool {
         if let Some(ref mut modal) = self.state.modal_state {
             match event {
-                Event::Up => {
+                Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
                     modal.scroll_up();
                     return true;
                 }
-                Event::Down => {
+                Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
                     modal.scroll_down();
                     return true;
                 }
-                Event::Left => {
+                Event::MoveFocus(crate::tui::events::FocusDirection::Left) => {
                     modal.select_previous();
                     return true;
                 }
-                Event::Right => {
+                Event::MoveFocus(crate::tui::events::FocusDirection::Right) => {
                     modal.select_next();
                     return true;
                 }
                 Event::Enter => {
-                    // Handle confirmation or retry
-                    let should_retry = modal.is_retry_selected();
-                    let is_confirmed = modal.is_confirmed();
-
-                    // Clear modal first
-                    self.state.modal_state = None;
-
-                    if should_retry {
-                        // Implement retry logic based on the last failed operation
-                        self.retry_last_operation();
-                    } else if is_confirmed {
-                        // Handle confirmation actions
-                        self.handle_confirmation();
+                    // For confirmation modals, Enter should execute the currently selected option
+                    match &modal.modal_type {
+                        crate::tui::components::modals::ModalType::Confirmation { .. } => {
+                            let is_confirmed = modal.selected_option == 0; // 0 = confirm, 1 = cancel
+                            
+                            // Clear modal first
+                            self.state.modal_state = None;
+                            
+                            if is_confirmed {
+                                // Handle confirmation actions
+                                self.handle_confirmation();
+                            }
+                            // If not confirmed (cancel), just close modal (already done above)
+                        }
+                        crate::tui::components::modals::ModalType::Error { retry_action, .. } => {
+                            let should_retry = retry_action.is_some() && modal.selected_option == 0;
+                            
+                            // Clear modal first
+                            self.state.modal_state = None;
+                            
+                            if should_retry {
+                                // Implement retry logic based on the last failed operation
+                                self.retry_last_operation();
+                            }
+                            // If not retry (close/cancel), just close modal (already done above)
+                        }
+                        _ => {
+                            // For other modal types, just close the modal
+                            self.state.modal_state = None;
+                        }
                     }
                     return true;
                 }
