@@ -944,6 +944,208 @@ impl AsyncBlockchainProcessor {
         }
     }
 
+    /// Create a new pool asynchronously
+    pub async fn create_pool(
+        &self,
+        asset_1: String,
+        asset_2: String,
+        swap_fee: String,
+        exit_fee: String,
+        pool_features: Vec<String>,
+    ) {
+        let operation = "create_pool".to_string();
+
+        // Send initial progress
+        let _ = self.event_sender.send(Event::BlockchainProgress {
+            operation: operation.clone(),
+            status: "Preparing pool creation...".to_string(),
+            progress: Some(0.1),
+        });
+
+        let result = self
+            .execute_create_pool_transaction(
+                asset_1.clone(),
+                asset_2.clone(),
+                swap_fee,
+                exit_fee,
+                pool_features,
+            )
+            .await;
+
+        match result {
+            Ok(tx_response) => {
+                let _ = self.event_sender.send(Event::BlockchainSuccess {
+                    operation: operation.clone(),
+                    result: format!("Successfully created pool for {} / {}", asset_1, asset_2),
+                    transaction_hash: Some(tx_response.txhash),
+                    enhanced_data: Some(tx_response.result.unwrap_or_default()),
+                });
+            }
+            Err(e) => {
+                let _ = self.event_sender.send(Event::BlockchainError {
+                    operation: operation.clone(),
+                    error: format!("Failed to create pool: {}", e),
+                });
+            }
+        }
+    }
+
+    /// Execute the actual create pool transaction using the SDK client
+    async fn execute_create_pool_transaction(
+        &self,
+        asset_1: String,
+        asset_2: String,
+        swap_fee: String,
+        _exit_fee: String,
+        pool_features: Vec<String>,
+    ) -> Result<ProvideResultWrapper, String> {
+        use cosmwasm_std::Decimal;
+        use std::str::FromStr;
+
+        // Send progress update
+        let _ = self.event_sender.send(Event::BlockchainProgress {
+            operation: "create_pool".to_string(),
+            status: "Parsing pool parameters...".to_string(),
+            progress: Some(0.2),
+        });
+
+        // Parse swap fee
+        let swap_fee_decimal =
+            Decimal::from_str(&swap_fee).map_err(|e| format!("Invalid swap fee: {}", e))?;
+
+        // Parse protocol fee from pool features
+        let mut protocol_fee_decimal = Decimal::zero();
+        let mut pool_type_str = "ConstantProduct".to_string();
+
+        for feature in &pool_features {
+            if let Some(protocol_fee_str) = feature.strip_prefix("protocol_fee:") {
+                protocol_fee_decimal = Decimal::from_str(protocol_fee_str)
+                    .map_err(|e| format!("Invalid protocol fee: {}", e))?;
+            } else if let Some(pool_type_val) = feature.strip_prefix("pool_type:") {
+                pool_type_str = pool_type_val.to_string();
+            }
+        }
+
+        // Send progress update
+        let _ = self.event_sender.send(Event::BlockchainProgress {
+            operation: "create_pool".to_string(),
+            status: "Preparing pool configuration...".to_string(),
+            progress: Some(0.4),
+        });
+
+        // Create pool fees structure
+        let pool_fees = mantra_dex_std::fee::PoolFee {
+            protocol_fee: mantra_dex_std::fee::Fee {
+                share: protocol_fee_decimal,
+            },
+            swap_fee: mantra_dex_std::fee::Fee {
+                share: swap_fee_decimal,
+            },
+            burn_fee: mantra_dex_std::fee::Fee {
+                share: cosmwasm_std::Decimal::zero(),
+            },
+            extra_fees: vec![], // No extra fees for basic pool creation
+        };
+
+        // Create pool type
+        let pool_type = match pool_type_str.as_str() {
+            "ConstantProduct" => mantra_dex_std::pool_manager::PoolType::ConstantProduct,
+            "StableSwap" => mantra_dex_std::pool_manager::PoolType::StableSwap {
+                amp: 100, // Default amplification parameter
+            },
+            _ => mantra_dex_std::pool_manager::PoolType::ConstantProduct,
+        };
+
+        // Send progress update
+        let _ = self.event_sender.send(Event::BlockchainProgress {
+            operation: "create_pool".to_string(),
+            status: "Broadcasting pool creation transaction...".to_string(),
+            progress: Some(0.7),
+        });
+
+        // Execute actual blockchain transaction if client is available
+        if let Some(client) = &self.client {
+            crate::tui::utils::logger::log_info(&format!(
+                "Creating pool with assets: {} / {}, swap fee: {}, protocol fee: {}, pool type: {}",
+                asset_1, asset_2, swap_fee, protocol_fee_decimal, pool_type_str
+            ));
+
+            match client
+                .create_pool(
+                    vec![asset_1.clone(), asset_2.clone()],
+                    vec![6, 6], // Default to 6 decimals for both assets
+                    pool_fees,
+                    pool_type,
+                    None, // No custom pool identifier
+                )
+                .await
+            {
+                Ok(tx_response) => {
+                    // Send final progress update
+                    let _ = self.event_sender.send(Event::BlockchainProgress {
+                        operation: "create_pool".to_string(),
+                        status: "Transaction confirmed, pool created successfully!".to_string(),
+                        progress: Some(0.9),
+                    });
+
+                    crate::tui::utils::logger::log_info(&format!(
+                        "Pool creation successful! TX Hash: {}",
+                        tx_response.txhash
+                    ));
+
+                    Ok(ProvideResultWrapper {
+                        txhash: tx_response.txhash,
+                        result: Some(format!(
+                            "Pool created for {} / {} with swap fee {}%",
+                            asset_1, asset_2, swap_fee
+                        )),
+                        lp_tokens_received: None,
+                        lp_token_denom: None,
+                        pool_id: "new_pool".to_string(), // Pool ID will be in transaction events
+                        user_lp_balance_after: None,
+                        pool_total_supply: None,
+                    })
+                }
+                Err(e) => {
+                    crate::tui::utils::logger::log_error(&format!(
+                        "Pool creation transaction failed: {}",
+                        e
+                    ));
+                    Err(format!("Pool creation transaction failed: {}", e))
+                }
+            }
+        } else {
+            // Fallback to mock implementation when no client is available
+            crate::tui::utils::logger::log_warning(
+                "No client available, using mock implementation for pool creation",
+            );
+
+            // Simulate network delay
+            tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+
+            // Send final progress update
+            let _ = self.event_sender.send(Event::BlockchainProgress {
+                operation: "create_pool".to_string(),
+                status: "Transaction confirmed, pool created successfully!".to_string(),
+                progress: Some(0.9),
+            });
+
+            // Return mock success
+            Ok(ProvideResultWrapper {
+                txhash: format!("mantra{}", chrono::Utc::now().timestamp()),
+                result: Some(format!(
+                    "Mock pool created for {} / {} (no real client connected)",
+                    asset_1, asset_2
+                )),
+                lp_tokens_received: None,
+                lp_token_denom: None,
+                pool_id: "mock_pool".to_string(),
+                user_lp_balance_after: None,
+                pool_total_supply: None,
+            })
+        }
+    }
+
     /// Refresh data from blockchain
     pub async fn refresh_data(&self, data_type: String) {
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1016,13 +1218,8 @@ impl EventHandler {
     /// Convert a key event to an application event
     fn convert_key_event(key_event: KeyEvent) -> Option<Event> {
         match key_event {
-            // Quit events
-            KeyEvent {
-                code: KeyCode::Char('q'),
-                modifiers: KeyModifiers::NONE,
-                ..
-            } => Some(Event::Quit),
-
+            // Quit events - removed automatic 'q' conversion to prevent interference with text input
+            // 'q' will be handled by the application based on context
             KeyEvent {
                 code: KeyCode::Char('c'),
                 modifiers: KeyModifiers::CONTROL,
@@ -1272,6 +1469,19 @@ impl EventHandler {
             } => {
                 tokio::spawn(async move {
                     processor.claim_rewards(pool_id, epochs, claim_all).await;
+                });
+            }
+            Event::CreatePool {
+                asset_1,
+                asset_2,
+                swap_fee,
+                exit_fee,
+                pool_features,
+            } => {
+                tokio::spawn(async move {
+                    processor
+                        .create_pool(asset_1, asset_2, swap_fee, exit_fee, pool_features)
+                        .await;
                 });
             }
             Event::Refresh => {

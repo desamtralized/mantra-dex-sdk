@@ -384,6 +384,200 @@ impl MantraDexClient {
         Ok(tx_response)
     }
 
+    /// Get pool manager configuration including pool creation fee
+    pub async fn get_pool_manager_config(&self) -> Result<serde_json::Value, Error> {
+        let query = pool_manager::QueryMsg::Config {};
+        let pool_manager_address = self.config.contracts.pool_manager.clone();
+        self.query(&pool_manager_address, &query).await
+    }
+
+    /// Get pool creation fee from pool manager config
+    pub async fn get_pool_creation_fee(&self) -> Result<cosmwasm_std::Coin, Error> {
+        // Try to get the fee from config, but fall back to known working value if needed
+        match self.get_pool_manager_config().await {
+            Ok(config) => {
+                // Try different possible structures for the pool_creation_fee
+                let fee_value = config.get("pool_creation_fee").or_else(|| {
+                    config
+                        .get("config")
+                        .and_then(|c| c.get("pool_creation_fee"))
+                });
+
+                if let Some(fee_value) = fee_value {
+                    // Parse the coin structure
+                    if let (Some(denom), Some(amount_str)) = (
+                        fee_value.get("denom").and_then(|v| v.as_str()),
+                        fee_value.get("amount").and_then(|v| v.as_str()),
+                    ) {
+                        if let Ok(amount) = cosmwasm_std::Uint128::from_str(amount_str) {
+                            // Check if amount is positive
+                            if !amount.is_zero() {
+                                return Ok(cosmwasm_std::Coin {
+                                    denom: denom.to_string(),
+                                    amount,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "Failed to query pool manager config: {}, using fallback fee",
+                    e
+                );
+            }
+        }
+
+        // Fallback to known working fee (88 OM = 88,000,000 uom)
+        Ok(cosmwasm_std::Coin {
+            denom: "uom".to_string(),
+            amount: cosmwasm_std::Uint128::new(88_000_000),
+        })
+    }
+
+    /// Query asset decimals for a specific asset in a pool
+    ///
+    /// This method uses the pool manager's AssetDecimals query to get accurate
+    /// decimal information for an asset within a specific pool context.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool_identifier` - The pool identifier to query from
+    /// * `denom` - The asset denomination to get decimals for
+    ///
+    /// # Returns
+    ///
+    /// The number of decimal places for the asset
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the query fails or the asset is not found in the pool
+    pub async fn query_asset_decimals(
+        &self,
+        pool_identifier: &str,
+        denom: &str,
+    ) -> Result<u8, Error> {
+        let query = pool_manager::QueryMsg::AssetDecimals {
+            pool_identifier: pool_identifier.to_string(),
+            denom: denom.to_string(),
+        };
+
+        let pool_manager_address = self.config.contracts.pool_manager.clone();
+
+        // Query and expect AssetDecimalsResponse
+        let response: serde_json::Value = self.query(&pool_manager_address, &query).await?;
+
+        // Extract decimals from response
+        let decimals = response
+            .get("decimals")
+            .and_then(|v| v.as_u64())
+            .map(|d| d as u8)
+            .ok_or_else(|| Error::Other("Invalid asset decimals response format".to_string()))?;
+
+        Ok(decimals)
+    }
+
+    /// Get asset decimals from multiple pools for comprehensive mapping
+    ///
+    /// This method queries all available pools and builds a comprehensive map of
+    /// asset denominations to their decimal places using the official AssetDecimals query.
+    ///
+    /// # Returns
+    ///
+    /// A HashMap mapping asset denominations to their decimal places
+    ///
+    /// # Errors
+    ///
+    /// Returns error if pools cannot be queried
+    pub async fn get_asset_decimals_from_pools(
+        &self,
+    ) -> Result<std::collections::HashMap<String, u8>, Error> {
+        use std::collections::HashMap;
+
+        let pools = self.get_pools(Some(100)).await?; // Query up to 100 pools
+        let mut asset_decimals_map = HashMap::new();
+
+        for pool in pools {
+            let pool_id = &pool.pool_info.pool_identifier;
+            let assets = &pool.pool_info.assets;
+
+            // For each asset in the pool, query its decimals using the proper API
+            for asset in assets {
+                let denom = &asset.denom;
+
+                // Skip if we already have this denomination
+                if asset_decimals_map.contains_key(denom) {
+                    continue;
+                }
+
+                // Query asset decimals using the pool manager API
+                match self.query_asset_decimals(pool_id, denom).await {
+                    Ok(decimals) => {
+                        asset_decimals_map.insert(denom.clone(), decimals);
+                    }
+                    Err(e) => {
+                        // Log error but continue with other assets
+                        eprintln!(
+                            "Failed to query decimals for {} in pool {}: {}",
+                            denom, pool_id, e
+                        );
+
+                        // Fallback to reasonable defaults for known tokens
+                        let fallback_decimals = match denom.as_str() {
+                            "uom" => 6,
+                            d if d.starts_with("factory/") => 6,
+                            d if d.starts_with("ibc/") => 6,
+                            _ => 6,
+                        };
+                        asset_decimals_map.insert(denom.clone(), fallback_decimals);
+                    }
+                }
+            }
+        }
+
+        // Ensure native token is always present
+        asset_decimals_map.entry("uom".to_string()).or_insert(6);
+
+        Ok(asset_decimals_map)
+    }
+
+    /// Get asset decimals for a specific denomination
+    ///
+    /// This method attempts to find a pool containing the asset and query its decimals.
+    /// If multiple pools contain the asset, it uses the first one found.
+    ///
+    /// # Arguments
+    ///
+    /// * `denom` - The asset denomination to get decimals for
+    ///
+    /// # Returns
+    ///
+    /// The number of decimal places for the asset
+    pub async fn get_asset_decimals(&self, denom: &str) -> Result<u8, Error> {
+        // First try to find a pool that contains this asset
+        let pools = self.get_pools(Some(50)).await?;
+
+        for pool in pools {
+            let pool_id = &pool.pool_info.pool_identifier;
+            let assets = &pool.pool_info.assets;
+
+            // Check if this pool contains the requested asset
+            if assets.iter().any(|asset| asset.denom == denom) {
+                // Found a pool with this asset, query its decimals
+                return self.query_asset_decimals(pool_id, denom).await;
+            }
+        }
+
+        // If not found in any pool, return reasonable default
+        Ok(match denom {
+            "uom" => 6,
+            d if d.starts_with("factory/") => 6,
+            d if d.starts_with("ibc/") => 6,
+            _ => 6,
+        })
+    }
+
     /// Get pool information by ID
     pub async fn get_pool(&self, pool_id: &str) -> Result<PoolInfoResponse, Error> {
         let query = pool_manager::QueryMsg::Pools {
@@ -712,10 +906,11 @@ impl MantraDexClient {
 
         let pool_manager_address = self.config.contracts.pool_manager.clone();
 
-        // Pool creation requires a fee of 98 OM (98,000,000 uom)
+        // Get pool creation fee dynamically from pool manager config
+        let pool_creation_fee_coin = self.get_pool_creation_fee().await?;
         let pool_creation_fee = vec![Coin {
-            denom: "uom".to_string(),
-            amount: Uint128::new(98_000_000), // 98 OM
+            denom: pool_creation_fee_coin.denom,
+            amount: pool_creation_fee_coin.amount,
         }];
 
         self.execute(&pool_manager_address, &msg, pool_creation_fee)

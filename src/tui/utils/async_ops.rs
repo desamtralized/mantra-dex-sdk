@@ -8,7 +8,7 @@ use crate::{Error, MantraDexClient};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::time::{interval, Interval};
+use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
 /// Background sync configuration
