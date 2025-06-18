@@ -632,6 +632,7 @@ impl AsyncDataRefresher {
                         operation: operation_name.to_string(),
                         result: format!("Operation completed in {:?}", start_time.elapsed()),
                         transaction_hash: None,
+                        enhanced_data: None, // No enhanced data for general operations
                     });
                     return Ok(result);
                 }

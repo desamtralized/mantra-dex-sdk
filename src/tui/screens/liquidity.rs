@@ -92,6 +92,10 @@ pub struct LiquidityScreenState {
     pub expected_assets: Option<(Uint128, Uint128, String, String)>, // (amount1, amount2, denom1, denom2)
     /// Timer for auto-refresh
     pub last_input_change: Option<std::time::Instant>,
+    /// Current pool reserves for proportional calculations (supports multi-asset pools)
+    pub current_pool_reserves: Option<Vec<(Uint128, String)>>, // Vec of (reserve_amount, denom)
+    /// Flag to prevent infinite loops during proportional calculation
+    pub updating_proportional_amount: bool,
 }
 
 impl Default for LiquidityScreenState {
@@ -132,6 +136,8 @@ impl Default for LiquidityScreenState {
             expected_lp_tokens: None,
             expected_assets: None,
             last_input_change: None,
+            current_pool_reserves: None,
+            updating_proportional_amount: false,
         };
 
         // Apply initial focus
@@ -275,6 +281,181 @@ impl LiquidityScreenState {
         self.last_input_change = Some(std::time::Instant::now());
     }
 
+    /// Update pool reserves from blockchain data
+    pub fn update_pool_reserves(&mut self, reserves: Vec<(Uint128, String)>) {
+        self.current_pool_reserves = Some(reserves);
+        crate::tui::utils::logger::log_info(&format!(
+            "Updated pool reserves: {} assets",
+            self.current_pool_reserves
+                .as_ref()
+                .map(|r| r.len())
+                .unwrap_or(0)
+        ));
+    }
+
+    /// Calculate proportional amount for the other asset when one amount is entered
+    pub fn calculate_proportional_amount(&mut self, changed_field: LiquidityInputFocus) {
+        // Prevent infinite loops during calculation
+        if self.updating_proportional_amount {
+            return;
+        }
+
+        // Only calculate for provide mode with valid pool reserves
+        if self.mode != LiquidityMode::Provide {
+            return;
+        }
+
+        let reserves = match &self.current_pool_reserves {
+            Some(reserves) if reserves.len() >= 2 => reserves,
+            _ => {
+                crate::tui::utils::logger::log_debug(
+                    "Cannot calculate proportional amounts: insufficient pool reserves",
+                );
+                return;
+            }
+        };
+
+        // Get the pool label to extract asset denoms
+        let pool_label = match self.pool_dropdown.get_selected_label() {
+            Some(label) => label,
+            None => {
+                crate::tui::utils::logger::log_debug(
+                    "Cannot calculate proportional amounts: no pool selected",
+                );
+                return;
+            }
+        };
+
+        // Extract asset symbols from pool label
+        let first_token = extract_first_token_from_pool(pool_label);
+        let second_token = extract_second_token_from_pool(pool_label);
+
+        // Find the reserves for our two assets
+        let (first_reserve, second_reserve) =
+            match self.find_reserves_for_tokens(&first_token, &second_token, reserves) {
+                Some((r1, r2)) => (r1, r2),
+                None => {
+                    crate::tui::utils::logger::log_debug(&format!(
+                        "Cannot find reserves for tokens {} and {} in pool reserves",
+                        first_token, second_token
+                    ));
+                    return;
+                }
+            };
+
+        self.updating_proportional_amount = true;
+
+        match changed_field {
+            LiquidityInputFocus::FirstAssetAmount => {
+                // Calculate second asset amount based on first asset input
+                let first_input = self.first_asset_input.value();
+                if !first_input.is_empty() && first_input != "0" && first_input != "0.0" {
+                    if let Ok(first_amount) = first_input.parse::<f64>() {
+                        let ratio = first_amount / self.uint128_to_f64(first_reserve);
+                        let second_amount = ratio * self.uint128_to_f64(second_reserve);
+                        let second_amount_str = self.format_calculated_amount(second_amount);
+
+                        crate::tui::utils::logger::log_debug(&format!(
+                            "Proportional calculation: {} {} -> {} {} (ratio: {:.6})",
+                            first_input, first_token, second_amount_str, second_token, ratio
+                        ));
+
+                        self.second_asset_input.set_value(&second_amount_str);
+                    }
+                } else {
+                    // Clear the second input if first is empty/zero
+                    self.second_asset_input.clear();
+                }
+            }
+            LiquidityInputFocus::SecondAssetAmount => {
+                // Calculate first asset amount based on second asset input
+                let second_input = self.second_asset_input.value();
+                if !second_input.is_empty() && second_input != "0" && second_input != "0.0" {
+                    if let Ok(second_amount) = second_input.parse::<f64>() {
+                        let ratio = second_amount / self.uint128_to_f64(second_reserve);
+                        let first_amount = ratio * self.uint128_to_f64(first_reserve);
+                        let first_amount_str = self.format_calculated_amount(first_amount);
+
+                        crate::tui::utils::logger::log_debug(&format!(
+                            "Proportional calculation: {} {} -> {} {} (ratio: {:.6})",
+                            second_input, second_token, first_amount_str, first_token, ratio
+                        ));
+
+                        self.first_asset_input.set_value(&first_amount_str);
+                    }
+                } else {
+                    // Clear the first input if second is empty/zero
+                    self.first_asset_input.clear();
+                }
+            }
+            _ => {} // No proportional calculation for other fields
+        }
+
+        self.updating_proportional_amount = false;
+    }
+
+    /// Find reserves for specific tokens in the reserve list
+    fn find_reserves_for_tokens(
+        &self,
+        first_token: &str,
+        second_token: &str,
+        reserves: &[(Uint128, String)],
+    ) -> Option<(Uint128, Uint128)> {
+        let mut first_reserve = None;
+        let mut second_reserve = None;
+
+        for (amount, denom) in reserves {
+            // Match tokens by checking if the denom contains the token symbol
+            // or matches common patterns
+            if self.denom_matches_token(denom, first_token) {
+                first_reserve = Some(*amount);
+            } else if self.denom_matches_token(denom, second_token) {
+                second_reserve = Some(*amount);
+            }
+        }
+
+        match (first_reserve, second_reserve) {
+            (Some(r1), Some(r2)) => Some((r1, r2)),
+            _ => None,
+        }
+    }
+
+    /// Check if a denomination matches a token symbol
+    fn denom_matches_token(&self, denom: &str, token_symbol: &str) -> bool {
+        // Handle various denomination formats
+        match token_symbol.to_uppercase().as_str() {
+            "OM" => denom == "uom",
+            "USDC" => denom.contains("uUSDC") || denom.contains("usdc"),
+            "AUSDY" => denom.contains("ausdy"),
+            _ => {
+                // Generic matching: check if denom contains token symbol (case insensitive)
+                denom.to_lowercase().contains(&token_symbol.to_lowercase()) ||
+                // Or if token symbol is in the denom path
+                denom.split('/').any(|part| part.to_lowercase().contains(&token_symbol.to_lowercase()))
+            }
+        }
+    }
+
+    /// Convert Uint128 to f64 for calculations (with proper decimal handling)
+    fn uint128_to_f64(&self, amount: Uint128) -> f64 {
+        // Convert from micro units to actual token amount
+        // Most tokens use 6 decimals on Mantra network
+        amount.u128() as f64 / 1_000_000.0
+    }
+
+    /// Format calculated amount to a reasonable number of decimal places
+    fn format_calculated_amount(&self, amount: f64) -> String {
+        if amount < 0.000001 {
+            format!("{:.9}", amount) // Very small amounts need more precision
+        } else if amount < 0.01 {
+            format!("{:.6}", amount) // Small amounts
+        } else if amount < 1.0 {
+            format!("{:.4}", amount) // Fractional amounts
+        } else {
+            format!("{:.2}", amount) // Larger amounts
+        }
+    }
+
     /// Check if any list is currently in editing mode
     pub fn is_any_list_editing(&self) -> bool {
         self.pool_dropdown.is_editing
@@ -296,6 +477,19 @@ impl LiquidityScreenState {
         // Handle ESC key to return to screen-level navigation
         if matches!(key.code, KeyCode::Esc) {
             return true; // Let the main app handle switching navigation modes
+        }
+
+        // Handle Tab navigation between fields
+        if matches!(key.code, KeyCode::Tab) {
+            if key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::SHIFT)
+            {
+                self.previous_focus();
+            } else {
+                self.next_focus();
+            }
+            return true;
         }
 
         // Log significant key events for liquidity execution
@@ -339,6 +533,8 @@ impl LiquidityScreenState {
                 if let Some(request) = input_request {
                     if self.first_asset_input.handle_input(request).is_some() {
                         self.mark_input_change();
+                        // Trigger proportional calculation for the other asset
+                        self.calculate_proportional_amount(LiquidityInputFocus::FirstAssetAmount);
                         return true;
                     }
                 }
@@ -359,6 +555,8 @@ impl LiquidityScreenState {
                 if let Some(request) = input_request {
                     if self.second_asset_input.handle_input(request).is_some() {
                         self.mark_input_change();
+                        // Trigger proportional calculation for the other asset
+                        self.calculate_proportional_amount(LiquidityInputFocus::SecondAssetAmount);
                         return true;
                     }
                 }
@@ -1659,6 +1857,12 @@ pub fn update_liquidity_positions(positions: Vec<LiquidityPosition>) {
 pub fn update_liquidity_pools(pools: Vec<(String, String)>) {
     let liquidity_state = get_liquidity_screen_state();
     liquidity_state.update_available_pools(pools);
+}
+
+/// Update pool reserves for proportional calculations
+pub fn update_liquidity_pool_reserves(reserves: Vec<(Uint128, String)>) {
+    let liquidity_state = get_liquidity_screen_state();
+    liquidity_state.update_pool_reserves(reserves);
 }
 
 /// Initialize focus for the liquidity screen (called when entering the screen)

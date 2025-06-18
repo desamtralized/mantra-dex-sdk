@@ -108,6 +108,37 @@ impl MantraDexClient {
             .ok_or_else(|| Error::Wallet("No wallet configured".to_string()))
     }
 
+    /// Get the wallet address if wallet is configured
+    pub async fn get_wallet_address(&self) -> Option<String> {
+        match &self.wallet {
+            Some(wallet) => wallet.address().ok().map(|addr| addr.to_string()),
+            None => None,
+        }
+    }
+
+    /// Get balance for a specific denom for a wallet address
+    pub async fn get_balance(
+        &self,
+        address: &str,
+        denom: &str,
+    ) -> Result<cosmwasm_std::Coin, Error> {
+        // Get all balances and find the specific denom
+        let balances = self.get_balances().await?;
+
+        // Find the balance for the specific denomination
+        for balance in balances {
+            if balance.denom == denom {
+                return Ok(balance);
+            }
+        }
+
+        // If not found, return zero balance
+        Ok(cosmwasm_std::Coin {
+            denom: denom.to_string(),
+            amount: cosmwasm_std::Uint128::zero(),
+        })
+    }
+
     /// Get last block height
     pub async fn get_last_block_height(&self) -> Result<u64, Error> {
         let rpc_client = self.rpc_client.lock().await;

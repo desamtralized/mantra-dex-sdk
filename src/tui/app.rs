@@ -651,6 +651,44 @@ impl App {
         }
     }
 
+    /// Format insufficient funds error in a user-friendly way
+    fn format_insufficient_funds_error(&self, error: &str) -> String {
+        // Simple parsing to extract token symbols from insufficient funds error
+        if error.contains("insufficient funds") || error.contains("spendable balance") {
+            // Look for specific token denominations in the error message
+            if error
+                .contains("ibc/8E27BA2D5493AF5636760E354E46004562C46AB7EC0CC4C1CA14E9E20E2545B5")
+                || error.contains("factory/mantra1qwm8p82w0ygaz3duf0y56gjf8pwh5ykmgnqmtm/uUSDC")
+            {
+                return "Insufficient USDC balance.\n\nYou don't have enough USDC to complete this transaction.\nPlease add more USDC to your wallet or reduce the transaction amount.".to_string();
+            } else if error.contains("uom") {
+                return "Insufficient OM balance.\n\nYou don't have enough OM to complete this transaction.\nPlease add more OM to your wallet or reduce the transaction amount.".to_string();
+            }
+        }
+
+        "Insufficient funds. Please check your wallet balance and try again with a smaller amount."
+            .to_string()
+    }
+
+    /// Extract meaningful contract error message
+    fn extract_contract_error(&self, error: &str) -> String {
+        // Look for the actual contract error message
+        if let Some(start) = error.find("failed to execute message") {
+            if let Some(end) = error[start..].find(": ") {
+                let contract_part = &error[start + end + 2..];
+                if let Some(error_end) = contract_part.find(": ") {
+                    contract_part[..error_end].to_string()
+                } else {
+                    contract_part.to_string()
+                }
+            } else {
+                error[start..].to_string()
+            }
+        } else {
+            error.to_string()
+        }
+    }
+
     /// Handle async blockchain operations with comprehensive status updates
     pub async fn handle_event(&mut self, event: Event) -> Result<bool, Error> {
         // Handle network state changes
@@ -711,36 +749,117 @@ impl App {
             operation,
             result,
             transaction_hash,
+            enhanced_data,
         } = &event
         {
-            let mut success_details = vec![result.clone()];
-            if let Some(tx_hash) = transaction_hash {
-                success_details.push(format!("Transaction: {}", tx_hash));
-            }
+            // Clear loading state first
+            self.state.loading_state = LoadingState::Idle;
 
-            self.state.loading_state = LoadingState::success_with_details(
-                format!("{} completed successfully", operation),
-                success_details,
+            // Create operation-specific success titles and details
+            let (success_title, formatted_details) = match operation.as_str() {
+                "provide_liquidity" => {
+                    let title = "Liquidity Provided Successfully!".to_string();
+                    let details = self.create_liquidity_success_details(
+                        result,
+                        transaction_hash,
+                        enhanced_data,
+                    );
+                    (title, details)
+                }
+                "withdraw_liquidity" => {
+                    let title = "Liquidity Withdrawn Successfully!".to_string();
+                    let details = self.create_basic_success_details(result, transaction_hash);
+                    (title, details)
+                }
+                "execute_swap" => {
+                    let title = "Swap Completed Successfully!".to_string();
+                    let details = self.create_basic_success_details(result, transaction_hash);
+                    (title, details)
+                }
+                "claim_rewards" => {
+                    let title = "Rewards Claimed Successfully!".to_string();
+                    let details = self.create_basic_success_details(result, transaction_hash);
+                    (title, details)
+                }
+                _ => {
+                    let title = format!("{} Completed Successfully!", operation.replace('_', " "));
+                    let details = self.create_basic_success_details(result, transaction_hash);
+                    (title, details)
+                }
+            };
+
+            self.state.modal_state = Some(
+                crate::tui::components::modals::ModalState::transaction_details(
+                    transaction_hash.clone().unwrap_or_default(),
+                    success_title,
+                    formatted_details,
+                ),
             );
+
+            crate::tui::utils::logger::log_info(&format!(
+                "Blockchain success modal displayed for operation: {}",
+                operation
+            ));
+
             return Ok(false);
         }
 
         // Handle blockchain error events
         if let Event::BlockchainError { operation, error } = &event {
-            let error_type = if error.to_lowercase().contains("network") {
-                ErrorType::Network
+            // Clear the loading state first
+            self.state.loading_state = LoadingState::Idle;
+
+            // Determine error type and create user-friendly message
+            let (error_type, user_friendly_error) = if error
+                .to_lowercase()
+                .contains("insufficient funds")
+            {
+                (
+                    ErrorType::Contract,
+                    self.format_insufficient_funds_error(error),
+                )
+            } else if error.to_lowercase().contains("network") {
+                (ErrorType::Network, "Network connection error. Please check your internet connection and try again.".to_string())
             } else if error.to_lowercase().contains("contract") {
-                ErrorType::Contract
+                (
+                    ErrorType::Contract,
+                    format!(
+                        "Smart contract error: {}",
+                        self.extract_contract_error(error)
+                    ),
+                )
             } else {
-                ErrorType::Unknown
+                (ErrorType::Unknown, error.clone())
             };
 
-            self.state.loading_state = LoadingState::error_with_details(
-                format!("{} failed", operation),
+            // Show error modal instead of just loading state
+            let operation_title = match operation.as_str() {
+                "provide_liquidity" => "Provide Liquidity Failed",
+                "withdraw_liquidity" => "Withdraw Liquidity Failed",
+                "execute_swap" => "Swap Failed",
+                _ => &format!("{} Failed", operation.replace('_', " ")),
+            };
+
+            self.state.modal_state = Some(crate::tui::components::modals::ModalState::error(
+                operation_title.to_string(),
+                user_friendly_error.clone(),
                 error_type,
-                vec![error.clone()],
+                Some(vec![
+                    format!("Operation: {}", operation),
+                    format!("Error Details: {}", error),
+                    format!(
+                        "Timestamp: {}",
+                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+                    ),
+                ]),
                 Some("retry_operation".to_string()),
-            );
+            ));
+
+            crate::tui::utils::logger::log_info(&format!(
+                "Blockchain error modal displayed for operation: {}",
+                operation
+            ));
+
             return Ok(false);
         }
 
@@ -840,73 +959,92 @@ impl App {
                 // Show loading modal for liquidity provision
                 self.set_loading_with_progress(
                     format!("Providing liquidity to pool {}", pool_id),
-                    Some(10.0),
+                    Some(5.0),
                     true,
                 );
 
-                let operation_name = "provide_liquidity";
-                let pool_id_val = pool_id.clone();
-                let asset_1_amount_val = asset_1_amount.clone();
-                let asset_2_amount_val = asset_2_amount.clone();
-                let slippage_tolerance_val = slippage_tolerance.clone();
-
-                let result = self
-                    .execute_async_operation(operation_name, || async {
-                        // TODO: Implement actual liquidity provision
-                        // Simulate the process with progress updates
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
-                        // For now, create a mock successful response
-                        // In real implementation, this would call self.client.provide_liquidity()
-                        let mock_tx_hash = format!(
-                            "0x{:x}",
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs()
+                // Use the async blockchain processor to execute the real transaction
+                if let Some(event_sender) = &self.event_sender {
+                    let blockchain_processor =
+                        crate::tui::events::AsyncBlockchainProcessor::with_client(
+                            event_sender.clone(),
+                            self.client.clone(),
                         );
 
-                        Ok(mock_tx_hash)
-                    })
-                    .await;
+                    let pool_id_clone = pool_id.clone();
+                    let asset_1_clone = asset_1_amount.clone();
+                    let asset_2_clone = asset_2_amount.clone();
+                    let slippage_clone = slippage_tolerance.clone();
 
-                match result {
-                    Ok(tx_hash) => {
-                        // Show success modal for liquidity provision
-                        let transaction_details = vec![
-                            ("Transaction Hash".to_string(), tx_hash.clone()),
-                            (
-                                "Operation Type".to_string(),
-                                "Provide Liquidity".to_string(),
-                            ),
-                            ("Pool ID".to_string(), pool_id_val),
-                            ("Asset 1 Amount".to_string(), asset_1_amount_val),
-                            ("Asset 2 Amount".to_string(), asset_2_amount_val),
-                            (
-                                "Slippage Tolerance".to_string(),
-                                slippage_tolerance_val.unwrap_or_else(|| "1.0%".to_string()),
-                            ),
-                            (
-                                "Status".to_string(),
-                                "✅ Completed Successfully".to_string(),
-                            ),
-                        ];
-
-                        self.state.modal_state = Some(
-                            crate::tui::components::modals::ModalState::transaction_details(
-                                tx_hash,
-                                "Liquidity Provided Successfully".to_string(),
-                                transaction_details,
-                            ),
-                        );
-                    }
-                    Err(e) => {
-                        crate::tui::utils::logger::log_error(&format!(
-                            "Liquidity provision failed: {}",
-                            e
-                        ));
-                    }
+                    // Spawn the async operation
+                    tokio::spawn(async move {
+                        blockchain_processor
+                            .provide_liquidity(
+                                pool_id_clone,
+                                asset_1_clone,
+                                asset_2_clone,
+                                slippage_clone,
+                            )
+                            .await;
+                    });
+                } else {
+                    crate::tui::utils::logger::log_error(
+                        "No event sender available for async blockchain operation",
+                    );
+                    self.set_error(
+                        "Failed to initiate liquidity provision: no event sender".to_string(),
+                    );
                 }
+
+                return Ok(false);
+            }
+            Event::WithdrawLiquidity {
+                pool_id,
+                lp_token_amount,
+                slippage_tolerance,
+            } => {
+                crate::tui::utils::logger::log_info(&format!(
+                    "=== PROCESSING WITHDRAW LIQUIDITY EVENT ===",
+                ));
+                crate::tui::utils::logger::log_info(&format!(
+                    "Pool ID: {}, LP Amount: {}, Slippage: {:?}",
+                    pool_id, lp_token_amount, slippage_tolerance
+                ));
+
+                // Show loading modal for liquidity withdrawal
+                self.set_loading_with_progress(
+                    format!("Withdrawing liquidity from pool {}", pool_id),
+                    Some(5.0),
+                    true,
+                );
+
+                // Use the async blockchain processor to execute the real transaction
+                if let Some(event_sender) = &self.event_sender {
+                    let blockchain_processor =
+                        crate::tui::events::AsyncBlockchainProcessor::with_client(
+                            event_sender.clone(),
+                            self.client.clone(),
+                        );
+
+                    let pool_id_clone = pool_id.clone();
+                    let lp_amount_clone = lp_token_amount.clone();
+                    let slippage_clone = slippage_tolerance.clone();
+
+                    // Spawn the async operation
+                    tokio::spawn(async move {
+                        blockchain_processor
+                            .withdraw_liquidity(pool_id_clone, lp_amount_clone, slippage_clone)
+                            .await;
+                    });
+                } else {
+                    crate::tui::utils::logger::log_error(
+                        "No event sender available for async blockchain operation",
+                    );
+                    self.set_error(
+                        "Failed to initiate liquidity withdrawal: no event sender".to_string(),
+                    );
+                }
+
                 return Ok(false);
             }
             Event::ClaimRewards {
@@ -1293,6 +1431,7 @@ impl App {
                     liquidity_pool_dropdown(),
                     liquidity_amount1_input(),
                     liquidity_amount2_input(),
+                    liquidity_slippage_input(),
                     liquidity_provide_button(),
                     liquidity_withdraw_button(),
                 ]
@@ -2130,8 +2269,21 @@ impl App {
         };
 
         // Handle the event using the new key event system (similar to swap screen)
+        let mut key_handled = false;
+        let mut pool_changed = false;
         if let Some(key_event) = key_event {
-            if liquidity_state.handle_key_event(key_event, self.state.navigation_mode) {
+            key_handled = liquidity_state.handle_key_event(key_event, self.state.navigation_mode);
+            if key_handled {
+                // For navigation keys that might change pool selection, check if pool changed
+                if matches!(
+                    key_event.code,
+                    crossterm::event::KeyCode::Up
+                        | crossterm::event::KeyCode::Down
+                        | crossterm::event::KeyCode::Enter
+                ) {
+                    pool_changed = true;
+                }
+
                 // Check if execute button was pressed by examining the current focus
                 if matches!(
                     liquidity_state.input_focus,
@@ -2143,8 +2295,17 @@ impl App {
                         self.set_error(format!("Liquidity preparation failed: {}", e));
                     }
                 }
-                return Ok(true);
             }
+        }
+
+        if key_handled {
+            // If pool might have changed, fetch reserves for proportional calculations
+            if pool_changed {
+                if let Some(pool_id) = liquidity_state.pool_dropdown.get_selected_value() {
+                    self.fetch_pool_reserves_for_liquidity(&pool_id).await?;
+                }
+            }
+            return Ok(true);
         }
 
         // Handle specific events that don't need key conversion
@@ -4565,5 +4726,167 @@ impl App {
         );
 
         Ok(())
+    }
+
+    /// Fetch pool reserves for liquidity proportional calculations
+    async fn fetch_pool_reserves_for_liquidity(&mut self, pool_id: &str) -> Result<(), Error> {
+        crate::tui::utils::logger::log_debug(&format!(
+            "Fetching pool reserves for liquidity calculations: {}",
+            pool_id
+        ));
+
+        // Get pool info from cache or fetch from blockchain
+        let pool_info = if let Some(cached_pool) = self.get_cached_pool(pool_id) {
+            cached_pool.clone()
+        } else {
+            // Fetch pool info from blockchain
+            match self.client.get_pool(pool_id).await {
+                Ok(pool_info) => {
+                    // Cache the pool info
+                    let cache_entry = PoolCacheEntry {
+                        pool_info: pool_info.clone(),
+                        cached_at: chrono::Utc::now(),
+                    };
+                    self.state
+                        .pool_cache
+                        .insert(pool_id.to_string(), cache_entry);
+                    pool_info
+                }
+                Err(e) => {
+                    crate::tui::utils::logger::log_error(&format!(
+                        "Failed to fetch pool info for reserves: {}",
+                        e
+                    ));
+                    return Err(e);
+                }
+            }
+        };
+
+        // Extract reserves from pool assets (supports multi-asset pools)
+        let mut reserves = Vec::new();
+        for asset in &pool_info.pool_info.assets {
+            reserves.push((asset.amount, asset.denom.clone()));
+        }
+
+        crate::tui::utils::logger::log_info(&format!(
+            "Fetched {} reserves for pool {}: {:?}",
+            reserves.len(),
+            pool_id,
+            reserves
+                .iter()
+                .map(|(amt, denom)| format!("{} {}", amt, denom))
+                .collect::<Vec<_>>()
+        ));
+
+        // Update liquidity screen with reserves
+        crate::tui::screens::liquidity::update_liquidity_pool_reserves(reserves);
+
+        Ok(())
+    }
+
+    /// Create enhanced liquidity success details with LP token information
+    fn create_liquidity_success_details(
+        &self,
+        result: &str,
+        transaction_hash: &Option<String>,
+        enhanced_data: &Option<String>,
+    ) -> Vec<(String, String)> {
+        let mut details = vec![("Result".to_string(), result.to_string())];
+
+        if let Some(tx_hash) = transaction_hash {
+            details.push(("Transaction".to_string(), tx_hash.clone()));
+        }
+
+        // Parse enhanced data if available
+        if let Some(enhanced_json) = enhanced_data {
+            if let Ok(provide_result) =
+                serde_json::from_str::<crate::tui::events::ProvideResultWrapper>(enhanced_json)
+            {
+                // Add LP token information if available
+                if let Some(lp_amount) = &provide_result.lp_tokens_received {
+                    let lp_display = self.format_token_amount_for_display(lp_amount, 6);
+                    details.push(("LP Tokens Received".to_string(), lp_display));
+                }
+
+                // Add user's total LP balance if available
+                if let Some(total_balance) = &provide_result.user_lp_balance_after {
+                    let balance_display = self.format_token_amount_for_display(total_balance, 6);
+                    details.push(("Total LP Balance".to_string(), balance_display));
+                }
+
+                // Calculate and add pool share information
+                if let (Some(user_balance), Some(total_supply)) = (
+                    &provide_result.user_lp_balance_after,
+                    &provide_result.pool_total_supply,
+                ) {
+                    if total_supply.u128() > 0 {
+                        let share_percentage =
+                            (user_balance.u128() as f64 / total_supply.u128() as f64) * 100.0;
+                        details.push((
+                            "Total Share of Pool".to_string(),
+                            format!("{:.4}%", share_percentage),
+                        ));
+
+                        // If we know how much was received, calculate the share of just the received amount
+                        if let Some(received_amount) = &provide_result.lp_tokens_received {
+                            let received_share = (received_amount.u128() as f64
+                                / total_supply.u128() as f64)
+                                * 100.0;
+                            details.push((
+                                "Share from This Transaction".to_string(),
+                                format!("{:.4}%", received_share),
+                            ));
+                        }
+                    }
+                }
+
+                // Add LP token denomination for reference
+                if let Some(lp_denom) = &provide_result.lp_token_denom {
+                    details.push(("LP Token Denom".to_string(), lp_denom.clone()));
+                }
+
+                crate::tui::utils::logger::log_info(&format!(
+                    "Enhanced liquidity success details created with {} items",
+                    details.len()
+                ));
+            } else {
+                crate::tui::utils::logger::log_warning("Failed to parse enhanced liquidity data");
+            }
+        }
+
+        details
+    }
+
+    /// Create basic success details for non-enhanced operations
+    fn create_basic_success_details(
+        &self,
+        result: &str,
+        transaction_hash: &Option<String>,
+    ) -> Vec<(String, String)> {
+        let mut details = vec![("Result".to_string(), result.to_string())];
+
+        if let Some(tx_hash) = transaction_hash {
+            details.push(("Transaction".to_string(), tx_hash.clone()));
+        }
+
+        details
+    }
+
+    /// Format token amount for display (convert from micro units to display units)
+    fn format_token_amount_for_display(
+        &self,
+        amount: &cosmwasm_std::Uint128,
+        decimals: u8,
+    ) -> String {
+        let amount_f64 = amount.u128() as f64 / 10_f64.powi(decimals as i32);
+
+        // Format with appropriate precision
+        if amount_f64 >= 1000.0 {
+            format!("{:.2}", amount_f64)
+        } else if amount_f64 >= 1.0 {
+            format!("{:.4}", amount_f64)
+        } else {
+            format!("{:.6}", amount_f64)
+        }
     }
 }

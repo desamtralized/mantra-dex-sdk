@@ -185,6 +185,7 @@ pub enum Event {
         operation: String,
         result: String,
         transaction_hash: Option<String>,
+        enhanced_data: Option<String>,
     },
     /// Blockchain operation failed
     BlockchainError { operation: String, error: String },
@@ -210,13 +211,26 @@ pub enum Event {
     ShowSwapConfirmation,
 }
 
-/// Swap operation for multi-hop swaps
+/// Swap operation details for multi-hop swaps
 #[derive(Debug, Clone, PartialEq)]
 pub struct SwapOperation {
     pub from_asset: String,
     pub to_asset: String,
     pub pool_id: String,
     pub amount: String,
+}
+
+/// Wrapper for provide liquidity result
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProvideResultWrapper {
+    pub txhash: String,
+    pub result: Option<String>,
+    // Enhanced LP token information
+    pub lp_tokens_received: Option<cosmwasm_std::Uint128>,
+    pub lp_token_denom: Option<String>,
+    pub pool_id: String,
+    pub user_lp_balance_after: Option<cosmwasm_std::Uint128>,
+    pub pool_total_supply: Option<cosmwasm_std::Uint128>,
 }
 
 /// Event handler for processing terminal events
@@ -229,16 +243,32 @@ pub struct EventHandler {
     _terminal_task: tokio::task::JoinHandle<()>,
 }
 
-/// Async blockchain operation processor
+/// Async blockchain processor for handling blockchain operations
 pub struct AsyncBlockchainProcessor {
     /// Event sender to communicate with the main event loop
     event_sender: mpsc::UnboundedSender<Event>,
+    /// Optional client reference for real blockchain operations
+    client: Option<std::sync::Arc<crate::client::MantraDexClient>>,
 }
 
 impl AsyncBlockchainProcessor {
-    /// Create a new async blockchain processor
+    /// Create a new async blockchain processor with event sender only
     pub fn new(event_sender: mpsc::UnboundedSender<Event>) -> Self {
-        Self { event_sender }
+        Self {
+            event_sender,
+            client: None,
+        }
+    }
+
+    /// Create a new async blockchain processor with both event sender and client
+    pub fn with_client(
+        event_sender: mpsc::UnboundedSender<Event>,
+        client: std::sync::Arc<crate::client::MantraDexClient>,
+    ) -> Self {
+        Self {
+            event_sender,
+            client: Some(client),
+        }
     }
 
     /// Execute a swap operation asynchronously
@@ -290,6 +320,7 @@ impl AsyncBlockchainProcessor {
                     amount, from_asset, "calculated_amount", to_asset
                 ),
                 transaction_hash: Some("0x1234567890abcdef...".to_string()),
+                enhanced_data: None,
             });
         } else {
             let _ = self.event_sender.send(Event::BlockchainError {
@@ -303,44 +334,438 @@ impl AsyncBlockchainProcessor {
     pub async fn provide_liquidity(
         &self,
         pool_id: String,
-        _asset_1_amount: String,
-        _asset_2_amount: String,
-        _slippage_tolerance: Option<String>,
+        asset_1_amount: String,
+        asset_2_amount: String,
+        slippage_tolerance: Option<String>,
     ) {
         let operation = "provide_liquidity".to_string();
 
+        // Send initial progress
         let _ = self.event_sender.send(Event::BlockchainProgress {
             operation: operation.clone(),
-            status: "Calculating LP tokens...".to_string(),
+            status: "Preparing liquidity transaction...".to_string(),
+            progress: Some(0.1),
+        });
+
+        // Get the client from the shared state (we'll need to implement this)
+        // For now, we'll simulate the actual call structure
+        let result = self
+            .execute_provide_liquidity_transaction(
+                pool_id.clone(),
+                asset_1_amount,
+                asset_2_amount,
+                slippage_tolerance,
+            )
+            .await;
+
+        match result {
+            Ok(tx_response) => {
+                // Create enhanced success message with LP token details
+                let mut success_message =
+                    format!("Successfully provided liquidity to pool {}", pool_id);
+
+                // Add LP token information if available
+                if let Some(lp_amount) = &tx_response.lp_tokens_received {
+                    let lp_display = self.format_token_amount(lp_amount, 6); // LP tokens typically use 6 decimals
+                    success_message.push_str(&format!(". LP tokens received: {}", lp_display));
+                }
+
+                // Send enhanced success event with LP token details
+                let tx_hash = tx_response.txhash.clone();
+                let _ = self.event_sender.send(Event::BlockchainSuccess {
+                    operation: operation.clone(),
+                    result: success_message,
+                    transaction_hash: Some(tx_hash),
+                    // Pass the enhanced result data as JSON string in the result field
+                    enhanced_data: Some(serde_json::to_string(&tx_response).unwrap_or_default()),
+                });
+            }
+            Err(e) => {
+                let _ = self.event_sender.send(Event::BlockchainError {
+                    operation: operation.clone(),
+                    error: format!("Failed to provide liquidity: {}", e),
+                });
+            }
+        }
+    }
+
+    /// Format token amount for display (convert from micro units)
+    fn format_token_amount(&self, amount: &cosmwasm_std::Uint128, decimals: u8) -> String {
+        let amount_f64 = amount.u128() as f64 / 10_f64.powi(decimals as i32);
+        format!("{:.6}", amount_f64)
+    }
+
+    /// Execute the actual provide liquidity transaction using the SDK client
+    async fn execute_provide_liquidity_transaction(
+        &self,
+        pool_id: String,
+        asset_1_amount: String,
+        asset_2_amount: String,
+        slippage_tolerance: Option<String>,
+    ) -> Result<ProvideResultWrapper, String> {
+        use cosmwasm_std::{Coin, Decimal, Uint128};
+        use std::str::FromStr;
+
+        // Send progress update
+        let _ = self.event_sender.send(Event::BlockchainProgress {
+            operation: "provide_liquidity".to_string(),
+            status: "Converting amounts and denominations...".to_string(),
             progress: Some(0.2),
         });
 
-        tokio::time::sleep(Duration::from_millis(800)).await;
+        // Get the actual asset denominations from the selected pool's info
+        let (denom_1, denom_2) = self.get_pool_denominations_from_cache(&pool_id).await?;
 
+        // Convert decimal amounts to micro amounts based on asset type
+        let amount_1_micro = self.convert_to_micro_amount(&asset_1_amount, &denom_1)?;
+        let amount_2_micro = self.convert_to_micro_amount(&asset_2_amount, &denom_2)?;
+
+        crate::tui::utils::logger::log_info(&format!(
+            "Converted amounts: {} {} -> {} {}, {} {} -> {} {}",
+            asset_1_amount,
+            denom_1,
+            amount_1_micro,
+            denom_1,
+            asset_2_amount,
+            denom_2,
+            amount_2_micro,
+            denom_2
+        ));
+
+        // Parse slippage tolerance (convert from percentage to decimal)
+        let slippage = if let Some(slippage_str) = slippage_tolerance {
+            let slippage_percent = slippage_str
+                .parse::<f64>()
+                .map_err(|e| format!("Invalid slippage percentage: {}", e))?;
+
+            // Convert percentage to decimal (1.0% -> 0.01)
+            let slippage_decimal = slippage_percent / 100.0;
+            Some(
+                Decimal::from_str(&slippage_decimal.to_string())
+                    .map_err(|e| format!("Invalid slippage decimal conversion: {}", e))?,
+            )
+        } else {
+            None
+        };
+
+        // Send progress update
         let _ = self.event_sender.send(Event::BlockchainProgress {
-            operation: operation.clone(),
-            status: "Broadcasting transaction...".to_string(),
-            progress: Some(0.6),
+            operation: "provide_liquidity".to_string(),
+            status: "Preparing assets for liquidity provision...".to_string(),
+            progress: Some(0.4),
         });
 
-        tokio::time::sleep(Duration::from_millis(1200)).await;
+        // Create the assets vector with correct denominations and micro amounts
+        let assets = vec![
+            Coin {
+                denom: denom_1.clone(),
+                amount: amount_1_micro,
+            },
+            Coin {
+                denom: denom_2.clone(),
+                amount: amount_2_micro,
+            },
+        ];
 
-        let success = true; // TODO: Replace with actual SDK call result
+        crate::tui::utils::logger::log_info(&format!(
+            "Prepared assets for liquidity provision: {:?}",
+            assets
+        ));
 
-        if success {
-            let _ = self.event_sender.send(Event::BlockchainSuccess {
-                operation: operation.clone(),
-                result: format!(
-                    "Added liquidity to pool {}. LP tokens received: calculated_amount",
-                    pool_id
-                ),
-                transaction_hash: Some("0xabcdef1234567890...".to_string()),
-            });
+        // Send progress update
+        let _ = self.event_sender.send(Event::BlockchainProgress {
+            operation: "provide_liquidity".to_string(),
+            status: "Broadcasting transaction to blockchain...".to_string(),
+            progress: Some(0.7),
+        });
+
+        // Execute actual blockchain transaction if client is available
+        if let Some(client) = &self.client {
+            // Get pool info before transaction to capture LP token denom and current supply
+            let pool_info = client
+                .get_pool(&pool_id)
+                .await
+                .map_err(|e| format!("Failed to get pool info before transaction: {}", e))?;
+
+            let lp_token_denom = pool_info.pool_info.lp_denom.clone();
+            let pool_total_supply_before = pool_info.total_share.amount;
+
+            // Get user's LP balance before transaction (if wallet is configured)
+            let user_lp_balance_before =
+                if let Some(wallet_address) = client.get_wallet_address().await {
+                    // Fetch user's LP token balance
+                    match client.get_balance(&wallet_address, &lp_token_denom).await {
+                        Ok(balance) => balance.amount,
+                        Err(_) => Uint128::zero(), // If balance query fails, assume zero
+                    }
+                } else {
+                    Uint128::zero()
+                };
+
+            match client
+                .provide_liquidity(&pool_id, assets, slippage, None)
+                .await
+            {
+                Ok(tx_response) => {
+                    // Send final progress update
+                    let _ = self.event_sender.send(Event::BlockchainProgress {
+                        operation: "provide_liquidity".to_string(),
+                        status: "Transaction confirmed, processing results...".to_string(),
+                        progress: Some(0.9),
+                    });
+
+                    crate::tui::utils::logger::log_info(&format!(
+                        "Liquidity provision successful! TX Hash: {}",
+                        tx_response.txhash
+                    ));
+
+                    // Extract LP tokens received from transaction events
+                    let lp_tokens_received =
+                        self.extract_lp_tokens_from_events(&tx_response, &lp_token_denom);
+
+                    // Get updated pool info and user balance after transaction
+                    let (user_lp_balance_after, pool_total_supply_after) = self
+                        .get_post_transaction_info(client, &pool_id, &lp_token_denom)
+                        .await;
+
+                    // Log the detailed information
+                    crate::tui::utils::logger::log_info(&format!(
+                        "LP Token Details - Received: {:?}, LP Denom: {}, User Balance Before: {}, User Balance After: {:?}, Pool Total Supply After: {:?}",
+                        lp_tokens_received, lp_token_denom, user_lp_balance_before, user_lp_balance_after, pool_total_supply_after
+                    ));
+
+                    Ok(ProvideResultWrapper {
+                        txhash: tx_response.txhash,
+                        result: Some(format!(
+                            "LP tokens received (check transaction for details)"
+                        )),
+                        lp_tokens_received,
+                        lp_token_denom: Some(lp_token_denom),
+                        pool_id: pool_id.clone(),
+                        user_lp_balance_after,
+                        pool_total_supply: pool_total_supply_after,
+                    })
+                }
+                Err(e) => {
+                    crate::tui::utils::logger::log_error(&format!(
+                        "Blockchain transaction failed: {}",
+                        e
+                    ));
+                    Err(format!("Blockchain transaction failed: {}", e))
+                }
+            }
         } else {
-            let _ = self.event_sender.send(Event::BlockchainError {
-                operation: operation.clone(),
-                error: "Failed to provide liquidity: slippage tolerance exceeded".to_string(),
+            // Fallback to mock implementation when no client is available
+            crate::tui::utils::logger::log_warning(
+                "No client available, using mock implementation",
+            );
+
+            // Simulate network delay
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+            // Send final progress update
+            let _ = self.event_sender.send(Event::BlockchainProgress {
+                operation: "provide_liquidity".to_string(),
+                status: "Transaction confirmed, processing results...".to_string(),
+                progress: Some(0.9),
             });
+
+            // Return mock success
+            Ok(ProvideResultWrapper {
+                txhash: format!("mantra{}", chrono::Utc::now().timestamp()),
+                result: Some("Mock LP tokens (no real client connected)".to_string()),
+                lp_tokens_received: Some(Uint128::new(1000000)), // Mock 1 LP token
+                lp_token_denom: Some(format!("factory/contract/{}/lp", pool_id)),
+                pool_id: pool_id.clone(),
+                user_lp_balance_after: Some(Uint128::new(1000000)), // Mock balance
+                pool_total_supply: Some(Uint128::new(100000000)),   // Mock total supply
+            })
+        }
+    }
+
+    /// Extract LP tokens received from transaction events
+    fn extract_lp_tokens_from_events(
+        &self,
+        tx_response: &cosmrs::proto::cosmos::base::abci::v1beta1::TxResponse,
+        lp_token_denom: &str,
+    ) -> Option<cosmwasm_std::Uint128> {
+        // Parse transaction events to find LP token mints or transfers
+        for event in &tx_response.events {
+            if event.r#type == "coin_received" || event.r#type == "transfer" {
+                let mut found_lp_denom = false;
+                let mut amount = None;
+
+                for attr in &event.attributes {
+                    match attr.key.as_str() {
+                        "denom" if attr.value == lp_token_denom => {
+                            found_lp_denom = true;
+                        }
+                        "amount" if found_lp_denom => {
+                            if let Ok(parsed_amount) = attr.value.parse::<u128>() {
+                                amount = Some(cosmwasm_std::Uint128::new(parsed_amount));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
+                if found_lp_denom && amount.is_some() {
+                    return amount;
+                }
+            }
+
+            // Also check wasm events for contract-specific LP token info
+            if event.r#type == "wasm" {
+                let mut lp_amount = None;
+
+                for attr in &event.attributes {
+                    if attr.key == "liquidity_token_amount" || attr.key == "lp_token_amount" {
+                        if let Ok(parsed_amount) = attr.value.parse::<u128>() {
+                            lp_amount = Some(cosmwasm_std::Uint128::new(parsed_amount));
+                        }
+                    }
+                }
+
+                if lp_amount.is_some() {
+                    return lp_amount;
+                }
+            }
+        }
+
+        // If we couldn't extract from events, log and return None
+        crate::tui::utils::logger::log_warning(&format!(
+            "Could not extract LP tokens received from transaction events for denom: {}",
+            lp_token_denom
+        ));
+        None
+    }
+
+    /// Get post-transaction information (user balance and pool total supply)
+    async fn get_post_transaction_info(
+        &self,
+        client: &std::sync::Arc<crate::client::MantraDexClient>,
+        pool_id: &str,
+        lp_token_denom: &str,
+    ) -> (Option<cosmwasm_std::Uint128>, Option<cosmwasm_std::Uint128>) {
+        // Get updated pool info for total supply
+        let pool_total_supply = match client.get_pool(pool_id).await {
+            Ok(pool_info) => Some(pool_info.total_share.amount),
+            Err(e) => {
+                crate::tui::utils::logger::log_warning(&format!(
+                    "Failed to get updated pool info: {}",
+                    e
+                ));
+                None
+            }
+        };
+
+        // Get user's updated LP balance
+        let user_lp_balance = if let Some(wallet_address) = client.get_wallet_address().await {
+            match client.get_balance(&wallet_address, lp_token_denom).await {
+                Ok(balance) => Some(balance.amount),
+                Err(e) => {
+                    crate::tui::utils::logger::log_warning(&format!(
+                        "Failed to get user LP balance: {}",
+                        e
+                    ));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        (user_lp_balance, pool_total_supply)
+    }
+
+    /// Get pool denominations from pool ID
+    async fn get_pool_denominations_from_cache(
+        &self,
+        pool_id: &str,
+    ) -> Result<(String, String), String> {
+        // Query the pool from the blockchain to get the actual asset denominations
+        // This ensures we always have the correct, up-to-date denominations
+        if let Some(client) = &self.client {
+            match client.get_pool(pool_id).await {
+                Ok(pool_info) => {
+                    let assets = &pool_info.pool_info.assets;
+                    if assets.len() >= 2 {
+                        let denom_1 = assets[0].denom.clone();
+                        let denom_2 = assets[1].denom.clone();
+
+                        crate::tui::utils::logger::log_info(&format!(
+                            "Pool {} denominations from blockchain: {} and {}",
+                            pool_id, denom_1, denom_2
+                        ));
+
+                        Ok((denom_1, denom_2))
+                    } else {
+                        Err(format!(
+                            "Pool {} does not have enough assets (found {})",
+                            pool_id,
+                            assets.len()
+                        ))
+                    }
+                }
+                Err(e) => {
+                    crate::tui::utils::logger::log_error(&format!(
+                        "Failed to query pool {} from blockchain: {:?}",
+                        pool_id, e
+                    ));
+                    Err(format!("Failed to query pool {}: {:?}", pool_id, e))
+                }
+            }
+        } else {
+            Err("No blockchain client available to query pool denominations".to_string())
+        }
+    }
+
+    /// Convert human-readable amount to micro amount
+    /// Uses standard decimal places for Mantra network tokens
+    fn convert_to_micro_amount(
+        &self,
+        amount_str: &str,
+        denom: &str,
+    ) -> Result<cosmwasm_std::Uint128, String> {
+        let amount_f64 = amount_str
+            .parse::<f64>()
+            .map_err(|e| format!("Invalid amount format: {}", e))?;
+
+        // Most tokens on Mantra use 6 decimals as the standard
+        // This includes OM (uom), USDC (factory tokens), and most other assets
+        let decimals = self.get_token_decimals_for_denom(denom);
+
+        // Convert to micro amount
+        let micro_amount = (amount_f64 * 10_f64.powi(decimals as i32)) as u128;
+
+        crate::tui::utils::logger::log_debug(&format!(
+            "Amount conversion: {} {} -> {} micro units (10^{})",
+            amount_str, denom, micro_amount, decimals
+        ));
+
+        Ok(cosmwasm_std::Uint128::new(micro_amount))
+    }
+
+    /// Get the number of decimal places for a given denomination
+    /// Most Mantra network tokens use 6 decimals
+    fn get_token_decimals_for_denom(&self, denom: &str) -> u8 {
+        match denom {
+            // Native OM token
+            "uom" => 6,
+            // Factory tokens (USDC, USDT, etc.) typically use 6 decimals
+            d if d.starts_with("factory/") => {
+                // Could be enhanced to read from config in the future
+                // For now, use the standard 6 decimals for all factory tokens
+                6
+            }
+            // IBC tokens - most use 6 decimals but could vary
+            d if d.starts_with("ibc/") => {
+                // Could be enhanced to maintain an IBC token registry
+                // For now, default to 6 decimals
+                6
+            }
+            // Default case
+            _ => 6,
         }
     }
 
@@ -349,34 +774,131 @@ impl AsyncBlockchainProcessor {
         &self,
         pool_id: String,
         lp_token_amount: String,
-        _slippage_tolerance: Option<String>,
+        slippage_tolerance: Option<String>,
     ) {
         let operation = "withdraw_liquidity".to_string();
 
+        // Send initial progress
         let _ = self.event_sender.send(Event::BlockchainProgress {
             operation: operation.clone(),
-            status: "Calculating withdrawal amounts...".to_string(),
-            progress: Some(0.3),
+            status: "Preparing liquidity withdrawal...".to_string(),
+            progress: Some(0.1),
         });
 
-        tokio::time::sleep(Duration::from_millis(600)).await;
+        let result = self
+            .execute_withdraw_liquidity_transaction(
+                pool_id.clone(),
+                lp_token_amount,
+                slippage_tolerance,
+            )
+            .await;
 
-        let success = true; // TODO: Replace with actual SDK call result
+        match result {
+            Ok(tx_response) => {
+                let _ = self.event_sender.send(Event::BlockchainSuccess {
+                    operation: operation.clone(),
+                    result: format!(
+                        "Successfully withdrew liquidity from pool {}. Assets received: {}",
+                        pool_id,
+                        tx_response.result.unwrap_or_default()
+                    ),
+                    transaction_hash: Some(tx_response.txhash),
+                    enhanced_data: None, // No enhanced data for withdraw operations yet
+                });
+            }
+            Err(e) => {
+                let _ = self.event_sender.send(Event::BlockchainError {
+                    operation: operation.clone(),
+                    error: format!("Failed to withdraw liquidity: {}", e),
+                });
+            }
+        }
+    }
 
-        if success {
-            let _ = self.event_sender.send(Event::BlockchainSuccess {
-                operation: operation.clone(),
-                result: format!(
-                    "Withdrew {} LP tokens from pool {}. Assets received: calculated_amounts",
-                    lp_token_amount, pool_id
-                ),
-                transaction_hash: Some("0xfedcba0987654321...".to_string()),
-            });
+    /// Execute the actual withdraw liquidity transaction using the SDK client
+    async fn execute_withdraw_liquidity_transaction(
+        &self,
+        pool_id: String,
+        lp_token_amount: String,
+        _slippage_tolerance: Option<String>,
+    ) -> Result<ProvideResultWrapper, String> {
+        use cosmwasm_std::Uint128;
+        use std::str::FromStr;
+
+        // Send progress update
+        let _ = self.event_sender.send(Event::BlockchainProgress {
+            operation: "withdraw_liquidity".to_string(),
+            status: "Converting LP token amount...".to_string(),
+            progress: Some(0.2),
+        });
+
+        // Parse LP token amount
+        let lp_amount = Uint128::from_str(&lp_token_amount)
+            .map_err(|e| format!("Invalid LP token amount: {}", e))?;
+
+        // Send progress update
+        let _ = self.event_sender.send(Event::BlockchainProgress {
+            operation: "withdraw_liquidity".to_string(),
+            status: "Calculating withdrawal amounts...".to_string(),
+            progress: Some(0.4),
+        });
+
+        // Send progress update
+        let _ = self.event_sender.send(Event::BlockchainProgress {
+            operation: "withdraw_liquidity".to_string(),
+            status: "Broadcasting withdrawal transaction...".to_string(),
+            progress: Some(0.7),
+        });
+
+        // Execute actual blockchain transaction if client is available
+        if let Some(client) = &self.client {
+            match client.withdraw_liquidity(&pool_id, lp_amount).await {
+                Ok(tx_response) => {
+                    // Send final progress update
+                    let _ = self.event_sender.send(Event::BlockchainProgress {
+                        operation: "withdraw_liquidity".to_string(),
+                        status: "Transaction confirmed, processing results...".to_string(),
+                        progress: Some(0.9),
+                    });
+
+                    Ok(ProvideResultWrapper {
+                        txhash: tx_response.txhash,
+                        result: Some(format!("Assets withdrawn (check transaction for details)")),
+                        lp_tokens_received: None,
+                        lp_token_denom: None,
+                        pool_id: pool_id.clone(),
+                        user_lp_balance_after: None,
+                        pool_total_supply: None,
+                    })
+                }
+                Err(e) => Err(format!("Blockchain transaction failed: {}", e)),
+            }
         } else {
-            let _ = self.event_sender.send(Event::BlockchainError {
-                operation: operation.clone(),
-                error: "Withdrawal failed: insufficient LP tokens".to_string(),
+            // Fallback to mock implementation when no client is available
+            crate::tui::utils::logger::log_warning(
+                "No client available, using mock implementation",
+            );
+
+            // Simulate network delay
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+
+            // Send final progress update
+            let _ = self.event_sender.send(Event::BlockchainProgress {
+                operation: "withdraw_liquidity".to_string(),
+                status: "Transaction confirmed, processing results...".to_string(),
+                progress: Some(0.9),
             });
+
+            // Return mock success
+            Ok(ProvideResultWrapper {
+                txhash: format!("mantra{}", chrono::Utc::now().timestamp() + 100),
+                result: Some("Mock assets (no real client connected)".to_string()),
+                lp_tokens_received: None,
+                lp_token_denom: None,
+                pool_id: pool_id.clone(),
+                user_lp_balance_after: None,
+                pool_total_supply: None,
+            })
         }
     }
 
@@ -412,6 +934,7 @@ impl AsyncBlockchainProcessor {
                 operation: operation.clone(),
                 result,
                 transaction_hash: Some("0x1111222233334444...".to_string()),
+                enhanced_data: None, // No enhanced data for rewards operations yet
             });
         } else {
             let _ = self.event_sender.send(Event::BlockchainError {
