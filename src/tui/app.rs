@@ -1165,10 +1165,15 @@ impl App {
             }
         }
 
+        // Handle wizard events SECOND - they should take priority when active
+        if self.state.wizard_state.show_wizard {
+            return self.handle_wizard_event(event).await;
+        }
+
         // Handle focus management events
         let mut focus_handled = false;
 
-        // Let screen-specific handlers process events first
+        // Let screen-specific handlers process events next
         if self.handle_screen_specific_event(event.clone()).await? {
             return Ok(true);
         }
@@ -1177,11 +1182,6 @@ impl App {
         if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
             self.update_component_focus(&focused_component);
             focus_handled = true;
-        }
-
-        // Handle wizard events first if wizard is active
-        if self.state.wizard_state.show_wizard {
-            return self.handle_wizard_event(event).await;
         }
 
         // Handle standard navigation events
@@ -4075,6 +4075,36 @@ impl App {
                     } else {
                         self.state.wizard_state.next_step();
                     }
+                }
+            }
+            // Add MoveFocus event handling for wizard navigation
+            Event::MoveFocus(direction) => {
+                match self.state.wizard_state.current_step {
+                    crate::tui::screens::wizard::WizardStep::NetworkSelection => {
+                        // Handle Up/Down arrows for network selection
+                        match direction {
+                            crate::tui::events::FocusDirection::Up | crate::tui::events::FocusDirection::Down => {
+                                self.state.wizard_state.toggle_network();
+                                return Ok(true);
+                            }
+                            _ => {} // Ignore other directions
+                        }
+                    }
+                    crate::tui::screens::wizard::WizardStep::WalletSave => {
+                        // Handle Tab navigation for wallet save form
+                        match direction {
+                            crate::tui::events::FocusDirection::Next => {
+                                self.state.wizard_state.wallet_save_focus_next();
+                                return Ok(true);
+                            }
+                            crate::tui::events::FocusDirection::Previous => {
+                                self.state.wizard_state.wallet_save_focus_previous();
+                                return Ok(true);
+                            }
+                            _ => {} // Other directions not used in wallet save
+                        }
+                    }
+                    _ => {} // Other steps don't need MoveFocus handling
                 }
             }
             Event::Tab => {

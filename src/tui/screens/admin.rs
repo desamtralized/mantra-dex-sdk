@@ -79,13 +79,13 @@ impl Default for PoolCreationState {
 
         let swap_fee_input = TextInput::new("Swap Fee (%)")
             .with_type(InputType::Amount)
-            .with_value("0.3")
-            .with_placeholder("0.3");
+            .with_value("0.03")
+            .with_placeholder("0.03");
 
         let protocol_fee_input = TextInput::new("Protocol Fee (%)")
             .with_type(InputType::Amount)
-            .with_value("0.1")
-            .with_placeholder("0.1");
+            .with_value("0.01")
+            .with_placeholder("0.01");
 
         let burn_fee_input = TextInput::new("Burn Fee (%)")
             .with_type(InputType::Amount)
@@ -2065,8 +2065,8 @@ pub fn reset_admin_forms() {
     // Reset form inputs
     admin_state.pool_creation.first_asset_input.clear();
     admin_state.pool_creation.second_asset_input.clear();
-    admin_state.pool_creation.swap_fee_input.set_value("0.3");
-    admin_state.pool_creation.protocol_fee_input.set_value("0.1");
+    admin_state.pool_creation.swap_fee_input.set_value("0.03");
+    admin_state.pool_creation.protocol_fee_input.set_value("0.01");
     admin_state.pool_creation.burn_fee_input.set_value("0.0");
 
     // Reset pool management
