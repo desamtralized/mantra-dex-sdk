@@ -174,7 +174,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Using HTTP transport for MCP communication"
             );
 
-            if let Err(e) = create_http_server(config, http_host, http_port).await {
+            if let Err(e) = create_http_server(config).await {
                 tracing::error!(error = ?e, "Failed to start HTTP server");
                 std::process::exit(1);
             }

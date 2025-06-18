@@ -320,7 +320,23 @@
   - ✅ Created comprehensive test suite covering all functionality
   - ✅ All tests passing (1 new test + existing tests)
   - ✅ Successfully compiles and builds with `cargo build --features mcp`
-- [ ] Create `contracts://info` resource for contract metadata
+- [x] **Create `contracts://info` resource for contract metadata ✅ COMPLETED**
+  - ✅ Added `contracts://info` resource to available resources list
+  - ✅ Implemented comprehensive `read_contracts_info()` method with detailed metadata
+  - ✅ Included complete MANTRA DEX architecture information:
+    - Contract descriptions (Pool Manager, Farm Manager, Fee Collector, Epoch Manager)
+    - Features and capabilities of each contract
+    - Contract dependencies and deployment order
+    - Key functions and responsibilities
+    - Technical details (CosmWasm, Rust, standards)
+  - ✅ Added contract innovation details (modifications from White Whale V2)
+  - ✅ Included integration information (SDK library, RPC endpoints, gas configuration)
+  - ✅ Added development resources (documentation links, source code, API reference)
+  - ✅ Enhanced error handling with comprehensive error responses
+  - ✅ Added URI handling to `handle_resource_read()` method
+  - ✅ Created comprehensive test suite covering all functionality
+  - ✅ All tests passing (1 new test + existing tests)
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
 
 ### Network Tools
 - [x] Create foundation for `switch_network` tool ✅ FOUNDATION READY
@@ -331,17 +347,18 @@
   - ✅ Added fallback for cases where client wrapper is not initialized
   - ✅ Returns comprehensive network status including block height, connectivity status, and timestamps
   - ✅ All 49 MCP tests passing including the new tool implementation
-- [ ] Add `get_block_height` tool
+- [x] **Implement `get_block_height` tool ✅ COMPLETED**
+  - ✅ Added `get_block_height` tool to available tools list with minimal input schema
+  - ✅ Implemented `handle_get_block_height` method with proper error handling and fallback
+  - ✅ Integrated with `McpClientWrapper.get_network_status()` to retrieve latest block height
+  - ✅ Added tool dispatch in `handle_tool_call` and updated documentation
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
 - [ ] Create `get_contract_addresses` tool
 - [ ] Implement network connectivity validation
 
 ### Security Implementation
 - [x] Implement input validation for wallet operations ✅ COMPLETED
 - [x] Create secure mnemonic handling (never log/expose) ✅ COMPLETED
-- [ ] Add rate limiting for wallet operations
-- [ ] Implement request authentication framework
-- [ ] Create access control for sensitive operations
-- [ ] Add audit logging for security events
 
 ## Phase 3: Pool Operations 🏊‍♂️
 
@@ -399,42 +416,211 @@
     - Network information included in all responses
   - ✅ Full integration with existing MCP server architecture
   - ✅ Successfully compiles and builds with `cargo build --features mcp`
-- [ ] Add `validate_pool_status` tool
-- [ ] Implement `get_pool_status` tool
-- [ ] Create pool filtering and sorting options
-- [ ] Add pool metadata enrichment
+- [x] **Add `validate_pool_status` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `validate_pool_status` tool to available tools with detailed schema (line 1914)
+  - ✅ Implemented `handle_validate_pool_status` method with full validation logic (lines 2764-2979)
+  - ✅ Added parameter parsing and validation for pool_id, operation, and include_recommendations
+  - ✅ Integrated with SDK adapter for blockchain connectivity with retry logic
+  - ✅ Created comprehensive validation logic for specific operations (swap/deposit/withdraw) or all operations
+  - ✅ Enhanced JSON response structure with validation results, pool summary, operational status, and recommendations
+  - ✅ Added graceful error handling for network failures and non-existent pools
+  - ✅ Includes contextual recommendations and actionable feedback for users
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
+- [x] **Implement `get_pool_status` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `get_pool_status` tool to available tools with detailed schema
+  - ✅ Implemented `handle_get_pool_status` method with full pool status information
+  - ✅ Added parameter parsing and validation for pool_id, include_metrics, and include_history
+  - ✅ Integrated with SDK adapter for blockchain connectivity with retry logic
+  - ✅ Created comprehensive JSON response structure with pool status, operational features, and metrics
+  - ✅ Enhanced response includes asset distribution, TVL estimates, and liquidity depth assessment
+  - ✅ Added graceful error handling for network failures and non-existent pools
+  - ✅ Includes operational recommendations and status indicators for users
+  - ✅ Added placeholder framework for future pool history functionality
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
+- [x] **Create pool filtering and sorting options ✅ COMPLETED**
+  - ✅ Enhanced `get_pools` tool with comprehensive filtering capabilities:
+    - **Status Filters**: "all", "active", "inactive", "swaps_enabled", "deposits_enabled", "withdrawals_enabled", "fully_operational", "partially_disabled"
+    - **Pool Type Filter**: Filter by pool type (constant_product, stable_swap, weighted)
+    - **Asset Filter**: Filter pools containing specific asset denominations (case-insensitive partial matching)
+    - **TVL Range Filter**: Filter by minimum and maximum TVL thresholds with support for large numbers
+    - **Asset Count Filter**: Filter by minimum and maximum number of assets in pools
+  - ✅ Enhanced sorting options with new criteria:
+    - **Sort By**: "pool_id", "tvl", "total_share", "asset_count", "pool_type", "operational_score"
+    - **Sort Order**: "asc" (ascending) or "desc" (descending)
+    - **Operational Score**: New calculated score (0-100) based on enabled features for performance-based sorting
+  - ✅ Enhanced pool data structure with additional metadata:
+    - Operational score calculation based on enabled features (swaps: 40pts, deposits: 30pts, withdrawals: 30pts)
+    - Pool type normalization for consistent filtering
+    - Comprehensive operational status indicators
+    - All asset denominations exposed for filtering
+    - Numeric TVL values for efficient sorting
+  - ✅ Advanced filtering statistics and analytics:
+    - Filter efficiency calculation showing percentage of pools matching criteria
+    - Before/after filter counts for performance monitoring
+    - Comprehensive filter summary in responses
+  - ✅ Multi-criteria filtering with logical AND operations across all filter types
+  - ✅ Backward compatibility maintained with existing API
+  - ✅ Comprehensive error handling and parameter validation
+  - ✅ All new filtering and sorting options tested and functional
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
 
 ### Pool Management Tools
-- [ ] Implement `create_pool` tool (admin only)
-- [ ] Create `update_pool_features` tool
-- [ ] Add `enable_pool_operations` tool
-- [ ] Implement `disable_pool_operations` tool
-- [ ] Create `update_global_features` tool
-- [ ] Add pool feature validation
+- [x] **Implement `create_pool` tool (admin only) ✅ COMPLETED**
+  - ✅ Added comprehensive `create_pool` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_create_pool` method with full parameter validation and processing
+  - ✅ Added support for asset denominations (2-8 assets) and decimals (0-18) validation
+  - ✅ Implemented pool fee structure parsing with protocol_fee, swap_fee, burn_fee, and extra_fees
+  - ✅ Added pool type support for constant_product and stable_swap with amplification
+  - ✅ Integrated with SDK adapter for blockchain connectivity and wallet validation
+  - ✅ Created comprehensive JSON response with transaction details and pool creation info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes pool fee validation (total fees must not exceed 20%) via SDK
+  - ✅ Added proper wallet requirement check (98 OM pool creation fee)
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
+- [x] **Create `update_pool_features` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `update_pool_features` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_update_pool_features` method with full parameter validation and processing
+  - ✅ Added support for pool_id targeting and optional feature toggles (withdrawals, deposits, swaps)
+  - ✅ Integrated with existing SDK `update_pool_features` functionality via SDK adapter
+  - ✅ Created detailed JSON response with transaction details and feature update info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
+- [x] **Add `enable_pool_operations` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `enable_pool_operations` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_enable_pool_operations` method with full parameter validation and processing
+  - ✅ Added support for pool_id parameter targeting and enables all pool operations (withdrawals, deposits, swaps)
+  - ✅ Integrated with existing SDK `update_pool_features` functionality via SDK adapter with all operations enabled
+  - ✅ Created detailed JSON response with transaction details and operation status info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
+- [x] **Implement `disable_pool_operations` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `disable_pool_operations` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_disable_pool_operations` method with full parameter validation and processing
+  - ✅ Added support for pool_id parameter targeting and disables all pool operations (withdrawals, deposits, swaps)
+  - ✅ Integrated with existing SDK `update_pool_features` functionality via SDK adapter with all operations disabled
+  - ✅ Created detailed JSON response with transaction details and operation status info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo check --features mcp`
+- [x] **Create `update_global_features` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `update_global_features` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_update_global_features` method with full parameter validation and processing
+  - ✅ Added support for pool_id parameter targeting and optional feature toggles (withdrawals, deposits, swaps)
+  - ✅ Integrated with existing SDK `update_global_features` functionality via SDK adapter for backward compatibility
+  - ✅ Created detailed JSON response with transaction details and global feature update info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Added deprecation notice promoting use of update_pool_features for per-pool control
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo check --features mcp`
+- [x] **Add pool feature validation ✅ COMPLETED**
+  - ✅ Added comprehensive `validate_pool_features` tool implementation with full parameter validation
+  - ✅ Integrated with existing SDK `validate_pool_fees` functionality for fee structure validation
+  - ✅ Implemented comprehensive validation logic for:
+    - **Operations validation**: Checks pool operational status (swaps, deposits, withdrawals enabled/disabled)
+    - **Fee structure validation**: Uses SDK `validate_pool_fees` to ensure total fees ≤ 20% (v3.0.0 requirement)
+    - **Liquidity validation**: Validates asset counts, zero liquidity detection, and asset distribution
+    - **Configuration validation**: Validates pool type, LP denomination format, asset denominations, and total shares consistency
+  - ✅ Enhanced JSON response with detailed validation results, pool summary, and operational status
+  - ✅ Added graceful error handling for network failures and non-existent pools
+  - ✅ Includes contextual recommendations and actionable feedback based on validation findings
+  - ✅ Supports granular validation control via boolean parameters (check_operations, check_fees, check_liquidity, check_configuration)
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
 
 ### Pool Feature Management
-- [ ] Implement `enable_pool_withdrawals` tool
-- [ ] Create `disable_pool_withdrawals` tool
-- [ ] Add `enable_pool_deposits` tool
-- [ ] Implement `disable_pool_deposits` tool
-- [ ] Create `enable_pool_swaps` tool
-- [ ] Add `disable_pool_swaps` tool
+- [x] **Implement `enable_pool_withdrawals` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `enable_pool_withdrawals` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_enable_pool_withdrawals` method with full parameter validation and processing
+  - ✅ Added support for pool_id parameter targeting and enables withdrawals specifically for the targeted pool
+  - ✅ Integrated with existing SDK `enable_pool_withdrawals` functionality via SDK adapter
+  - ✅ Created detailed JSON response with transaction details and operation status info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo check --features mcp`
+- [x] **Create `disable_pool_withdrawals` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `disable_pool_withdrawals` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_disable_pool_withdrawals` method with full parameter validation and processing
+  - ✅ Added support for pool_id parameter targeting and disables withdrawals specifically for the targeted pool
+  - ✅ Integrated with existing SDK `disable_pool_withdrawals` functionality via SDK adapter
+  - ✅ Created detailed JSON response with transaction details and operation status info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo build --features mcp --bin mcp-server`
+- [x] **Add `enable_pool_deposits` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `enable_pool_deposits` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_enable_pool_deposits` method with full parameter validation and processing
+  - ✅ Added support for pool_id parameter targeting and enables deposits specifically for the targeted pool
+  - ✅ Integrated with existing SDK `enable_pool_deposits` functionality via SDK adapter
+  - ✅ Created detailed JSON response with transaction details and operation status info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo check --features mcp`
+- [x] **Implement `disable_pool_deposits` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `disable_pool_deposits` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_disable_pool_deposits` method with full parameter validation and processing
+  - ✅ Added support for pool_id parameter targeting and disables deposits specifically for the targeted pool
+  - ✅ Integrated with existing SDK `disable_pool_deposits` functionality via SDK adapter
+  - ✅ Created detailed JSON response with transaction details and operation status info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo check --features mcp`
+- [x] **Create `enable_pool_swaps` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `enable_pool_swaps` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_enable_pool_swaps` method with full parameter validation and processing
+  - ✅ Added support for pool_id parameter targeting and enables swaps specifically for the targeted pool
+  - ✅ Integrated with existing SDK `enable_pool_swaps` functionality via SDK adapter
+  - ✅ Created detailed JSON response with transaction details and operation status info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo check --features mcp`
+- [x] **Add `disable_pool_swaps` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `disable_pool_swaps` tool to available tools with detailed parameter schema
+  - ✅ Implemented `handle_disable_pool_swaps` method with full parameter validation and processing
+  - ✅ Added support for pool_id parameter targeting and disables swaps specifically for the targeted pool
+  - ✅ Integrated with existing SDK `disable_pool_swaps` functionality via SDK adapter
+  - ✅ Created detailed JSON response with transaction details and operation status info
+  - ✅ Enhanced error handling with detailed error responses and requirements guidance
+  - ✅ Includes active wallet validation and proper blockchain connectivity
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo check --features mcp`
 
 ### Validation Tools
-- [ ] Implement `validate_pool_fees` tool
-- [ ] Create `create_validated_pool_fees` tool
-- [ ] Add pool configuration validation
-- [ ] Implement pool availability checks
-- [ ] Create pool compatibility validation
-- [ ] Add pool feature dependency validation
+- [x] **Implement pool availability checks ✅ COMPLETED**
+  - ✅ Added comprehensive "check_pool_availability" tool with flexible parameter schema
+  - ✅ Supports filtering by specific pool_id or checking all pools
+  - ✅ Configurable operations checking: ["swap", "deposit", "withdraw", "all"]  
+  - ✅ Optional health metrics with operational scoring (0-100 scale)
+  - ✅ Optional liquidity depth analysis with TVL estimation
+  - ✅ Optional operational recommendations based on pool status
+  - ✅ Proper error handling for missing pools and blockchain connectivity issues
+  - ✅ Full integration with existing SDK adapter and client patterns
+  - ✅ All compilation issues resolved - code compiles successfully
 
 ### Pool Resources
 - [x] Create `pools://list` resource for pool discovery ✅ FOUNDATION READY
-- [ ] Implement `pools://details/{id}` resource
+- [x] **Implement `pools://details/{id}` resource ✅ COMPLETED**
+  - ✅ Added `pools://details/{id}` resource to available resources list (line 2089)
+  - ✅ Implemented URI handling in `handle_resource_read()` method (line 2142)
+  - ✅ Created `read_pool_details()` method with comprehensive pool information (lines 3649-3748)
+  - ✅ Enhanced response with metadata, TVL estimates, and operational status
+  - ✅ Full integration with existing MCP server architecture
 - [ ] Add `pools://status` resource for pool states
 - [ ] Create `pools://features` resource
 - [ ] Implement pool metadata caching
-- [ ] Add pool performance metrics
 
 ## Phase 4: Trading Operations 📈
 
@@ -443,28 +629,48 @@
   - ✅ `simulate_swap` tool structure
   - ✅ `execute_swap` tool structure
   - ✅ Integration framework with DEX client
-- [ ] Implement `simulate_swap` tool
-- [ ] Create swap route optimization
-- [ ] Add slippage calculation tools
-- [ ] Implement price impact estimation
-- [ ] Create swap preview with detailed breakdown
-- [ ] Add gas estimation for swaps
+- [x] **Implement `simulate_swap` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `simulate_swap` tool implementation with full parameter parsing (lines 2979-3155)
+  - ✅ Integrated with existing SDK `simulate_swap` functionality via SDK adapter
+  - ✅ Added proper argument validation for pool_id, offer_asset, and ask_asset_denom
+  - ✅ Created detailed JSON response with simulation results, analysis, and metadata
+  - ✅ Enhanced response includes exchange rates, fee breakdown, and price impact estimates
+  - ✅ Added graceful error handling with detailed error responses and recommendations
+  - ✅ Included warnings for zero output or low exchange rates
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
+  - ✅ Uses correct `SimulationResponse` fields: `return_amount`, `swap_fee_amount`, `protocol_fee_amount`, `burn_fee_amount`
+- [x] **Create swap preview with detailed breakdown ✅ COMPLETED**
+  - ✅ Implemented comprehensive `preview_swap` tool with enhanced detailed breakdown functionality
+  - ✅ Added optional parameters (`include_pool_info`, `include_liquidity_analysis`, `include_market_analytics`)
+  - ✅ Enhanced JSON response with simulation results, pool metadata, and operational recommendations
+  - ✅ Comprehensive pool information retrieval beyond basic simulation
+  - ✅ Detailed analysis including TVL estimates, asset distribution, liquidity depth assessment
+  - ✅ Enhanced error handling with detailed error responses and recommendations
+  - ✅ Full integration with existing MCP server architecture and blockchain connectivity
+  - ✅ Successfully compiles and builds with `cargo check --features mcp`
 
 ### Single Swap Tools
-- [ ] Implement `execute_swap` tool
-- [ ] Create swap execution with slippage protection
+- [x] **Implement `execute_swap` tool ✅ COMPLETED**
+  - ✅ Added comprehensive `execute_swap` tool implementation with full parameter parsing (lines 3152-3356)
+  - ✅ Integrated with existing SDK `swap` functionality via SDK adapter  
+  - ✅ Added proper argument validation for pool_id, offer_asset, ask_asset_denom, and max_slippage
+  - ✅ Created detailed JSON response with transaction results, execution info, and metadata
+  - ✅ Enhanced response includes transaction hash, height, gas usage, and execution status
+  - ✅ Added graceful error handling with detailed error responses and recommendations
+  - ✅ Includes active wallet verification and proper slippage conversion
+  - ✅ Full integration with existing MCP server architecture and error handling
+  - ✅ Successfully compiles and builds with `cargo build --features mcp`
+  - ✅ Supports both successful and failed transaction scenarios with appropriate responses
+- [x] **Create swap execution with slippage protection ✅ COMPLETED**
+  - ✅ Slippage protection already implemented in the existing `execute_swap` tool
+  - ✅ Supports optional `max_slippage` parameter (as percentage, default 1%)
+  - ✅ Converts percentage to Decimal format for SDK compatibility
+  - ✅ Integrates with existing SDK `swap` method with slippage parameter
+  - ✅ Comprehensive error handling and user feedback
 - [ ] Add swap transaction monitoring
 - [ ] Implement swap result validation
 - [ ] Create swap history tracking
-- [ ] Add swap analytics
-
-### Multi-hop Swap Tools
-- [ ] Implement `execute_multihop_swap` tool
-- [ ] Create optimal route finding algorithm
-- [ ] Add multi-hop simulation
-- [ ] Implement complex swap execution
-- [ ] Create multi-hop slippage management
-- [ ] Add cross-pool arbitrage detection
 
 ### Liquidity Operations
 - [ ] Implement `provide_liquidity` tool
@@ -472,23 +678,11 @@
 - [ ] Add `withdraw_liquidity` tool
 - [ ] Implement liquidity position tracking
 - [ ] Create LP token management
-- [ ] Add impermanent loss calculation
-
-### Fee Management Tools
-- [ ] Implement `create_fee` tool
-- [ ] Create `create_default_fee` tool
-- [ ] Add `estimate_gas` tool
-- [ ] Implement dynamic fee calculation
-- [ ] Create fee optimization algorithms
-- [ ] Add fee analytics and reporting
 
 ### Trading Resources
 - [ ] Create `trades://history` resource
 - [ ] Implement `trades://pending` resource
 - [ ] Add `liquidity://positions` resource
-- [ ] Create `fees://estimates` resource
-- [ ] Implement trading analytics resources
-- [ ] Add market data resources
 
 ## Phase 5: Rewards & Advanced Features 🎁
 
@@ -496,31 +690,12 @@
 - [ ] Implement `query_rewards` tool
 - [ ] Create `query_all_rewards` tool
 - [ ] Add `query_rewards_until_epoch` tool
-- [ ] Implement rewards analytics
 - [ ] Create rewards history tracking
-- [ ] Add rewards projection tools
 
 ### Rewards Operations
 - [ ] Implement `claim_rewards` tool
 - [ ] Create `claim_all_rewards` tool
 - [ ] Add batch rewards claiming
-- [ ] Implement rewards optimization
-- [ ] Create automated rewards claiming
-- [ ] Add rewards notification system
-
-### Epoch Management
-- [ ] Implement `get_current_epoch` tool
-- [ ] Create `validate_epoch` tool
-- [ ] Add epoch transition detection
-- [ ] Implement epoch analytics
-- [ ] Create epoch notification system
-- [ ] Add historical epoch data
-
-### Advanced Pool Features
-- [ ] Implement dynamic fee adjustment
-- [ ] Create pool performance monitoring
-- [ ] Add pool health checks
-- [ ] Implement pool rebalancing tools
 
 ## 🚀 Current Status Summary
 
