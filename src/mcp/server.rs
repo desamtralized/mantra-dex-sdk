@@ -4981,11 +4981,11 @@ pub async fn create_mcp_server(config: McpServerConfig) -> McpResult<MantraDexMc
 pub async fn create_stdio_server(config: McpServerConfig) -> McpResult<MantraDexMcpServer> {
     let server = create_mcp_server(config).await?;
     info!("Starting MCP server with STDIO transport");
-    
+
     // Start the stdio transport loop - this will run indefinitely
     let server_clone = server.clone();
     start_stdio_transport(server_clone).await?;
-    
+
     // This line should never be reached unless the transport stops
     warn!("STDIO transport has stopped unexpectedly");
     Ok(server)
@@ -6210,10 +6210,27 @@ async fn start_stdio_transport(server: MantraDexMcpServer) -> McpResult<()> {
     use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
     
     info!("Starting stdio transport for MCP communication");
-    info!("Server will now listen for JSON-RPC messages on stdin...");
     
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+    
+    // Signal that the server is ready
+    let ready_message = serde_json::json!({
+        "status": "ready",
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+    });
+    let ready_json = serde_json::to_string(&ready_message).unwrap();
+    
+    if let Err(e) = stdout.write_all(format!("{}\n", ready_json).as_bytes()).await {
+        error!("Failed to write readiness signal: {}", e);
+        return Err(McpServerError::Internal("Failed to signal readiness".to_string()));
+    }
+    if let Err(e) = stdout.flush().await {
+        error!("Failed to flush stdout for readiness signal: {}", e);
+    }
+    
+    info!("Server is ready and listening for JSON-RPC messages on stdin...");
+
     let mut reader = BufReader::new(stdin);
     let mut line = String::new();
     
