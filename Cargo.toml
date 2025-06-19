@@ -20,6 +20,7 @@ required-features = ["mcp"]
 
 
 [package.metadata.commands]
+run-mcp = "cargo run --bin mcp-server --features mcp"
 tui = "cargo run --bin mantra-dex-tui --features tui"
 
 [features]

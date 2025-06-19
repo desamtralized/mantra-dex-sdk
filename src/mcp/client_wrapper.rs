@@ -3,7 +3,6 @@ use std::sync::Arc;
 use serde_json::Value as JsonValue;
 use tracing::{debug, info, warn};
 
-use crate::client::MantraDexClient;
 use crate::config::MantraNetworkConfig;
 
 use super::sdk_adapter::McpSdkAdapter;
@@ -366,27 +365,6 @@ impl McpClientWrapper {
                 }
             }
         }))
-    }
-
-    /// Prepare client for operations requiring a wallet
-    ///
-    /// # Returns
-    ///
-    /// Result containing client ready for wallet operations
-    async fn get_client_with_wallet(&self) -> McpResult<MantraDexClient> {
-        let mut client = self.adapter.get_client(&self.network_config).await?;
-
-        if client.wallet().is_err() {
-            if let Some(wallet) = self.adapter.get_active_wallet().await? {
-                client = client.with_wallet(wallet);
-            } else {
-                return Err(McpServerError::Validation(
-                    "No active wallet available for this operation".to_string(),
-                ));
-            }
-        }
-
-        Ok(client)
     }
 }
 

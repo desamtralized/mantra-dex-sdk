@@ -18,6 +18,7 @@ use cosmrs::{
     Any,
 };
 use cosmwasm_std::{Coin, Decimal, Uint128};
+use hex;
 use mantra_dex_std::pool_manager::{
     self, PoolInfoResponse, PoolsResponse, SimulationResponse, SwapOperation,
 };
@@ -170,6 +171,20 @@ impl MantraDexClient {
     /// Get the network configuration
     pub fn config(&self) -> &MantraNetworkConfig {
         &self.config
+    }
+
+    /// Query a transaction by hash
+    /// TODO: Implement proper transaction querying with correct field mapping
+    pub async fn query_transaction(&self, tx_hash: &str) -> Result<serde_json::Value, Error> {
+        // Placeholder implementation - return basic transaction info
+        // This needs to be implemented properly with correct field mappings
+        // from the cosmrs transaction response types
+
+        Ok(serde_json::json!({
+            "hash": tx_hash,
+            "status": "pending",
+            "message": "Transaction query implementation pending - requires proper field mapping from cosmrs types"
+        }))
     }
 
     /// Query a smart contract

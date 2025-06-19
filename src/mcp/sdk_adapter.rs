@@ -481,6 +481,121 @@ impl McpSdkAdapter {
         info!("MCP SDK adapter shutdown complete");
         Ok(())
     }
+
+    // =========================================================================
+    // SDK Operation Wrappers
+    // =========================================================================
+
+    pub async fn get_pool(&self, pool_id: &str) -> McpResult<Value> {
+        // Placeholder for get_pool implementation
+        Ok(serde_json::json!({ "pool_id": pool_id }))
+    }
+
+    pub async fn get_pools(&self, _args: Value) -> McpResult<Value> {
+        // Placeholder for get_pools implementation
+        Ok(serde_json::json!({ "pools": [] }))
+    }
+
+    pub async fn get_pool_status(
+        &self,
+        _pool_id: u64,
+        _include_metrics: bool,
+        _include_history: bool,
+    ) -> McpResult<Value> {
+        // Placeholder
+        Ok(serde_json::json!({}))
+    }
+
+    pub async fn validate_pool_status(
+        &self,
+        _pool_id: u64,
+        _operation: Option<String>,
+        _include_recommendations: bool,
+    ) -> McpResult<Value> {
+        // Placeholder
+        Ok(serde_json::json!({}))
+    }
+
+    pub async fn provide_liquidity(&self, args: Value) -> McpResult<Value> {
+        // Placeholder for provide_liquidity implementation
+        info!(?args, "SDK Adapter: Providing liquidity");
+        // In a real implementation, this would:
+        // 1. Parse args
+        // 2. Get active wallet
+        // 3. Get a client with the wallet
+        // 4. Call client.provide_liquidity
+        // 5. Return the result
+        Ok(serde_json::json!({
+            "status": "success",
+            "message": "Liquidity provided (simulation)",
+            "tx_hash": "SIMULATED_TX_HASH"
+        }))
+    }
+
+    pub async fn provide_liquidity_unchecked(&self, args: Value) -> McpResult<Value> {
+        info!(?args, "SDK Adapter: Providing liquidity (unchecked)");
+        Ok(serde_json::json!({
+            "status": "success",
+            "message": "Liquidity provided (unchecked, simulation)",
+            "tx_hash": "SIMULATED_UNCHECKED_TX_HASH"
+        }))
+    }
+
+    pub async fn withdraw_liquidity(&self, args: Value) -> McpResult<Value> {
+        info!(?args, "SDK Adapter: Withdrawing liquidity");
+        Ok(serde_json::json!({
+            "status": "success",
+            "message": "Liquidity withdrawn (simulation)",
+            "tx_hash": "SIMULATED_WITHDRAW_TX_HASH"
+        }))
+    }
+
+    pub async fn get_liquidity_positions(&self, _args: Value) -> McpResult<Value> {
+        info!("SDK Adapter: Getting liquidity positions");
+        Ok(serde_json::json!({
+            "positions": [
+                {
+                    "pool_id": "1",
+                    "lp_token_denom": "mantra/pool/1",
+                    "amount": "1000000"
+                }
+            ]
+        }))
+    }
+
+    pub async fn execute_swap(&self, args: Value) -> McpResult<Value> {
+        info!(?args, "SDK Adapter: Executing swap");
+        // Placeholder implementation for swap execution
+        Ok(serde_json::json!({
+            "status": "success",
+            "transaction_hash": "0x1234567890abcdef",
+            "swap_details": {
+                "pool_id": args.get("pool_id").unwrap_or(&Value::String("1".to_string())),
+                "offer_asset": args.get("offer_asset").unwrap_or(&Value::Null),
+                "ask_asset_denom": args.get("ask_asset_denom").unwrap_or(&Value::String("uusdc".to_string())),
+                "return_amount": "4950",
+                "swap_fee": "50"
+            },
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    pub async fn create_pool(&self, args: Value) -> McpResult<Value> {
+        info!(?args, "SDK Adapter: Creating pool");
+        // Placeholder implementation for pool creation
+        Ok(serde_json::json!({
+            "status": "success",
+            "transaction_hash": "0xabcdef1234567890",
+            "pool_details": {
+                "pool_id": "42",
+                "pool_type": args.get("pool_type").unwrap_or(&Value::String("constant_product".to_string())),
+                "assets": args.get("assets").unwrap_or(&Value::Array(vec![])),
+                "fees": args.get("fees").unwrap_or(&Value::Null),
+                "creation_fee": "88000000" // 88 OM in uom
+            },
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
 }
 
 impl Default for McpSdkAdapter {

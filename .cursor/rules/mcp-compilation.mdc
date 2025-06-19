@@ -1,0 +1,36 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MCP Compilation Rule
+
+When compiling or checking the MCP server (or any code paths that require MCP-specific components), always include the `mcp` feature flag. 
+
+## Allowed Commands
+
+Use these commands for compilation validation:
+
+```bash
+cargo check --features mcp
+cargo build --features mcp
+cargo test --features mcp
+```
+
+## Prohibited Commands
+
+**NEVER** use `cargo run --bin` commands for compilation validation:
+
+```bash
+# ❌ DO NOT USE - These can hang or cause issues
+cargo run --bin mcp-server --features mcp
+cargo run --bin mcp-server --features mcp -- --help
+```
+
+## Rationale
+
+- `cargo check` and `cargo build` validate compilation without executing the binary
+- `cargo run` can hang, require user interaction, or cause other runtime issues
+- Compilation validation should focus on build success, not runtime behavior
+
+This ensures that all MCP-gated modules are compiled and that feature-dependent code paths are validated during development without runtime complications.
