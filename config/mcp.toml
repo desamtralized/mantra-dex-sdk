@@ -1,0 +1,22 @@
+[server]
+name = "Mantra DEX MCP Server"
+version = "0.1.0"
+debug = true
+max_concurrent_ops = 10
+request_timeout_secs = 30
+cache_ttl_secs = 300
+
+[network]
+name = "testnet"
+rpc_url = "https://rpc.testnet.mantra.com"
+chain_id = "mantra-dukong-1"
+
+[transport]
+type = "stdio"
+http_host = "127.0.0.1"
+http_port = 8080
+
+[logging]
+level = "info"
+format = "compact"
+enable_colors = true
