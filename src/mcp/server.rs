@@ -2128,9 +2128,22 @@ impl McpServerStateData {
 
     /// Initialize the DEX client
     pub async fn initialize_client(&self) -> McpResult<()> {
-        let client = MantraDexClient::new(self.config.network_config.clone())
-            .await
-            .map_err(McpServerError::Sdk)?;
+        info!("Attempting to initialize DEX client...");
+        debug!(
+            "Network config: {:?}",
+            self.config.network_config
+        );
+        
+        let client = match MantraDexClient::new(self.config.network_config.clone()).await {
+            Ok(client) => {
+                info!("DEX client created successfully");
+                client
+            }
+            Err(e) => {
+                error!("Failed to create DEX client: {:?}", e);
+                return Err(McpServerError::Sdk(e));
+            }
+        };
 
         *self.client.lock().await = Some(client);
         info!(
@@ -3430,6 +3443,9 @@ impl McpToolProvider for MantraDexMcpServer {
         }
     }
 }
+
+// Implement the main McpServer trait that combines all sub-traits
+impl McpServer for MantraDexMcpServer {}
 
 impl MantraDexMcpServer {
     /// Handle get_transaction_monitor_status tool
@@ -4964,7 +4980,14 @@ pub async fn create_mcp_server(config: McpServerConfig) -> McpResult<MantraDexMc
 /// Create an MCP server with STDIO transport
 pub async fn create_stdio_server(config: McpServerConfig) -> McpResult<MantraDexMcpServer> {
     let server = create_mcp_server(config).await?;
-    info!("Created MCP server with STDIO transport");
+    info!("Starting MCP server with STDIO transport");
+    
+    // Start the stdio transport loop - this will run indefinitely
+    let server_clone = server.clone();
+    start_stdio_transport(server_clone).await?;
+    
+    // This line should never be reached unless the transport stops
+    warn!("STDIO transport has stopped unexpectedly");
     Ok(server)
 }
 
@@ -6179,5 +6202,135 @@ impl MantraDexMcpServer {
         let mut detailed = report.clone();
         detailed["report_type"] = serde_json::json!("detailed");
         detailed
+    }
+}
+
+/// Start the stdio transport layer for MCP communication
+async fn start_stdio_transport(server: MantraDexMcpServer) -> McpResult<()> {
+    use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt, BufReader};
+    
+    info!("Starting stdio transport for MCP communication");
+    info!("Server will now listen for JSON-RPC messages on stdin...");
+    
+    let stdin = io::stdin();
+    let mut stdout = io::stdout();
+    let mut reader = BufReader::new(stdin);
+    let mut line = String::new();
+    
+    loop {
+        line.clear();
+        debug!("Waiting for input on stdin...");
+        
+        // Read a line from stdin
+        match reader.read_line(&mut line).await {
+            Ok(0) => {
+                // EOF reached, client disconnected
+                info!("Client disconnected (EOF received)");
+                break;
+            }
+            Ok(_) => {
+                // Parse and handle the JSON-RPC request
+                let trimmed = line.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                
+                debug!("Received MCP request: {}", trimmed);
+                
+                // Parse JSON-RPC request
+                let response = match serde_json::from_str::<serde_json::Value>(trimmed) {
+                    Ok(request) => handle_json_rpc_request(&server, request).await,
+                    Err(e) => {
+                        warn!("Failed to parse JSON-RPC request: {}", e);
+                        JsonRpcResponse::error(
+                            None,
+                            JsonRpcError {
+                                code: -32700, // Parse error
+                                message: "Parse error".to_string(),
+                                data: Some(serde_json::json!({
+                                    "error": e.to_string(),
+                                    "request": trimmed
+                                })),
+                            },
+                        )
+                    }
+                };
+                
+                // Send response back via stdout
+                match serde_json::to_string(&response) {
+                    Ok(response_json) => {
+                        if let Err(e) = stdout.write_all(response_json.as_bytes()).await {
+                            warn!("Failed to write response to stdout: {}", e);
+                            break;
+                        }
+                        if let Err(e) = stdout.write_all(b"\n").await {
+                            warn!("Failed to write newline to stdout: {}", e);
+                            break;
+                        }
+                        if let Err(e) = stdout.flush().await {
+                            warn!("Failed to flush stdout: {}", e);
+                            break;
+                        }
+                        debug!("Sent MCP response: {}", response_json);
+                    }
+                    Err(e) => {
+                        warn!("Failed to serialize response: {}", e);
+                        break;
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Error reading from stdin: {}", e);
+                break;
+            }
+        }
+    }
+    
+    info!("Stdio transport stopped");
+    Ok(())
+}
+
+/// Handle a JSON-RPC request and return a JSON-RPC response
+async fn handle_json_rpc_request(
+    server: &MantraDexMcpServer,
+    request: serde_json::Value,
+) -> JsonRpcResponse {
+    // Extract request ID for response correlation
+    let request_id = request.get("id").cloned();
+    
+    // Extract method and params
+    let method = match request.get("method").and_then(|m| m.as_str()) {
+        Some(method) => method,
+        None => {
+            return JsonRpcResponse::error(
+                request_id,
+                JsonRpcError {
+                    code: -32600, // Invalid Request
+                    message: "Missing method".to_string(),
+                    data: None,
+                },
+            );
+        }
+    };
+    
+    let params = request.get("params").cloned();
+    
+    debug!("Handling MCP method: {}", method);
+    
+    // Handle the request using the server
+    match server.handle_request(method, params).await {
+        Ok(result) => JsonRpcResponse::success(request_id, result),
+        Err(e) => {
+            warn!("MCP request failed: {}", e);
+            JsonRpcResponse::error(request_id, e.to_json_rpc_error())
+        }
+    }
+}
+
+impl Clone for MantraDexMcpServer {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+        }
     }
 }

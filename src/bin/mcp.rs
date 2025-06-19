@@ -41,8 +41,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .short('n')
                 .value_name("NETWORK")
                 .help("Network to connect to")
-                .default_value("testnet")
-                .value_parser(["mainnet", "testnet"]),
+                .default_value("mantra-dukong")
+                .value_parser(["mainnet", "testnet", "mantra-dukong", "mantra-testnet"]),
         )
         .arg(
             Arg::new("debug")
@@ -117,12 +117,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create server config with environment variables and CLI overrides
     let mut config = match McpServerConfig::with_network(network) {
-        Ok(config) => config,
+        Ok(config) => {
+            tracing::debug!("Config created successfully");
+            config
+        }
         Err(e) => {
             tracing::error!("Failed to load configuration: {}", e);
             std::process::exit(1);
         }
     };
+    tracing::debug!("Config creation completed");
 
     // Override debug setting from CLI if provided
     if debug_mode {
@@ -136,10 +140,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Validate the final configuration
+    tracing::debug!("About to validate configuration...");
     if let Err(e) = config.validate() {
         tracing::error!("Invalid configuration: {}", e);
         std::process::exit(1);
     }
+    tracing::debug!("Configuration validation passed");
 
     tracing::info!(
         transport = ?transport,
@@ -158,10 +164,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "stdio" => {
             tracing::info!("Using stdio transport for MCP communication");
             tracing::debug!("Starting stdio server with config");
+            tracing::debug!("About to call create_stdio_server...");
 
-            if let Err(e) = create_stdio_server(config).await {
-                tracing::error!(error = ?e, "Failed to start stdio server");
-                std::process::exit(1);
+            match create_stdio_server(config).await {
+                Ok(_) => {
+                    tracing::info!("Stdio server completed successfully");
+                }
+                Err(e) => {
+                    tracing::error!(error = ?e, "Failed to start stdio server");
+                    tracing::error!("Error details: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
         "http" => {
