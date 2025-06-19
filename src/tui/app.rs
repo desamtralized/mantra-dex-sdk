@@ -1571,9 +1571,29 @@ impl App {
                 ),
             ],
             Screen::Settings => vec![
-                settings_network_dropdown(),
-                settings_rpc_input(),
-                settings_wallet_input(),
+                // Section navigation
+                crate::tui::events::FocusableComponent::Custom("settings_section_list".to_string()),
+                
+                // Network section components
+                crate::tui::events::FocusableComponent::Dropdown("settings_network_environment".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("settings_network_name".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("settings_network_rpc".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("settings_gas_price".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("settings_gas_adjustment".to_string()),
+                
+                // Wallet section components
+                crate::tui::events::FocusableComponent::Button("settings_wallet_import_mode".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("settings_wallet_mnemonic".to_string()),
+                crate::tui::events::FocusableComponent::Button("settings_wallet_show_mnemonic".to_string()),
+                
+                // Display section components
+                crate::tui::events::FocusableComponent::Dropdown("settings_theme".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("settings_balance_refresh".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("settings_pool_refresh".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("settings_decimal_precision".to_string()),
+                crate::tui::events::FocusableComponent::Button("settings_auto_refresh".to_string()),
+                
+                // Action buttons
                 settings_save_button(),
                 settings_reset_button(),
             ],
@@ -2283,16 +2303,26 @@ impl App {
         // Handle other swap-specific events
         match event {
             Event::Tab => {
-                // Handle Tab navigation between form fields
-                swap_state.next_focus();
-                self.sync_swap_state_to_app(swap_state);
-                return Ok(true);
+                // Only handle Tab navigation between form fields when in WithinScreen mode
+                if self.state.navigation_mode == NavigationMode::WithinScreen {
+                    swap_state.next_focus();
+                    self.sync_swap_state_to_app(swap_state);
+                    return Ok(true);
+                } else {
+                    // In ScreenLevel mode, let global navigation handle Tab for screen switching
+                    return Ok(false);
+                }
             }
             Event::BackTab => {
-                // Handle Shift+Tab (reverse navigation) between form fields
-                swap_state.previous_focus();
-                self.sync_swap_state_to_app(swap_state);
-                return Ok(true);
+                // Only handle Shift+Tab (reverse navigation) between form fields when in WithinScreen mode
+                if self.state.navigation_mode == NavigationMode::WithinScreen {
+                    swap_state.previous_focus();
+                    self.sync_swap_state_to_app(swap_state);
+                    return Ok(true);
+                } else {
+                    // In ScreenLevel mode, let global navigation handle BackTab for screen switching
+                    return Ok(false);
+                }
             }
             Event::Enter => {
                 // Handle selection for currently focused list or execute button
@@ -2873,104 +2903,161 @@ impl App {
 
     /// Handle settings screen specific events. Returns `true` if the event was handled.
     async fn handle_settings_screen_event(&mut self, event: Event) -> Result<bool, Error> {
-        match event {
-            Event::Char(c) => {
-                self.handle_settings_input(c).await?;
-                return Ok(true);
-            }
-            Event::MoveFocus(direction) => {
-                // Handle focus movement within settings screen
-                match direction {
-                    crate::tui::events::FocusDirection::Next => {
-                        self.state.focus_manager.focus_next();
-                    }
-                    crate::tui::events::FocusDirection::Previous => {
-                        self.state.focus_manager.focus_previous();
-                    }
-                    crate::tui::events::FocusDirection::Up => {
-                        // Navigate to previous section
-                        self.state.settings_state.previous_section();
-                    }
-                    crate::tui::events::FocusDirection::Down => {
-                        // Navigate to next section
-                        self.state.settings_state.next_section();
-                    }
-                    _ => {}
+        // Check if we're in content mode and handle navigation accordingly
+        if matches!(self.state.navigation_mode, NavigationMode::WithinScreen) {
+            match event {
+                Event::Char(c) => {
+                    self.handle_settings_input(c).await?;
+                    return Ok(true);
                 }
-                return Ok(true);
-            }
-            Event::Enter => {
-                // Handle enter key in settings
-                if let Some(focused) = self.state.focus_manager.current_focus() {
-                    match focused {
-                        crate::tui::events::FocusableComponent::Button(button_id) => {
-                            match button_id.as_str() {
-                                "settings_save" => {
-                                    self.handle_settings_action().await?;
-                                }
-                                "settings_reset" => {
-                                    self.state.settings_state.reset_to_defaults();
-                                }
-                                _ => {}
-                            }
+                Event::MoveFocus(direction) => {
+                    // Handle focus movement within settings screen content
+                    match direction {
+                        crate::tui::events::FocusDirection::Next => {
+                            self.state.focus_manager.focus_next();
                         }
-                        crate::tui::events::FocusableComponent::Dropdown(dropdown_id) => {
-                            // Toggle dropdown or handle selection
-                            match dropdown_id.as_str() {
-                                "settings_network" => {
-                                    self.state.settings_state.toggle_network_environment();
+                        crate::tui::events::FocusDirection::Previous => {
+                            self.state.focus_manager.focus_previous();
+                        }
+                        crate::tui::events::FocusDirection::Up => {
+                            // Check if we're on the section list, then navigate sections
+                            if let Some(focused) = self.state.focus_manager.current_focus() {
+                                if let crate::tui::events::FocusableComponent::Custom(id) = focused {
+                                    if id == "settings_section_list" {
+                                        self.state.settings_state.previous_section();
+                                        return Ok(true);
+                                    }
                                 }
-                                _ => {}
                             }
+                            // Otherwise use normal focus navigation
+                            self.state.focus_manager.focus_previous();
+                        }
+                        crate::tui::events::FocusDirection::Down => {
+                            // Check if we're on the section list, then navigate sections
+                            if let Some(focused) = self.state.focus_manager.current_focus() {
+                                if let crate::tui::events::FocusableComponent::Custom(id) = focused {
+                                    if id == "settings_section_list" {
+                                        self.state.settings_state.next_section();
+                                        return Ok(true);
+                                    }
+                                }
+                            }
+                            // Otherwise use normal focus navigation
+                            self.state.focus_manager.focus_next();
                         }
                         _ => {}
                     }
+                    return Ok(true);
                 }
-                return Ok(true);
-            }
-            Event::Escape => {
-                // Handle escape key - close confirmation modal or go back
-                if self.state.settings_state.show_confirmation {
-                    self.state.settings_state.show_confirmation = false;
-                } else if self.state.settings_state.message.is_some() {
-                    self.state.settings_state.clear_message();
-                }
-                return Ok(true);
-            }
-            Event::Backspace => {
-                // Handle backspace for text input fields
-                if let Some(focused) = self.state.focus_manager.current_focus() {
-                    if let crate::tui::events::FocusableComponent::TextInput(field_id) = focused {
-                        match field_id.as_str() {
-                            "settings_rpc" => {
-                                let _ = self.state.settings_state.handle_backspace();
+                Event::Enter => {
+                    // Handle enter key in settings
+                    if let Some(focused) = self.state.focus_manager.current_focus() {
+                        match focused {
+                            crate::tui::events::FocusableComponent::Button(button_id) => {
+                                match button_id.as_str() {
+                                    "settings_save" => {
+                                        self.handle_settings_action().await?;
+                                    }
+                                    "settings_reset" => {
+                                        self.state.settings_state.reset_to_defaults();
+                                    }
+                                    "settings_wallet_import_mode" => {
+                                        self.state.settings_state.toggle_import_mode();
+                                    }
+                                    "settings_wallet_show_mnemonic" => {
+                                        self.state.settings_state.toggle_mnemonic_visibility();
+                                    }
+                                    "settings_auto_refresh" => {
+                                        self.state.settings_state.toggle_auto_refresh();
+                                    }
+                                    _ => {}
+                                }
                             }
-                            "settings_wallet" => {
-                                let _ = self.state.settings_state.handle_backspace();
+                            crate::tui::events::FocusableComponent::Dropdown(dropdown_id) => {
+                                // Toggle dropdown or handle selection
+                                match dropdown_id.as_str() {
+                                    "settings_network_environment" => {
+                                        self.state.settings_state.toggle_network_environment();
+                                    }
+                                    "settings_theme" => {
+                                        self.state.settings_state.toggle_theme();
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            crate::tui::events::FocusableComponent::TextInput(_) => {
+                                // Enter editing mode for text input
+                                match self.state.settings_state.current_section {
+                                    crate::tui::screens::settings::SettingsSection::Network => {
+                                        self.state.settings_state.network_form.form_state.editing = true;
+                                    }
+                                    crate::tui::screens::settings::SettingsSection::Wallet => {
+                                        if self.state.settings_state.wallet_form.import_mode {
+                                            self.state.settings_state.wallet_form.form_state.editing = true;
+                                        }
+                                    }
+                                    crate::tui::screens::settings::SettingsSection::Display => {
+                                        self.state.settings_state.display_form.form_state.editing = true;
+                                    }
+                                }
                             }
                             _ => {}
                         }
                     }
+                    return Ok(true);
                 }
-                return Ok(true);
-            }
-            Event::ContextAction => {
-                // Handle space bar context actions
-                match self.state.settings_state.current_section {
-                    crate::tui::screens::settings::SettingsSection::Network => {
-                        self.state.settings_state.toggle_network_environment();
+                Event::Escape => {
+                    // Handle escape key - close confirmation modal or go back to tab mode
+                    if self.state.settings_state.show_confirmation {
+                        self.state.settings_state.show_confirmation = false;
+                    } else if self.state.settings_state.message.is_some() {
+                        self.state.settings_state.clear_message();
+                    } else {
+                        // Exit content mode and return to tab mode
+                        self.state.navigation_mode = NavigationMode::ScreenLevel;
                     }
-                    crate::tui::screens::settings::SettingsSection::Display => {
-                        self.state.settings_state.toggle_theme();
-                    }
-                    crate::tui::screens::settings::SettingsSection::Wallet => {
-                        self.state.settings_state.toggle_import_mode();
-                    }
+                    return Ok(true);
                 }
-                return Ok(true);
+                Event::Backspace => {
+                    // Handle backspace for text input fields
+                    if let Some(focused) = self.state.focus_manager.current_focus() {
+                        if let crate::tui::events::FocusableComponent::TextInput(field_id) = focused {
+                            match field_id.as_str() {
+                                "settings_network_name" | "settings_network_rpc" | "settings_gas_price" | "settings_gas_adjustment" => {
+                                    let _ = self.state.settings_state.handle_backspace();
+                                }
+                                "settings_wallet_mnemonic" => {
+                                    let _ = self.state.settings_state.handle_backspace();
+                                }
+                                "settings_balance_refresh" | "settings_pool_refresh" | "settings_decimal_precision" => {
+                                    let _ = self.state.settings_state.handle_backspace();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    return Ok(true);
+                }
+                Event::ContextAction => {
+                    // Handle space bar context actions
+                    match self.state.settings_state.current_section {
+                        crate::tui::screens::settings::SettingsSection::Network => {
+                            self.state.settings_state.toggle_network_environment();
+                        }
+                        crate::tui::screens::settings::SettingsSection::Display => {
+                            self.state.settings_state.toggle_theme();
+                        }
+                        crate::tui::screens::settings::SettingsSection::Wallet => {
+                            self.state.settings_state.toggle_import_mode();
+                        }
+                    }
+                    return Ok(true);
+                }
+                _ => {}
             }
-            _ => {}
         }
+        
+        // If not handled in content mode, return false to allow global handling
         Ok(false)
     }
 
