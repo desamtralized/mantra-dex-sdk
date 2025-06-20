@@ -644,9 +644,79 @@ impl McpSdkAdapter {
     // SDK Operation Wrappers
     // =========================================================================
 
-    pub async fn get_pool(&self, pool_id: &str) -> McpResult<Value> {
-        // Placeholder for get_pool implementation
-        Ok(serde_json::json!({ "pool_id": pool_id }))
+    /// Get pool information by ID
+    /// 
+    /// # Arguments
+    /// 
+    /// * `network_config` - Network configuration for the query
+    /// * `pool_id` - The pool identifier to query
+    /// 
+    /// # Returns
+    /// 
+    /// JSON value containing pool information including assets, fees, liquidity, and status
+    pub async fn get_pool(&self, network_config: &MantraNetworkConfig, pool_id: &str) -> McpResult<Value> {
+        debug!("Getting pool info for network: {}", network_config.network_id);
+        info!("Querying pool with ID: {}", pool_id);
+
+        // Validate pool_id parameter
+        if pool_id.trim().is_empty() {
+            return Err(McpServerError::InvalidArguments("Pool ID cannot be empty".to_string()));
+        }
+
+        // Get client and execute pool query
+        let client = self.get_client(network_config).await?;
+        
+        // Query pool information using the SDK client
+        let pool_info = client.get_pool(pool_id).await
+            .map_err(|e| {
+                error!("Failed to get pool {}: {}", pool_id, e);
+                McpServerError::Sdk(e)
+            })?;
+        
+        debug!("Retrieved pool info for pool {}", pool_id);
+        
+        // Convert pool assets to JSON format
+        let assets_json: Vec<Value> = pool_info.pool_info.assets
+            .into_iter()
+            .map(|asset| {
+                serde_json::json!({
+                    "denom": asset.denom,
+                    "amount": asset.amount.to_string()
+                })
+            })
+            .collect();
+
+        // Get pool status information
+        let pool_status = client.get_pool_status(&pool_info);
+        let status_json = serde_json::json!({
+            "available": pool_status.is_available(),
+            "swaps_enabled": pool_info.pool_info.status.swaps_enabled,
+            "deposits_enabled": pool_info.pool_info.status.deposits_enabled,
+            "withdrawals_enabled": pool_info.pool_info.status.withdrawals_enabled
+        });
+
+        // Convert fees to JSON format
+        let fees_json = serde_json::json!({
+            "protocol_fee": pool_info.pool_info.pool_fees.protocol_fee.to_string(),
+            "swap_fee": pool_info.pool_info.pool_fees.swap_fee.to_string(),
+            "burn_fee": pool_info.pool_info.pool_fees.burn_fee.to_string()
+        });
+
+        // Build comprehensive pool information response
+        let result = serde_json::json!({
+            "pool_id": pool_id,
+            "pool_type": format!("{:?}", pool_info.pool_info.pool_type),
+            "assets": assets_json,
+            "total_assets": assets_json.len(),
+            "fees": fees_json,
+            "status": status_json,
+            "total_share": pool_info.total_share.to_string(),
+            "network": network_config.network_id,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        });
+
+        info!("Successfully retrieved pool information for pool: {}", pool_id);
+        Ok(result)
     }
 
     pub async fn get_pools(&self, _args: Value) -> McpResult<Value> {
