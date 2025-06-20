@@ -1097,7 +1097,13 @@ pub trait McpServer:
                     ))
                 }
             }
-            "initialize" => Ok(self.get_server_info()),
+            "initialize" => {
+                let mut response = serde_json::Map::new();
+                response.insert("protocolVersion".to_string(), serde_json::Value::String("2024-11-05".to_string()));
+                response.insert("serverInfo".to_string(), self.get_server_info());
+                response.insert("capabilities".to_string(), self.get_capabilities());
+                Ok(serde_json::Value::Object(response))
+            },
             "ping" => Ok(serde_json::json!({ "result": "pong" })),
             _ => Err(McpServerError::Mcp(format!("Unknown method: {}", method))),
         }
@@ -6213,21 +6219,6 @@ async fn start_stdio_transport(server: MantraDexMcpServer) -> McpResult<()> {
     
     let stdin = io::stdin();
     let mut stdout = io::stdout();
-    
-    // Signal that the server is ready
-    let ready_message = serde_json::json!({
-        "status": "ready",
-        "timestamp": chrono::Utc::now().to_rfc3339(),
-    });
-    let ready_json = serde_json::to_string(&ready_message).unwrap();
-    
-    if let Err(e) = stdout.write_all(format!("{}\n", ready_json).as_bytes()).await {
-        error!("Failed to write readiness signal: {}", e);
-        return Err(McpServerError::Internal("Failed to signal readiness".to_string()));
-    }
-    if let Err(e) = stdout.flush().await {
-        error!("Failed to flush stdout for readiness signal: {}", e);
-    }
     
     info!("Server is ready and listening for JSON-RPC messages on stdin...");
 
