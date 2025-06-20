@@ -15,7 +15,7 @@ fn test_network_config_loading() {
         "Network name should match"
     );
     assert_eq!(
-        network.network_id, "mantra-dukong-1",
+        network.network_id, "mantra-dukong",
         "Network ID should match"
     );
     assert!(
@@ -90,7 +90,7 @@ fn test_create_network_config() {
         "Network name should match"
     );
     assert_eq!(
-        network_config.network_id, "mantra-dukong-1",
+        network_config.network_id, "mantra-dukong",
         "Network ID should match"
     );
     assert!(
@@ -128,8 +128,8 @@ fn test_default_network_config() {
         "Default network name should be mantra-dukong"
     );
     assert_eq!(
-        default_config.network_id, "mantra-dukong-1",
-        "Default network ID should be mantra-dukong-1"
+        default_config.network_id, "mantra-dukong",
+        "Default network ID should be mantra-dukong"
     );
     assert_eq!(
         default_config.rpc_url, "https://rpc.dukong.mantrachain.io/",

@@ -89,6 +89,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Override with CLI arguments
     if debug_mode {
         logging_config.level = mantra_dex_sdk::mcp::logging::LogLevel::Debug;
+    } else {
+        // For normal operation, use INFO level to reduce noise
+        logging_config.level = mantra_dex_sdk::mcp::logging::LogLevel::Info;
     }
 
     logging_config.format = log_format

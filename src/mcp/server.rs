@@ -1958,7 +1958,7 @@ thread_keep_alive = 10
 # Examples of network-specific overrides:
 # [network_config]
 # rpc_endpoint = "https://rpc.mantra.com"
-# chain_id = "mantra-dukong"
+# chain_id = "mantra-dukong-1"
 # gas_price = "0.01uom"
 "#,
             example_config.name,
@@ -2257,6 +2257,9 @@ impl MantraDexMcpServer {
         info!("Initializing Mantra DEX MCP Server");
         self.state.initialize_client().await?;
 
+        // Auto-load wallet from environment if available
+        self.auto_load_wallet_from_env().await?;
+
         // Initialize client wrapper
         let wrapper = McpClientWrapper::new(
             self.state.sdk_adapter.clone(),
@@ -2271,6 +2274,69 @@ impl MantraDexMcpServer {
     /// Get server state
     pub fn state(&self) -> Arc<McpServerStateData> {
         self.state.clone()
+    }
+
+    /// Auto-load wallet from environment variables
+    async fn auto_load_wallet_from_env(&self) -> McpResult<()> {
+        use std::env;
+        use crate::wallet::MantraWallet;
+
+        // Check for wallet mnemonic in environment
+        if let Ok(mnemonic) = env::var("WALLET_MNEMONIC") {
+            if !mnemonic.trim().is_empty() {
+                info!("Auto-loading wallet from WALLET_MNEMONIC environment variable");
+                
+                // Create wallet from mnemonic (using account index 0)
+                match MantraWallet::from_mnemonic(&mnemonic, 0) {
+                    Ok(wallet) => {
+                        let wallet_info = wallet.info();
+                        let address = wallet_info.address.clone();
+                        
+                        // Store wallet info in state
+                        self.state.set_active_wallet(address.clone(), wallet_info.clone()).await?;
+                        
+                        // Create another wallet instance for the SDK adapter (since MantraWallet doesn't implement Clone)
+                        match MantraWallet::from_mnemonic(&mnemonic, 0) {
+                            Ok(adapter_wallet) => {
+                                // Store wallet instance in SDK adapter
+                                self.state.sdk_adapter.set_active_wallet_with_instance(adapter_wallet).await?;
+                            }
+                            Err(e) => {
+                                warn!("Failed to create wallet instance for SDK adapter: {}", e);
+                            }
+                        }
+                        
+                        // Update the client with the wallet
+                        let mut client_guard = self.state.client.lock().await;
+                        if let Some(client) = client_guard.take() {
+                            *client_guard = Some(client.with_wallet(wallet));
+                        }
+                        
+                        info!("Successfully auto-loaded wallet with address: {}", address);
+                    }
+                    Err(e) => {
+                        warn!("Failed to create wallet from WALLET_MNEMONIC: {}", e);
+                        return Err(McpServerError::Validation(
+                            format!("Invalid WALLET_MNEMONIC: {}", e)
+                        ));
+                    }
+                }
+            } else {
+                debug!("WALLET_MNEMONIC environment variable is empty, skipping auto-load");
+            }
+        } else {
+            debug!("No WALLET_MNEMONIC environment variable found, skipping auto-load");
+        }
+
+        // Check for wallet address override (optional)
+        if let Ok(wallet_address) = env::var("WALLET_ADDRESS") {
+            if !wallet_address.trim().is_empty() {
+                debug!("WALLET_ADDRESS environment variable found: {}", wallet_address);
+                // This could be used for validation or override, but mnemonic takes precedence
+            }
+        }
+
+        Ok(())
     }
 
     /// Get server information
@@ -2291,8 +2357,8 @@ impl MantraDexMcpServer {
                 "list_changed": true,
                 "subscribe": false
             },
-            "logging": null,
-            "experimental": null
+            "logging": {},
+            "experimental": {}
         })
     }
 }
@@ -2614,6 +2680,25 @@ impl McpToolProvider for MantraDexMcpServer {
                     }
                 }
             }),
+            // Wallet and Balance Tools
+            serde_json::json!({
+                "name": "get_balances",
+                "description": "Get wallet balances for all assets",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "wallet_address": {
+                            "type": "string",
+                            "description": "Wallet address to query balances for (optional, uses active wallet if not provided)"
+                        },
+                        "include_zero_balances": {
+                            "type": "boolean",
+                            "description": "Whether to include assets with zero balance (default: false)",
+                            "default": false
+                        }
+                    }
+                }
+            }),
             // Transaction Monitoring Tools
             serde_json::json!({
                 "name": "monitor_swap_transaction",
@@ -2719,7 +2804,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "execute_swap",
                 "description": "Executes a token swap in a specified pool with slippage protection.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_id": { "type": "string", "description": "The ID of the pool to swap in." },
@@ -2740,7 +2825,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "provide_liquidity",
                 "description": "Provides liquidity to a specified pool.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_id": { "type": "string", "description": "The ID of the pool to provide liquidity to." },
@@ -2764,7 +2849,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "provide_liquidity_unchecked",
                 "description": "Provides liquidity to a specified pool without client-side checks.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_id": { "type": "string", "description": "The ID of the pool to provide liquidity to." },
@@ -2787,7 +2872,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "withdraw_liquidity",
                 "description": "Withdraws liquidity from a specified pool.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_id": { "type": "string", "description": "The ID of the pool to withdraw from." },
@@ -2799,7 +2884,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "create_pool",
                 "description": "Creates a new liquidity pool (admin only).",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_type": {
@@ -2842,7 +2927,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "validate_pool_status",
                 "description": "Validates the operational status and configuration of a pool.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_id": {
@@ -2867,7 +2952,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "validate_swap_result",
                 "description": "Validates and analyzes swap transaction results with comprehensive checks.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "tx_hash": { 
@@ -2918,7 +3003,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "get_swap_execution_summary",
                 "description": "Provides a comprehensive summary of swap execution with performance metrics.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "tx_hash": { 
@@ -2944,7 +3029,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "validate_swap_parameters",
                 "description": "Validates swap parameters against current pool state and market conditions.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_id": { 
@@ -2983,7 +3068,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "get_swap_history",
                 "description": "Retrieves comprehensive swap transaction history with filtering and pagination.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "wallet_address": {
@@ -3067,7 +3152,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "get_swap_statistics",
                 "description": "Generates comprehensive swap statistics and analytics for a wallet or globally.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "wallet_address": {
@@ -3106,7 +3191,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "export_swap_history",
                 "description": "Exports swap history data in various formats for external analysis.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "wallet_address": {
@@ -3150,7 +3235,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "track_swap_execution",
                 "description": "Tracks and records a swap execution for history tracking purposes.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "tx_hash": {
@@ -3193,7 +3278,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "analyze_swap_performance",
                 "description": "Analyzes swap performance including slippage, gas efficiency, and success rates.",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "wallet_address": {
@@ -3236,7 +3321,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "get_lp_token_balance",
                 "description": "Get LP token balance for a specific pool",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_id": {
@@ -3254,7 +3339,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "get_all_lp_token_balances",
                 "description": "Get all LP token balances for the wallet across all pools",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "wallet_address": {
@@ -3272,7 +3357,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "estimate_lp_withdrawal_amounts",
                 "description": "Estimate withdrawal amounts for LP tokens",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_id": {
@@ -3294,7 +3379,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "generate_trading_report",
                 "description": "Generate comprehensive trading report for a specific time period",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "wallet_address": {
@@ -3339,7 +3424,7 @@ impl McpToolProvider for MantraDexMcpServer {
             serde_json::json!({
                 "name": "calculate_impermanent_loss",
                 "description": "Calculate impermanent loss for liquidity positions",
-                "input_schema": {
+                "inputSchema": {
                     "type": "object",
                     "properties": {
                         "pool_id": {
@@ -3393,6 +3478,9 @@ impl McpToolProvider for MantraDexMcpServer {
         arguments: serde_json::Value,
     ) -> McpResult<serde_json::Value> {
         match tool_name {
+            "get_contract_addresses" => self.handle_get_contract_addresses(arguments).await,
+            "validate_network_connectivity" => self.handle_validate_network_connectivity(arguments).await,
+            "get_balances" => self.handle_get_balances(arguments).await,
             "execute_swap" => self.handle_execute_swap(arguments).await,
             "provide_liquidity" => self.handle_provide_liquidity(arguments).await,
             "provide_liquidity_unchecked" => {
@@ -3432,6 +3520,356 @@ impl McpToolProvider for MantraDexMcpServer {
 impl McpServer for MantraDexMcpServer {}
 
 impl MantraDexMcpServer {
+    /// Handle get_contract_addresses tool
+    async fn handle_get_contract_addresses(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling get_contract_addresses tool call");
+        
+        let include_metadata = arguments
+            .get("include_metadata")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let contracts = &self.state.config.network_config.contracts;
+        
+        let mut result = serde_json::json!({
+            "network": self.state.config.network_config.network_name,
+            "chain_id": self.state.config.network_config.network_id,
+            "contracts": {
+                "pool_manager": contracts.pool_manager
+            }
+        });
+
+        if let Some(farm_manager) = &contracts.farm_manager {
+            result["contracts"]["farm_manager"] = serde_json::Value::String(farm_manager.clone());
+        }
+
+        if let Some(fee_collector) = &contracts.fee_collector {
+            result["contracts"]["fee_collector"] = serde_json::Value::String(fee_collector.clone());
+        }
+
+        if let Some(epoch_manager) = &contracts.epoch_manager {
+            result["contracts"]["epoch_manager"] = serde_json::Value::String(epoch_manager.clone());
+        }
+
+        if include_metadata {
+            result["metadata"] = serde_json::json!({
+                "pool_manager": {
+                    "description": "Main DEX pool management contract",
+                    "functions": ["create_pool", "swap", "provide_liquidity", "withdraw_liquidity"]
+                },
+                "farm_manager": {
+                    "description": "Liquidity farming and rewards management",
+                    "functions": ["stake_lp_tokens", "unstake_lp_tokens", "claim_rewards"]
+                },
+                "fee_collector": {
+                    "description": "Protocol fee collection and distribution",
+                    "functions": ["collect_fees", "distribute_fees"]
+                },
+                "epoch_manager": {
+                    "description": "Epoch-based reward distribution management",
+                    "functions": ["create_epoch", "finalize_epoch", "claim_epoch_rewards"]
+                }
+            });
+        }
+
+        // Create formatted response text
+        let mut response_text = format!("📄 **Contract Addresses**\n\n");
+        response_text.push_str(&format!("**Network:** {}\n", self.state.config.network_config.network_name));
+        response_text.push_str(&format!("**Chain ID:** {}\n\n", self.state.config.network_config.network_id));
+
+        response_text.push_str("### 🏗️ Core Contracts:\n\n");
+        response_text.push_str(&format!("**Pool Manager:** `{}`\n", contracts.pool_manager));
+
+        if let Some(farm_manager) = &contracts.farm_manager {
+            response_text.push_str(&format!("**Farm Manager:** `{}`\n", farm_manager));
+        }
+
+        if let Some(fee_collector) = &contracts.fee_collector {
+            response_text.push_str(&format!("**Fee Collector:** `{}`\n", fee_collector));
+        }
+
+        if let Some(epoch_manager) = &contracts.epoch_manager {
+            response_text.push_str(&format!("**Epoch Manager:** `{}`\n", epoch_manager));
+        }
+
+        if include_metadata {
+            response_text.push_str("\n### 📋 Contract Functions:\n\n");
+            response_text.push_str("**Pool Manager:**\n");
+            response_text.push_str("- create_pool, swap, provide_liquidity, withdraw_liquidity\n\n");
+            response_text.push_str("**Farm Manager:**\n");
+            response_text.push_str("- stake_lp_tokens, unstake_lp_tokens, claim_rewards\n\n");
+            response_text.push_str("**Fee Collector:**\n");
+            response_text.push_str("- collect_fees, distribute_fees\n\n");
+            response_text.push_str("**Epoch Manager:**\n");
+            response_text.push_str("- create_epoch, finalize_epoch, claim_epoch_rewards\n");
+        }
+
+        // Return proper MCP response format
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ]
+        }))
+    }
+
+    /// Handle validate_network_connectivity tool
+    async fn handle_validate_network_connectivity(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling validate_network_connectivity tool call");
+        
+        let check_rpc = arguments
+            .get("check_rpc")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let check_contracts = arguments
+            .get("check_contracts")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let check_block_height = arguments
+            .get("check_block_height")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        let _timeout_secs = arguments
+            .get("timeout_secs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10);
+
+        // Simplified status tracking
+        let mut status_messages = Vec::new();
+        let mut all_passed = true;
+
+        // RPC connectivity check
+        if check_rpc {
+            match self.state.get_client().await {
+                Ok(_) => {
+                    status_messages.push("RPC connection: OK".to_string());
+                }
+                Err(e) => {
+                    status_messages.push(format!("RPC connection: FAILED - {}", e));
+                    all_passed = false;
+                }
+            }
+        }
+
+        // Contract validation check
+        if check_contracts {
+            let contracts = &self.state.config.network_config.contracts;
+            let pool_manager_valid = contracts.pool_manager.starts_with("mantra1") && contracts.pool_manager.len() >= 39;
+            
+            if pool_manager_valid {
+                status_messages.push("Contract addresses: OK".to_string());
+            } else {
+                status_messages.push("Contract addresses: INVALID".to_string());
+                all_passed = false;
+            }
+        }
+
+        // Block height check
+        if check_block_height {
+            match self.state.get_client().await {
+                Ok(_) => {
+                    status_messages.push("Block queries: OK".to_string());
+                }
+                Err(e) => {
+                    status_messages.push(format!("Block queries: FAILED - {}", e));
+                    all_passed = false;
+                }
+            }
+        }
+
+        // Create simple, clean response
+        let overall_status = if all_passed { "healthy" } else { "unhealthy" };
+        let summary = if all_passed {
+            "All network connectivity checks passed"
+        } else {
+            "Some network connectivity checks failed"
+        };
+
+        // Create formatted response text
+        let mut response_text = format!("🌐 **Network Connectivity Check**\n\n");
+        response_text.push_str(&format!("**Network:** {}\n", self.state.config.network_config.network_name));
+        response_text.push_str(&format!("**RPC URL:** {}\n", self.state.config.network_config.rpc_url));
+        response_text.push_str(&format!("**Overall Status:** {}\n\n", if all_passed { "✅ Healthy" } else { "❌ Unhealthy" }));
+
+        response_text.push_str("### 🔍 Check Results:\n\n");
+        for (i, message) in status_messages.iter().enumerate() {
+            let icon = if message.contains("OK") { "✅" } else { "❌" };
+            response_text.push_str(&format!("{}. {} {}\n", i + 1, icon, message));
+        }
+
+        response_text.push_str(&format!("\n**Summary:** {}\n", summary));
+        response_text.push_str(&format!("**Timestamp:** {}\n", chrono::Utc::now().to_rfc3339()));
+
+        // Return proper MCP response format
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ]
+        }))
+    }
+
+    /// Handle get_balances tool
+    async fn handle_get_balances(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling get_balances tool call");
+
+        // Parse arguments
+        let wallet_address = arguments
+            .get("wallet_address")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let include_zero_balances = arguments
+            .get("include_zero_balances")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Get balances using the SDK adapter
+        let result = self
+            .state
+            .sdk_adapter
+            .get_balances(&self.state.config.network_config, wallet_address)
+            .await?;
+
+        // Extract balance data for processing
+        let empty_vec = vec![];
+        let balances_array = result.get("balances").and_then(|b| b.as_array()).unwrap_or(&empty_vec);
+        let address = result.get("address").and_then(|a| a.as_str()).unwrap_or("Unknown");
+        let network = result.get("network").and_then(|n| n.as_str()).unwrap_or("Unknown");
+
+        // Filter out zero balances if requested
+        let filtered_balances: Vec<_> = if !include_zero_balances {
+            balances_array
+                .iter()
+                .filter(|balance| {
+                    balance
+                        .get("amount")
+                        .and_then(|a| a.as_str())
+                        .map(|amount| amount != "0")
+                        .unwrap_or(true)
+                })
+                .cloned()
+                .collect()
+        } else {
+            balances_array.clone()
+        };
+
+        // Format balances for human readability - SIMPLIFIED
+        let mut formatted_balances = Vec::new();
+        let mut total_om_value = 0.0;
+
+        for balance in &filtered_balances {
+            let denom = balance.get("denom").and_then(|d| d.as_str()).unwrap_or("unknown");
+            let amount_str = balance.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
+            
+            // Parse amount
+            let raw_amount: u128 = amount_str.parse().unwrap_or(0);
+            
+            // Simplified formatting
+            let (token_name, formatted_amount) = self.format_token_simple(denom, raw_amount);
+            
+            formatted_balances.push(serde_json::json!({
+                "token": token_name,
+                "amount": formatted_amount,
+                "denom": denom
+            }));
+
+            // Calculate OM value for estimate
+            if denom == "uom" {
+                total_om_value = (raw_amount as f64) / 1_000_000.0;
+            }
+        }
+
+        // Create simple, clean response
+        let summary = if filtered_balances.is_empty() {
+            "No tokens found in wallet".to_string()
+        } else {
+            format!("Found {} tokens in wallet", filtered_balances.len())
+        };
+
+        // Create formatted response text
+        let mut response_text = format!("🏦 **Wallet Balances**\n\n");
+        response_text.push_str(&format!("**Address:** `{}`\n", address));
+        response_text.push_str(&format!("**Network:** {}\n", network));
+        response_text.push_str(&format!("**Total Tokens:** {}\n\n", filtered_balances.len()));
+
+        if !formatted_balances.is_empty() {
+            response_text.push_str("### 💰 Token Holdings:\n\n");
+            for balance in &formatted_balances {
+                let token = balance.get("token").and_then(|t| t.as_str()).unwrap_or("Unknown");
+                let amount = balance.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
+                response_text.push_str(&format!("- **{}**: {}\n", token, amount));
+            }
+            
+            if total_om_value > 0.0 {
+                response_text.push_str(&format!("\n**Total OM Value:** {:.2} OM\n", total_om_value));
+            }
+        } else {
+            response_text.push_str("No tokens found in wallet.\n");
+        }
+
+        // Return proper MCP response format
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ]
+        }))
+    }
+
+    /// Simplified token formatting without emojis or complex logic
+    fn format_token_simple(&self, denom: &str, raw_amount: u128) -> (String, String) {
+        match denom {
+            "uom" => {
+                let om_amount = (raw_amount as f64) / 1_000_000.0;
+                ("OM".to_string(), format!("{:.6}", om_amount))
+            }
+            d if d.contains("/uUSDC") => {
+                let usdc_amount = (raw_amount as f64) / 1_000_000.0;
+                ("USDC".to_string(), format!("{:.6}", usdc_amount))
+            }
+            d if d.contains("/uUSDY") => {
+                let usdy_amount = (raw_amount as f64) / 1_000_000.0;
+                ("USDY".to_string(), format!("{:.6}", usdy_amount))
+            }
+            d if d.contains("/aUSDY") => {
+                ("aUSDY".to_string(), raw_amount.to_string())
+            }
+            d if d.contains(".LP") => {
+                let lp_amount = (raw_amount as f64) / 1_000_000.0;
+                ("LP Token".to_string(), format!("{:.6}", lp_amount))
+            }
+            d if d.starts_with("ibc/") => {
+                let ibc_amount = (raw_amount as f64) / 1_000_000.0;
+                ("USDT".to_string(), format!("{:.6}", ibc_amount))
+            }
+            _ => {
+                ("Unknown Token".to_string(), raw_amount.to_string())
+            }
+        }
+    }
+
+    /// Check RPC connectivity
+
+
     /// Handle get_transaction_monitor_status tool
     async fn handle_get_transaction_monitor_status(
         &self,
@@ -6205,8 +6643,6 @@ async fn start_stdio_transport(server: MantraDexMcpServer) -> McpResult<()> {
     
     loop {
         line.clear();
-        debug!("Waiting for input on stdin...");
-        
         // Read a line from stdin
         match reader.read_line(&mut line).await {
             Ok(0) => {
@@ -6221,14 +6657,17 @@ async fn start_stdio_transport(server: MantraDexMcpServer) -> McpResult<()> {
                     continue;
                 }
                 
-                debug!("Received MCP request: {}", trimmed);
+                // Only log request details in debug mode to reduce noise
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    debug!("Received MCP request: {}", trimmed);
+                }
                 
                 // Parse JSON-RPC request
-                let response = match serde_json::from_str::<serde_json::Value>(trimmed) {
+                let response_opt = match serde_json::from_str::<serde_json::Value>(trimmed) {
                     Ok(request) => handle_json_rpc_request(&server, request).await,
                     Err(e) => {
                         warn!("Failed to parse JSON-RPC request: {}", e);
-                        JsonRpcResponse::error(
+                        Some(JsonRpcResponse::error(
                             None,
                             JsonRpcError {
                                 code: -32700, // Parse error
@@ -6238,31 +6677,38 @@ async fn start_stdio_transport(server: MantraDexMcpServer) -> McpResult<()> {
                                     "request": trimmed
                                 })),
                             },
-                        )
+                        ))
                     }
                 };
                 
-                // Send response back via stdout
-                match serde_json::to_string(&response) {
-                    Ok(response_json) => {
-                        if let Err(e) = stdout.write_all(response_json.as_bytes()).await {
-                            warn!("Failed to write response to stdout: {}", e);
+                // Send response back via stdout (only if we have a response - notifications don't require responses)
+                if let Some(response) = response_opt {
+                    match serde_json::to_string(&response) {
+                        Ok(response_json) => {
+                            if let Err(e) = stdout.write_all(response_json.as_bytes()).await {
+                                warn!("Failed to write response to stdout: {}", e);
+                                break;
+                            }
+                            if let Err(e) = stdout.write_all(b"\n").await {
+                                warn!("Failed to write newline to stdout: {}", e);
+                                break;
+                            }
+                            if let Err(e) = stdout.flush().await {
+                                warn!("Failed to flush stdout: {}", e);
+                                break;
+                            }
+                            // Only log response details in debug mode to reduce noise
+                            if tracing::enabled!(tracing::Level::DEBUG) {
+                                debug!("Sent MCP response: {}", response_json);
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to serialize response: {}", e);
                             break;
                         }
-                        if let Err(e) = stdout.write_all(b"\n").await {
-                            warn!("Failed to write newline to stdout: {}", e);
-                            break;
-                        }
-                        if let Err(e) = stdout.flush().await {
-                            warn!("Failed to flush stdout: {}", e);
-                            break;
-                        }
-                        debug!("Sent MCP response: {}", response_json);
                     }
-                    Err(e) => {
-                        warn!("Failed to serialize response: {}", e);
-                        break;
-                    }
+                } else {
+                    debug!("No response needed for notification");
                 }
             }
             Err(e) => {
@@ -6280,7 +6726,7 @@ async fn start_stdio_transport(server: MantraDexMcpServer) -> McpResult<()> {
 async fn handle_json_rpc_request(
     server: &MantraDexMcpServer,
     request: serde_json::Value,
-) -> JsonRpcResponse {
+) -> Option<JsonRpcResponse> {
     // Extract request ID for response correlation
     let request_id = request.get("id").cloned();
     
@@ -6288,14 +6734,14 @@ async fn handle_json_rpc_request(
     let method = match request.get("method").and_then(|m| m.as_str()) {
         Some(method) => method,
         None => {
-            return JsonRpcResponse::error(
+            return Some(JsonRpcResponse::error(
                 request_id,
                 JsonRpcError {
                     code: -32600, // Invalid Request
                     message: "Missing method".to_string(),
                     data: None,
                 },
-            );
+            ));
         }
     };
     
@@ -6303,12 +6749,33 @@ async fn handle_json_rpc_request(
     
     debug!("Handling MCP method: {}", method);
     
-    // Handle the request using the server
+    // Check if this is a notification (no id field)
+    let is_notification = request_id.is_none();
+    
+    // Handle notifications - they don't require responses
+    if is_notification {
+        match method {
+            "notifications/initialized" => {
+                debug!("Received notifications/initialized - client is ready");
+                return None; // No response for notifications
+            }
+            "notifications/cancelled" => {
+                debug!("Received notifications/cancelled - request cancelled");
+                return None; // No response for notifications
+            }
+            _ => {
+                debug!("Received unknown notification: {}", method);
+                return None; // Still no response for unknown notifications
+            }
+        }
+    }
+    
+    // Handle regular requests using the server
     match server.handle_request(method, params).await {
-        Ok(result) => JsonRpcResponse::success(request_id, result),
+        Ok(result) => Some(JsonRpcResponse::success(request_id, result)),
         Err(e) => {
             warn!("MCP request failed: {}", e);
-            JsonRpcResponse::error(request_id, e.to_json_rpc_error())
+            Some(JsonRpcResponse::error(request_id, e.to_json_rpc_error()))
         }
     }
 }

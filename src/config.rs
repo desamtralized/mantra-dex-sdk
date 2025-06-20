@@ -52,7 +52,7 @@ impl NetworkConstants {
         match network {
             "mantra-dukong" => Ok(NetworkConstants {
                 network_name: "mantra-dukong".to_string(),
-                network_id: "mantra-dukong-1".to_string(),
+                network_id: "mantra-dukong".to_string(),
                 default_rpc: "https://rpc.dukong.mantrachain.io/".to_string(),
                 default_gas_price: 0.025,
                 default_gas_adjustment: 1.3,
@@ -97,7 +97,7 @@ impl Default for ContractAddresses {
 pub struct MantraNetworkConfig {
     /// Network name (e.g., mantra-dukong)
     pub network_name: String,
-    /// Network ID (e.g., mantra-dukong-1)
+    /// Network ID (e.g., mantra-dukong)
     pub network_id: String,
     /// RPC endpoint URL
     pub rpc_url: String,

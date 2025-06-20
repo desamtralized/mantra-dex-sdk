@@ -373,7 +373,7 @@ impl Default for McpClientWrapper {
         // Create a default testnet configuration
         let testnet_constants = crate::config::NetworkConstants {
             network_name: "mantra-dukong".to_string(),
-            network_id: "mantra-dukong-1".to_string(),
+            network_id: "mantra-dukong".to_string(),
             default_rpc: "https://rpc.dukong.mantrachain.io".to_string(),
             default_gas_price: 0.01,
             default_gas_adjustment: 1.5,
@@ -428,7 +428,7 @@ mod tests {
         let result = wrapper.get_contract_addresses().await.unwrap();
 
         // Should return contract information
-        assert_eq!(result["network"], "mantra-dukong-1");
+        assert_eq!(result["network"], "mantra-dukong");
         assert!(result["contracts"]["pool_manager"].is_string());
     }
 

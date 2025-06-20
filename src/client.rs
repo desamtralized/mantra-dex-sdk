@@ -124,11 +124,16 @@ impl MantraDexClient {
     pub async fn get_balances(&self) -> Result<Vec<Coin>, Error> {
         let wallet = self.wallet()?;
         let address = wallet.address().unwrap().to_string();
+        self.get_balances_for_address(&address).await
+    }
+
+    /// Get balances for a specific address
+    pub async fn get_balances_for_address(&self, address: &str) -> Result<Vec<Coin>, Error> {
         let rpc_client = self.rpc_client.lock().await;
 
         // Create a request to get all balances
         let request = QueryAllBalancesRequest {
-            address,
+            address: address.to_string(),
             pagination: None,
             resolve_denom: false,
         };

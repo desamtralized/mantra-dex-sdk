@@ -487,7 +487,7 @@ impl SettingsState {
             NetworkEnvironment::Testnet => {
                 new_config.network = MantraNetworkConfig {
                     network_name: "mantra-dukong".to_string(),
-                    network_id: "mantra-dukong-1".to_string(),
+                    network_id: "mantra-dukong".to_string(),
                     rpc_url: "https://rpc.dukong.mantrachain.io/".to_string(),
                     gas_price: 0.025,
                     gas_adjustment: 1.3,

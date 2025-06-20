@@ -8,8 +8,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono;
+
 use serde_json::Value;
-use tokio::sync::{RwLock, Semaphore};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
 
 use crate::client::MantraDexClient;
@@ -241,7 +243,8 @@ impl NetworkConnectionPool {
     }
 }
 
-/// MCP SDK Adapter for managing DEX client operations with connection pooling
+/// MCP SDK adapter for connection management and wallet state
+#[derive(Debug)]
 pub struct McpSdkAdapter {
     /// Connection pools per network
     connection_pools: Arc<RwLock<HashMap<String, NetworkConnectionPool>>>,
@@ -253,6 +256,12 @@ pub struct McpSdkAdapter {
     cache_ttl: Duration,
     /// Health check task handle
     health_check_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Loaded wallets (address -> wallet info)
+    wallets: Arc<RwLock<HashMap<String, WalletInfo>>>,
+    /// Current active wallet address
+    active_wallet: Arc<Mutex<Option<String>>>,
+    /// Current active wallet instance (if available)
+    active_wallet_instance: Arc<Mutex<Option<MantraWallet>>>,
 }
 
 impl McpSdkAdapter {
@@ -264,6 +273,9 @@ impl McpSdkAdapter {
             config,
             cache: Arc::new(RwLock::new(HashMap::new())),
             health_check_handle: None,
+            wallets: Arc::new(RwLock::new(HashMap::new())),
+            active_wallet: Arc::new(Mutex::new(None)),
+            active_wallet_instance: Arc::new(Mutex::new(None)),
         };
 
         adapter
@@ -429,17 +441,163 @@ impl McpSdkAdapter {
     }
 
     /// Get the currently active wallet
+    /// 
+    /// Note: Since MantraWallet doesn't implement Clone, this method
+    /// should primarily be used by the server layer that manages the wallet lifecycle.
+    /// For balance queries and other operations, use the methods that accept wallet parameters.
     pub async fn get_active_wallet(&self) -> McpResult<Option<MantraWallet>> {
-        // For now, return None - this will be implemented when wallet management is added
-        // TODO: Implement proper wallet management and retrieval
+        // For now, return None since we can't clone the wallet
+        // The server layer should manage wallet access directly
         Ok(None)
     }
 
     /// Get the currently active wallet info
     pub async fn get_active_wallet_info(&self) -> McpResult<Option<WalletInfo>> {
-        // For now, return None - this will be implemented when wallet management is added
-        // TODO: Implement proper wallet management and retrieval
-        Ok(None)
+        let active_address = self.active_wallet.lock().await.clone();
+        if let Some(address) = active_address {
+            let wallets = self.wallets.read().await;
+            Ok(wallets.get(&address).cloned())
+        } else {
+            debug!("No active wallet set");
+            Ok(None)
+        }
+    }
+
+    /// Set the active wallet
+    pub async fn set_active_wallet(
+        &self,
+        address: String,
+        wallet_info: WalletInfo,
+    ) -> McpResult<()> {
+        // Store the wallet info and set as active
+        self.wallets
+            .write()
+            .await
+            .insert(address.clone(), wallet_info);
+        *self.active_wallet.lock().await = Some(address.clone());
+        
+        info!("Set active wallet: {}", address);
+        Ok(())
+    }
+
+    /// Set the active wallet with the actual wallet instance
+    pub async fn set_active_wallet_with_instance(
+        &self,
+        wallet: MantraWallet,
+    ) -> McpResult<()> {
+        let wallet_info = wallet.info();
+        let address = wallet_info.address.clone();
+        
+        // Store the wallet info
+        self.wallets
+            .write()
+            .await
+            .insert(address.clone(), wallet_info);
+        
+        // Set as active
+        *self.active_wallet.lock().await = Some(address.clone());
+        
+        // Store the wallet instance
+        *self.active_wallet_instance.lock().await = Some(wallet);
+        
+        info!("Set active wallet with instance: {}", address);
+        Ok(())
+    }
+
+    /// Add wallet validation methods
+    pub async fn validate_wallet_exists(&self) -> McpResult<()> {
+        if self.get_active_wallet_info().await?.is_none() {
+            return Err(McpServerError::WalletNotConfigured);
+        }
+        Ok(())
+    }
+
+    /// Get wallet error handling with proper error messages
+    pub async fn get_active_wallet_with_validation(&self) -> McpResult<MantraWallet> {
+        match self.get_active_wallet().await? {
+            Some(wallet) => Ok(wallet),
+            None => Err(McpServerError::WalletNotConfigured),
+        }
+    }
+
+    /// Get spendable balances for a specific address
+    /// 
+    /// # Arguments
+    /// 
+    /// * `network_config` - Network configuration for the query
+    /// * `wallet_address` - Wallet address to query balances for
+    /// 
+    /// # Returns
+    /// 
+    /// JSON value containing balance information
+    pub async fn get_balances_for_address_direct(
+        &self,
+        network_config: &MantraNetworkConfig,
+        wallet_address: &str,
+    ) -> McpResult<Value> {
+        debug!("Getting balances for network: {}", network_config.network_id);
+        info!("Querying balances for address: {}", wallet_address);
+
+        // Get client and execute balance query
+        let client = self.get_client(network_config).await?;
+        
+        // Query spendable balances using the SDK client
+        let balances = client.get_balances_for_address(wallet_address).await
+            .map_err(|e| McpServerError::Sdk(e))?;
+        
+        debug!("Retrieved {} balances for address {}", balances.len(), wallet_address);
+        
+        // Convert to JSON format
+        let balance_json: Vec<Value> = balances
+            .into_iter()
+            .map(|coin| {
+                serde_json::json!({
+                    "denom": coin.denom,
+                    "amount": coin.amount.to_string()
+                })
+            })
+            .collect();
+
+        let result = serde_json::json!({
+            "address": wallet_address,
+            "balances": balance_json,
+            "total_tokens": balance_json.len(),
+            "network": network_config.network_id,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        });
+
+        info!("Successfully retrieved balances for address: {}", wallet_address);
+        Ok(result)
+    }
+
+    /// Get spendable balances for the active wallet
+    /// 
+    /// # Arguments
+    /// 
+    /// * `network_config` - Network configuration for the query
+    /// * `wallet_address` - Optional specific wallet address, uses active wallet if None
+    /// 
+    /// # Returns
+    /// 
+    /// JSON value containing balance information
+    pub async fn get_balances(
+        &self,
+        network_config: &MantraNetworkConfig,
+        wallet_address: Option<String>,
+    ) -> McpResult<Value> {
+        // Get the wallet address to query
+        let address = if let Some(addr) = wallet_address {
+            addr
+        } else {
+            // Use active wallet address
+            match self.get_active_wallet_info().await? {
+                Some(wallet_info) => wallet_info.address,
+                None => return Err(McpServerError::WalletNotConfigured),
+            }
+        };
+
+        // Delegate to the direct address method
+        self.get_balances_for_address_direct(network_config, &address).await
     }
 
     /// Get connection pool statistics
