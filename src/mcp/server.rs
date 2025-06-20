@@ -2699,6 +2699,26 @@ impl McpToolProvider for MantraDexMcpServer {
                     }
                 }
             }),
+            // Pool Query Tools
+            serde_json::json!({
+                "name": "get_pools",
+                "description": "Get information about all available liquidity pools with optional filtering and pagination",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of pools to return (optional)",
+                            "minimum": 1,
+                            "maximum": 100
+                        },
+                        "start_after": {
+                            "type": "string",
+                            "description": "Pool ID to start pagination after (optional)"
+                        }
+                    }
+                }
+            }),
             // Transaction Monitoring Tools
             serde_json::json!({
                 "name": "monitor_swap_transaction",
@@ -2931,9 +2951,8 @@ impl McpToolProvider for MantraDexMcpServer {
                     "type": "object",
                     "properties": {
                         "pool_id": {
-                            "type": "integer",
-                            "description": "The ID of the pool to validate.",
-                            "minimum": 1
+                            "type": "string",
+                            "description": "The identifier of the pool to validate (e.g., 'pool_1', 'uom.usdc.pool')."
                         },
                         "operation": {
                             "type": "string",
@@ -3481,6 +3500,7 @@ impl McpToolProvider for MantraDexMcpServer {
             "get_contract_addresses" => self.handle_get_contract_addresses(arguments).await,
             "validate_network_connectivity" => self.handle_validate_network_connectivity(arguments).await,
             "get_balances" => self.handle_get_balances(arguments).await,
+            "get_pools" => self.handle_get_pools(arguments).await,
             "execute_swap" => self.handle_execute_swap(arguments).await,
             "provide_liquidity" => self.handle_provide_liquidity(arguments).await,
             "provide_liquidity_unchecked" => {
@@ -3867,8 +3887,137 @@ impl MantraDexMcpServer {
         }
     }
 
-    /// Check RPC connectivity
+    /// Handle get_pools tool
+    async fn handle_get_pools(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling get_pools tool call");
 
+        // Parse optional arguments
+        let limit = arguments
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+
+        let start_after = arguments
+            .get("start_after")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // Call the SDK adapter to get pools
+        let result = self
+            .state
+            .sdk_adapter
+            .get_pools(arguments)
+            .await?;
+
+        // Extract pool data for processing
+        let empty_vec = vec![];
+        let pools_array = result.get("pools").and_then(|p| p.as_array()).unwrap_or(&empty_vec);
+        let count = result.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
+        let network = &self.state.config.network_config.network_name;
+
+        // Create formatted response text
+        let mut response_text = format!("🏊 **Liquidity Pools**\n\n");
+        response_text.push_str(&format!("**Network:** {}\n", network));
+        response_text.push_str(&format!("**Total Pools Found:** {}\n", count));
+        
+        if let Some(limit) = limit {
+            response_text.push_str(&format!("**Limit Applied:** {}\n", limit));
+        }
+        
+        if let Some(start_after) = &start_after {
+            response_text.push_str(&format!("**Starting After:** {}\n", start_after));
+        }
+        
+        response_text.push_str("\n");
+
+        if !pools_array.is_empty() {
+            response_text.push_str("### 💧 Available Pools:\n\n");
+            
+            for (i, pool) in pools_array.iter().enumerate() {
+                let pool_id = pool.get("pool_id").and_then(|p| p.as_str()).unwrap_or("Unknown");
+                let pool_type = pool.get("pool_type").and_then(|p| p.as_str()).unwrap_or("Unknown");
+                let lp_denom = pool.get("lp_denom").and_then(|p| p.as_str()).unwrap_or("Unknown");
+                let total_share = pool.get("total_share").and_then(|p| p.as_str()).unwrap_or("0");
+                
+                // Get pool status
+                let status = pool.get("status");
+                let swaps_enabled = status.and_then(|s| s.get("swaps_enabled")).and_then(|v| v.as_bool()).unwrap_or(false);
+                let deposits_enabled = status.and_then(|s| s.get("deposits_enabled")).and_then(|v| v.as_bool()).unwrap_or(false);
+                let withdrawals_enabled = status.and_then(|s| s.get("withdrawals_enabled")).and_then(|v| v.as_bool()).unwrap_or(false);
+                
+                response_text.push_str(&format!("**{}. Pool {}** ({})\n", i + 1, pool_id, pool_type));
+                
+                // Show assets
+                if let Some(assets) = pool.get("assets").and_then(|a| a.as_array()) {
+                    response_text.push_str("   **Assets:**\n");
+                    for asset in assets {
+                        let denom = asset.get("denom").and_then(|d| d.as_str()).unwrap_or("Unknown");
+                        let amount = asset.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
+                        
+                        // Format asset name
+                        let asset_name = if denom == "uom" {
+                            "OM".to_string()
+                        } else if denom.contains("/uUSDC") {
+                            "USDC".to_string()
+                        } else if denom.contains("/uUSDY") {
+                            "USDY".to_string()
+                        } else if denom.contains("/aUSDY") {
+                            "aUSDY".to_string()
+                        } else if denom.starts_with("ibc/") {
+                            "USDT".to_string()
+                        } else {
+                            denom.to_string()
+                        };
+                        
+                        // Format amount
+                        let formatted_amount = if denom == "uom" || denom.contains("/uUSDC") || denom.contains("/uUSDY") {
+                            let amount_num: u128 = amount.parse().unwrap_or(0);
+                            format!("{:.2}", (amount_num as f64) / 1_000_000.0)
+                        } else {
+                            amount.to_string()
+                        };
+                        
+                        response_text.push_str(&format!("     - {}: {}\n", asset_name, formatted_amount));
+                    }
+                }
+                
+                // Show status
+                response_text.push_str("   **Status:**");
+                if swaps_enabled && deposits_enabled && withdrawals_enabled {
+                    response_text.push_str(" ✅ Fully Operational\n");
+                } else {
+                    response_text.push_str(" ⚠️ Limited Operations (");
+                    let mut ops = Vec::new();
+                    if swaps_enabled { ops.push("Swaps"); }
+                    if deposits_enabled { ops.push("Deposits"); }
+                    if withdrawals_enabled { ops.push("Withdrawals"); }
+                    response_text.push_str(&ops.join(", "));
+                    response_text.push_str(")\n");
+                }
+                
+                // Show LP token info
+                response_text.push_str(&format!("   **LP Token:** `{}`\n", lp_denom));
+                response_text.push_str(&format!("   **Total Shares:** {}\n\n", total_share));
+            }
+        } else {
+            response_text.push_str("No pools found matching the criteria.\n");
+        }
+
+        response_text.push_str(&format!("**Query Time:** {}\n", chrono::Utc::now().to_rfc3339()));
+
+        // Return proper MCP response format
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ]
+        }))
+    }
 
     /// Handle get_transaction_monitor_status tool
     async fn handle_get_transaction_monitor_status(
@@ -3922,15 +4071,15 @@ impl MantraDexMcpServer {
     ) -> McpResult<serde_json::Value> {
         info!(?arguments, "Handling validate_pool_status tool call");
 
-        let pool_id: u64 = arguments
+        let pool_id = arguments
             .get("pool_id")
-            .and_then(|v| v.as_u64())
+            .and_then(|v| v.as_str())
             .ok_or_else(|| {
                 McpServerError::InvalidArguments(
-                    "Missing or invalid 'pool_id' argument".to_string(),
+                    "Missing or invalid 'pool_id' argument - must be a string".to_string(),
                 )
             })?;
-        let operation = arguments.get("operation").map(|v| v.to_string());
+        let operation = arguments.get("operation").and_then(|v| v.as_str()).map(|s| s.to_string());
         let include_recommendations = arguments
             .get("include_recommendations")
             .and_then(|v| v.as_bool())

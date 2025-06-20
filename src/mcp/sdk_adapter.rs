@@ -7,8 +7,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::str::FromStr;
 
 use chrono;
+use cosmwasm_std::{Coin, Decimal, Uint128};
 
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock, Semaphore};
@@ -640,18 +642,117 @@ impl McpSdkAdapter {
         Ok(())
     }
 
+    /// Get the default network configuration
+    /// This is a temporary method until proper network configuration management is implemented
+    async fn get_default_network_config(&self) -> McpResult<MantraNetworkConfig> {
+        // For now, we'll use the testnet configuration
+        // This should be replaced with proper configuration management
+        use crate::config::NetworkConstants;
+        
+        let network_constants = NetworkConstants::load("mantra-dukong")
+            .map_err(|e| McpServerError::Internal(format!("Failed to load network constants: {}", e)))?;
+        
+        Ok(MantraNetworkConfig::from_constants(&network_constants))
+    }
+
     // =========================================================================
     // SDK Operation Wrappers
     // =========================================================================
 
     pub async fn get_pool(&self, pool_id: &str) -> McpResult<Value> {
-        // Placeholder for get_pool implementation
-        Ok(serde_json::json!({ "pool_id": pool_id }))
+        // Validate pool_id parameter
+        if pool_id.is_empty() {
+            return Err(McpServerError::InvalidArguments("pool_id cannot be empty".to_string()));
+        }
+
+        // Get client connection
+        let client = self.get_client(&self.get_default_network_config().await?).await?;
+
+        // Query pool information from blockchain
+        let pool_info = client.get_pool(pool_id).await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        // Convert pool info to JSON format
+        let pool_data = serde_json::json!({
+            "pool_id": pool_info.pool_info.pool_identifier,
+            "pool_type": match pool_info.pool_info.pool_type {
+                mantra_dex_std::pool_manager::PoolType::ConstantProduct => "constant_product",
+                mantra_dex_std::pool_manager::PoolType::StableSwap { .. } => "stable_swap",
+            },
+            "assets": pool_info.pool_info.assets.iter().map(|asset| {
+                serde_json::json!({
+                    "denom": asset.denom,
+                    "amount": asset.amount.to_string()
+                })
+            }).collect::<Vec<_>>(),
+            "status": {
+                "swaps_enabled": pool_info.pool_info.status.swaps_enabled,
+                "deposits_enabled": pool_info.pool_info.status.deposits_enabled,
+                "withdrawals_enabled": pool_info.pool_info.status.withdrawals_enabled
+            },
+            "lp_token_denom": pool_info.pool_info.lp_denom,
+            "total_share": pool_info.total_share.to_string()
+        });
+
+        Ok(pool_data)
     }
 
-    pub async fn get_pools(&self, _args: Value) -> McpResult<Value> {
-        // Placeholder for get_pools implementation
-        Ok(serde_json::json!({ "pools": [] }))
+    pub async fn get_pools(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Getting pools with args: {:?}", args);
+        
+        // Parse optional parameters
+        let limit = args.get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        
+        let start_after = args.get("start_after")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+
+        // Execute the pools query directly (without retry for now due to client not being Clone)
+        let pools_result = client.get_pools(limit)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        // Convert pools to JSON format
+        let pools_json: Vec<Value> = pools_result
+            .into_iter()
+            .map(|pool| {
+                serde_json::json!({
+                    "pool_id": pool.pool_info.pool_identifier,
+                    "pool_type": match pool.pool_info.pool_type {
+                        mantra_dex_std::pool_manager::PoolType::ConstantProduct => "constant_product",
+                        mantra_dex_std::pool_manager::PoolType::StableSwap { .. } => "stable_swap",
+                    },
+                    "assets": pool.pool_info.assets.iter().map(|asset| {
+                        serde_json::json!({
+                            "denom": asset.denom,
+                            "amount": asset.amount.to_string()
+                        })
+                    }).collect::<Vec<_>>(),
+                    "lp_denom": pool.pool_info.lp_denom,
+                    "status": {
+                        "swaps_enabled": pool.pool_info.status.swaps_enabled,
+                        "deposits_enabled": pool.pool_info.status.deposits_enabled,
+                        "withdrawals_enabled": pool.pool_info.status.withdrawals_enabled
+                    },
+                    "total_share": pool.total_share.to_string()
+                })
+            })
+            .collect();
+
+        info!("Successfully retrieved {} pools", pools_json.len());
+
+        Ok(serde_json::json!({
+            "pools": pools_json,
+            "count": pools_json.len(),
+            "limit": limit,
+            "start_after": start_after
+        }))
     }
 
     pub async fn get_pool_status(
@@ -666,27 +767,179 @@ impl McpSdkAdapter {
 
     pub async fn validate_pool_status(
         &self,
-        _pool_id: u64,
-        _operation: Option<String>,
-        _include_recommendations: bool,
+        pool_id: &str,
+        operation: Option<String>,
+        include_recommendations: bool,
     ) -> McpResult<Value> {
-        // Placeholder
-        Ok(serde_json::json!({}))
+        debug!("SDK Adapter: Validating pool status for pool {} with operation {:?}", pool_id, operation);
+        
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+
+        // Get pool information
+        let pool_result = client.get_pool(pool_id).await;
+        
+        let mut validation_result = serde_json::Map::new();
+        validation_result.insert("pool_id".to_string(), serde_json::Value::String(pool_id.to_string()));
+        validation_result.insert("validation_timestamp".to_string(), serde_json::Value::String(chrono::Utc::now().to_rfc3339()));
+
+        match pool_result {
+            Ok(pool_info) => {
+                let status = &pool_info.pool_info.status;
+                
+                // Overall pool existence validation
+                validation_result.insert("pool_exists".to_string(), serde_json::Value::Bool(true));
+                validation_result.insert("pool_identifier".to_string(), serde_json::Value::String(pool_info.pool_info.pool_identifier.clone()));
+                
+                // Feature status validation
+                let mut feature_status = serde_json::Map::new();
+                feature_status.insert("swaps_enabled".to_string(), serde_json::Value::Bool(status.swaps_enabled));
+                feature_status.insert("deposits_enabled".to_string(), serde_json::Value::Bool(status.deposits_enabled));
+                feature_status.insert("withdrawals_enabled".to_string(), serde_json::Value::Bool(status.withdrawals_enabled));
+                validation_result.insert("features".to_string(), serde_json::Value::Object(feature_status));
+
+                // Operation-specific validation
+                if let Some(op) = operation {
+                    let operation_valid = match op.as_str() {
+                        "swap" => status.swaps_enabled,
+                        "deposit" | "provide_liquidity" => status.deposits_enabled,
+                        "withdraw" | "withdraw_liquidity" => status.withdrawals_enabled,
+                        _ => false,
+                    };
+                    
+                    validation_result.insert("operation".to_string(), serde_json::Value::String(op.clone()));
+                    validation_result.insert("operation_valid".to_string(), serde_json::Value::Bool(operation_valid));
+                    
+                    if !operation_valid {
+                        validation_result.insert("operation_error".to_string(), 
+                            serde_json::Value::String(format!("Operation '{}' is not enabled for this pool", op)));
+                    }
+                }
+
+                // Overall status assessment
+                let all_operations_enabled = status.swaps_enabled && status.deposits_enabled && status.withdrawals_enabled;
+                let overall_status = if all_operations_enabled {
+                    "fully_operational"
+                } else if !status.swaps_enabled && !status.deposits_enabled && !status.withdrawals_enabled {
+                    "disabled"
+                } else {
+                    "partially_operational"
+                };
+                
+                validation_result.insert("overall_status".to_string(), serde_json::Value::String(overall_status.to_string()));
+                validation_result.insert("is_operational".to_string(), serde_json::Value::Bool(all_operations_enabled));
+
+                // Add recommendations if requested
+                if include_recommendations {
+                    let mut recommendations = Vec::new();
+                    
+                    if !status.swaps_enabled {
+                        recommendations.push("Swaps are disabled - users cannot trade in this pool");
+                    }
+                    if !status.deposits_enabled {
+                        recommendations.push("Deposits are disabled - users cannot provide liquidity");
+                    }
+                    if !status.withdrawals_enabled {
+                        recommendations.push("Withdrawals are disabled - users cannot remove liquidity");
+                    }
+                    
+                    if recommendations.is_empty() {
+                        recommendations.push("Pool is fully operational - all operations are enabled");
+                    }
+                    
+                    validation_result.insert("recommendations".to_string(), 
+                        serde_json::Value::Array(recommendations.into_iter().map(|s| serde_json::Value::String(s.to_string())).collect()));
+                }
+
+                validation_result.insert("status".to_string(), serde_json::Value::String("success".to_string()));
+            }
+            Err(e) => {
+                validation_result.insert("pool_exists".to_string(), serde_json::Value::Bool(false));
+                validation_result.insert("error".to_string(), serde_json::Value::String(format!("Failed to get pool information: {}", e)));
+                validation_result.insert("status".to_string(), serde_json::Value::String("error".to_string()));
+                validation_result.insert("is_operational".to_string(), serde_json::Value::Bool(false));
+                
+                if include_recommendations {
+                    validation_result.insert("recommendations".to_string(), 
+                        serde_json::Value::Array(vec![serde_json::Value::String("Pool does not exist or is not accessible".to_string())]));
+                }
+            }
+        }
+
+        Ok(serde_json::Value::Object(validation_result))
     }
 
     pub async fn provide_liquidity(&self, args: Value) -> McpResult<Value> {
-        // Placeholder for provide_liquidity implementation
-        info!(?args, "SDK Adapter: Providing liquidity");
-        // In a real implementation, this would:
-        // 1. Parse args
-        // 2. Get active wallet
-        // 3. Get a client with the wallet
-        // 4. Call client.provide_liquidity
-        // 5. Return the result
+        debug!("SDK Adapter: Providing liquidity with args: {:?}", args);
+        
+        // Parse required parameters
+        let pool_id = args.get("pool_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("pool_id is required".to_string()))?;
+
+        let assets_json = args.get("assets")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| McpServerError::InvalidArguments("assets array is required".to_string()))?;
+
+        // Parse assets
+        let mut assets = Vec::new();
+        for asset_json in assets_json {
+            let denom = asset_json.get("denom")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpServerError::InvalidArguments("asset.denom is required".to_string()))?;
+
+            let amount_str = asset_json.get("amount")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpServerError::InvalidArguments("asset.amount is required".to_string()))?;
+
+            let amount = Uint128::from_str(amount_str)
+                .map_err(|e| McpServerError::InvalidArguments(format!("Invalid asset amount: {}", e)))?;
+
+            assets.push(Coin {
+                denom: denom.to_string(),
+                amount,
+            });
+        }
+
+        // Parse optional slippage parameters
+        let liquidity_max_slippage = args.get("liquidity_max_slippage")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Decimal::from_str(s).ok());
+
+        let swap_max_slippage = args.get("swap_max_slippage")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Decimal::from_str(s).ok());
+
+        // Get active wallet (required for providing liquidity)
+        let wallet = self.get_active_wallet_with_validation().await?;
+
+        // Get network config and client with wallet
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client_with_wallet(&network_config, wallet).await?;
+
+        // Execute provide liquidity directly (without retry for now due to client not being Clone)
+        let liquidity_result = client.provide_liquidity(pool_id, assets, liquidity_max_slippage, swap_max_slippage)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        info!("Successfully provided liquidity to pool {} with tx hash: {}", pool_id, liquidity_result.txhash);
+
+        // Format the response
         Ok(serde_json::json!({
             "status": "success",
-            "message": "Liquidity provided (simulation)",
-            "tx_hash": "SIMULATED_TX_HASH"
+            "transaction_hash": liquidity_result.txhash,
+            "liquidity_details": {
+                "pool_id": pool_id,
+                "assets": assets_json,
+                "liquidity_max_slippage": liquidity_max_slippage.map(|d| d.to_string()),
+                "swap_max_slippage": swap_max_slippage.map(|d| d.to_string()),
+                "gas_used": liquidity_result.gas_used,
+                "gas_wanted": liquidity_result.gas_wanted
+            },
+            "block_height": liquidity_result.height,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "events": liquidity_result.events
         }))
     }
 
@@ -700,58 +953,582 @@ impl McpSdkAdapter {
     }
 
     pub async fn withdraw_liquidity(&self, args: Value) -> McpResult<Value> {
-        info!(?args, "SDK Adapter: Withdrawing liquidity");
+        debug!("SDK Adapter: Withdrawing liquidity with args: {:?}", args);
+        
+        // Parse required parameters
+        let pool_id = args.get("pool_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("pool_id is required".to_string()))?;
+
+        let amount_str = args.get("amount")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("amount is required".to_string()))?;
+
+        let lp_amount = Uint128::from_str(amount_str)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid LP amount: {}", e)))?;
+
+        // Get active wallet (required for withdrawing liquidity)
+        let wallet = self.get_active_wallet_with_validation().await?;
+
+        // Get network config and client with wallet
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client_with_wallet(&network_config, wallet).await?;
+
+        // Execute withdraw liquidity directly (without retry for now due to client not being Clone)
+        let withdraw_result = client.withdraw_liquidity(pool_id, lp_amount)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        info!("Successfully withdrew liquidity from pool {} with tx hash: {}", pool_id, withdraw_result.txhash);
+
+        // Format the response
         Ok(serde_json::json!({
             "status": "success",
-            "message": "Liquidity withdrawn (simulation)",
-            "tx_hash": "SIMULATED_WITHDRAW_TX_HASH"
+            "transaction_hash": withdraw_result.txhash,
+            "withdrawal_details": {
+                "pool_id": pool_id,
+                "lp_amount": amount_str,
+                "gas_used": withdraw_result.gas_used,
+                "gas_wanted": withdraw_result.gas_wanted
+            },
+            "block_height": withdraw_result.height,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "events": withdraw_result.events
         }))
     }
 
-    pub async fn get_liquidity_positions(&self, _args: Value) -> McpResult<Value> {
-        info!("SDK Adapter: Getting liquidity positions");
-        Ok(serde_json::json!({
-            "positions": [
-                {
-                    "pool_id": "1",
-                    "lp_token_denom": "mantra/pool/1",
-                    "amount": "1000000"
+    pub async fn get_liquidity_positions(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Getting liquidity positions with args: {:?}", args);
+        
+        // Get wallet address (use active wallet if not provided)
+        let wallet_address = if let Some(addr) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            addr.to_string()
+        } else {
+            match self.get_active_wallet().await? {
+                Some(wallet) => {
+                    wallet.address()
+                        .map_err(|e| McpServerError::InvalidArguments(format!("Failed to get wallet address: {}", e)))?
+                        .to_string()
+                },
+                None => {
+                    return Err(McpServerError::InvalidArguments("No wallet configured and no wallet_address provided".to_string()));
                 }
-            ]
+            }
+        };
+
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+
+        // Get all balances for the wallet to find LP tokens
+        let balances_result = client.get_balances_for_address(&wallet_address)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        // Filter for LP tokens (typically start with "factory/" and contain "lp" or are pool denoms)
+        let mut lp_positions = Vec::new();
+        
+        for balance in &balances_result {
+            let denom = &balance.denom;
+            // Check if this looks like an LP token denom
+            if denom.contains("factory/") && (denom.contains("lp") || denom.contains("pool")) {
+                // Try to extract pool identifier from the denom
+                let pool_id = if let Some(last_part) = denom.split('/').last() {
+                    if last_part.starts_with("lp_") {
+                        last_part.strip_prefix("lp_").unwrap_or(last_part)
+                    } else {
+                        last_part
+                    }
+                } else {
+                    denom
+                };
+
+                lp_positions.push(serde_json::json!({
+                    "pool_id": pool_id,
+                    "lp_token_denom": denom,
+                    "balance": balance.amount.to_string(),
+                    "wallet_address": wallet_address
+                }));
+            }
+        }
+
+        info!("Found {} LP positions for wallet {}", lp_positions.len(), wallet_address);
+
+        Ok(serde_json::json!({
+            "status": "success",
+            "wallet_address": wallet_address,
+            "positions": lp_positions,
+            "total_positions": lp_positions.len(),
+            "timestamp": chrono::Utc::now().to_rfc3339()
         }))
     }
 
     pub async fn execute_swap(&self, args: Value) -> McpResult<Value> {
-        info!(?args, "SDK Adapter: Executing swap");
-        // Placeholder implementation for swap execution
+        debug!("SDK Adapter: Executing swap with args: {:?}", args);
+        
+        // Parse required parameters
+        let pool_id = args.get("pool_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("pool_id is required".to_string()))?;
+
+        let offer_asset = args.get("offer_asset")
+            .ok_or_else(|| McpServerError::InvalidArguments("offer_asset is required".to_string()))?;
+
+        let ask_asset_denom = args.get("ask_asset_denom")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("ask_asset_denom is required".to_string()))?;
+
+        // Parse offer asset
+        let offer_denom = offer_asset.get("denom")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("offer_asset.denom is required".to_string()))?;
+
+        let offer_amount_str = offer_asset.get("amount")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("offer_asset.amount is required".to_string()))?;
+
+        let offer_amount = Uint128::from_str(offer_amount_str)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid offer amount: {}", e)))?;
+
+        let offer_coin = Coin {
+            denom: offer_denom.to_string(),
+            amount: offer_amount,
+        };
+
+        // Parse optional max_slippage
+        let max_slippage = args.get("max_slippage")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Decimal::from_str(s).ok());
+
+        // Get active wallet (required for swaps)
+        let wallet = self.get_active_wallet_with_validation().await?;
+
+        // Get network config and client with wallet
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client_with_wallet(&network_config, wallet).await?;
+
+        // Execute the swap directly (without retry for now due to client not being Clone)
+        let swap_result = client.swap(pool_id, offer_coin, ask_asset_denom, max_slippage)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        info!("Successfully executed swap in pool {} with tx hash: {}", pool_id, swap_result.txhash);
+
+        // Format the response
         Ok(serde_json::json!({
             "status": "success",
-            "transaction_hash": "0x1234567890abcdef",
+            "transaction_hash": swap_result.txhash,
             "swap_details": {
-                "pool_id": args.get("pool_id").unwrap_or(&Value::String("1".to_string())),
-                "offer_asset": args.get("offer_asset").unwrap_or(&Value::Null),
-                "ask_asset_denom": args.get("ask_asset_denom").unwrap_or(&Value::String("uusdc".to_string())),
-                "return_amount": "4950",
-                "swap_fee": "50"
+                "pool_id": pool_id,
+                "offer_asset": {
+                    "denom": offer_denom,
+                    "amount": offer_amount_str
+                },
+                "ask_asset_denom": ask_asset_denom,
+                "max_slippage": max_slippage.map(|d| d.to_string()),
+                "gas_used": swap_result.gas_used,
+                "gas_wanted": swap_result.gas_wanted
+            },
+            "block_height": swap_result.height,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "events": swap_result.events
+        }))
+    }
+
+    pub async fn get_lp_token_balance(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Getting LP token balance with args: {:?}", args);
+        
+        // Parse required pool_id parameter
+        let pool_id = args.get("pool_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("pool_id is required".to_string()))?;
+
+        // Get wallet address (use active wallet if not provided)
+        let wallet_address = if let Some(addr) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            addr.to_string()
+        } else {
+            match self.get_active_wallet().await? {
+                Some(wallet) => {
+                    wallet.address()
+                        .map_err(|e| McpServerError::InvalidArguments(format!("Failed to get wallet address: {}", e)))?
+                        .to_string()
+                },
+                None => {
+                    return Err(McpServerError::InvalidArguments("No wallet configured and no wallet_address provided".to_string()));
+                }
+            }
+        };
+
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+
+        // Get all balances for the wallet
+        let balances_result = client.get_balances_for_address(&wallet_address)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        // Look for LP token for this specific pool
+        let mut lp_balance = None;
+        let mut lp_denom = None;
+        
+        for balance in &balances_result {
+            let denom = &balance.denom;
+            // Check if this is an LP token for the specified pool
+            if denom.contains("factory/") && (denom.contains("lp") || denom.contains("pool")) {
+                // Try to extract pool identifier from the denom
+                if let Some(last_part) = denom.split('/').last() {
+                    let extracted_pool_id = if last_part.starts_with("lp_") {
+                        last_part.strip_prefix("lp_").unwrap_or(last_part)
+                    } else {
+                        last_part
+                    };
+                    
+                    if extracted_pool_id == pool_id {
+                        lp_balance = Some(balance.amount.to_string());
+                        lp_denom = Some(denom.clone());
+                        break;
+                    }
+                }
+            }
+        }
+
+        let balance_amount = lp_balance.unwrap_or_else(|| "0".to_string());
+        let token_denom = lp_denom.unwrap_or_else(|| format!("factory/mantra/lp_{}", pool_id));
+
+        info!("LP token balance for pool {}: {} {}", pool_id, balance_amount, token_denom);
+
+        Ok(serde_json::json!({
+            "status": "success",
+            "pool_id": pool_id,
+            "wallet_address": wallet_address,
+            "lp_token_balance": {
+                "denom": token_denom,
+                "amount": balance_amount
+            },
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    pub async fn get_all_lp_token_balances(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Getting all LP token balances with args: {:?}", args);
+        
+        // Parse optional parameters
+        let include_zero_balances = args.get("include_zero_balances")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        // Get wallet address (use active wallet if not provided)
+        let wallet_address = if let Some(addr) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            addr.to_string()
+        } else {
+            match self.get_active_wallet().await? {
+                Some(wallet) => {
+                    wallet.address()
+                        .map_err(|e| McpServerError::InvalidArguments(format!("Failed to get wallet address: {}", e)))?
+                        .to_string()
+                },
+                None => {
+                    return Err(McpServerError::InvalidArguments("No wallet configured and no wallet_address provided".to_string()));
+                }
+            }
+        };
+
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+
+        // Get all balances for the wallet
+        let balances_result = client.get_balances_for_address(&wallet_address)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        // Filter for LP tokens
+        let mut lp_balances = Vec::new();
+        
+        for balance in &balances_result {
+            let denom = &balance.denom;
+            // Check if this looks like an LP token denom
+            if denom.contains("factory/") && (denom.contains("lp") || denom.contains("pool")) {
+                let amount_str = balance.amount.to_string();
+                
+                // Skip zero balances if not requested
+                if !include_zero_balances && balance.amount.is_zero() {
+                    continue;
+                }
+
+                // Try to extract pool identifier from the denom
+                let pool_id = if let Some(last_part) = denom.split('/').last() {
+                    if last_part.starts_with("lp_") {
+                        last_part.strip_prefix("lp_").unwrap_or(last_part)
+                    } else {
+                        last_part
+                    }
+                } else {
+                    denom
+                };
+
+                lp_balances.push(serde_json::json!({
+                    "pool_id": pool_id,
+                    "lp_token_denom": denom,
+                    "balance": amount_str,
+                    "is_zero": balance.amount.is_zero()
+                }));
+            }
+        }
+
+        info!("Found {} LP token balances for wallet {}", lp_balances.len(), wallet_address);
+
+        Ok(serde_json::json!({
+            "status": "success",
+            "wallet_address": wallet_address,
+            "lp_balances": lp_balances,
+            "total_positions": lp_balances.len(),
+            "include_zero_balances": include_zero_balances,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    pub async fn estimate_lp_withdrawal_amounts(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Estimating LP withdrawal amounts with args: {:?}", args);
+        
+        // Parse required pool_id parameter
+        let pool_id = args.get("pool_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("pool_id is required".to_string()))?;
+
+        // Get wallet address (use active wallet if not provided)
+        let wallet_address = if let Some(addr) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            addr.to_string()
+        } else {
+            match self.get_active_wallet().await? {
+                Some(wallet) => {
+                    wallet.address()
+                        .map_err(|e| McpServerError::InvalidArguments(format!("Failed to get wallet address: {}", e)))?
+                        .to_string()
+                },
+                None => {
+                    return Err(McpServerError::InvalidArguments("No wallet configured and no wallet_address provided".to_string()));
+                }
+            }
+        };
+
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+
+        // Get pool information
+        let pool_info = client.get_pool(pool_id)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        // Get LP token amount to withdraw (use full balance if not provided)
+        let lp_amount = if let Some(amount_str) = args.get("lp_token_amount").and_then(|v| v.as_str()) {
+            Uint128::from_str(amount_str)
+                .map_err(|e| McpServerError::InvalidArguments(format!("Invalid LP token amount: {}", e)))?
+        } else {
+            // Use full LP balance
+            let balances_result = client.get_balances_for_address(&wallet_address)
+                .await
+                .map_err(|e| McpServerError::Sdk(e))?;
+
+            let mut full_balance = Uint128::zero();
+            for balance in &balances_result {
+                let denom = &balance.denom;
+                if denom.contains("factory/") && (denom.contains("lp") || denom.contains("pool")) {
+                    if let Some(last_part) = denom.split('/').last() {
+                        let extracted_pool_id = if last_part.starts_with("lp_") {
+                            last_part.strip_prefix("lp_").unwrap_or(last_part)
+                        } else {
+                            last_part
+                        };
+                        
+                        if extracted_pool_id == pool_id {
+                            full_balance = balance.amount;
+                            break;
+                        }
+                    }
+                }
+            }
+            full_balance
+        };
+
+        if lp_amount.is_zero() {
+            return Ok(serde_json::json!({
+                "status": "success",
+                "pool_id": pool_id,
+                "wallet_address": wallet_address,
+                "lp_amount": "0",
+                "estimated_withdrawal": [],
+                "total_share": pool_info.total_share.to_string(),
+                "message": "No LP tokens to withdraw",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            }));
+        }
+
+        // Calculate withdrawal amounts based on pool ratio
+        let total_share = pool_info.total_share;
+        let mut estimated_amounts = Vec::new();
+
+        for asset in &pool_info.pool_info.assets {
+            // Calculate proportional withdrawal amount
+            // withdrawal_amount = (lp_amount / total_share) * asset_amount
+            let withdrawal_amount = if !total_share.amount.is_zero() {
+                asset.amount.multiply_ratio(lp_amount, total_share.amount)
+            } else {
+                Uint128::zero()
+            };
+
+            estimated_amounts.push(serde_json::json!({
+                "denom": asset.denom,
+                "amount": withdrawal_amount.to_string(),
+                "pool_amount": asset.amount.to_string()
+            }));
+        }
+
+        info!("Estimated withdrawal amounts for {} LP tokens from pool {}: {:?}", lp_amount, pool_id, estimated_amounts);
+
+        Ok(serde_json::json!({
+            "status": "success",
+            "pool_id": pool_id,
+            "wallet_address": wallet_address,
+            "lp_amount": lp_amount.to_string(),
+            "estimated_withdrawal": estimated_amounts,
+            "pool_info": {
+                "total_share": total_share.to_string(),
+                "assets": pool_info.pool_info.assets.iter().map(|asset| {
+                    serde_json::json!({
+                        "denom": asset.denom,
+                        "amount": asset.amount.to_string()
+                    })
+                }).collect::<Vec<_>>()
+            },
+            "withdrawal_ratio": if !total_share.amount.is_zero() {
+                format!("{:.6}", lp_amount.u128() as f64 / total_share.amount.u128() as f64)
+            } else {
+                "0.000000".to_string()
             },
             "timestamp": chrono::Utc::now().to_rfc3339()
         }))
     }
 
     pub async fn create_pool(&self, args: Value) -> McpResult<Value> {
-        info!(?args, "SDK Adapter: Creating pool");
-        // Placeholder implementation for pool creation
+        debug!("SDK Adapter: Creating pool with args: {:?}", args);
+        
+        // Parse required parameters
+        let pool_type_str = args.get("pool_type")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("pool_type is required".to_string()))?;
+
+        let assets_json = args.get("assets")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| McpServerError::InvalidArguments("assets array is required".to_string()))?;
+
+        // Parse pool type
+        let pool_type = match pool_type_str {
+            "constant_product" => mantra_dex_std::pool_manager::PoolType::ConstantProduct,
+            "stable_swap" => {
+                // For stable swap, we need amplification parameter
+                let amplification = args.get("amplification")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1) as u64;
+                mantra_dex_std::pool_manager::PoolType::StableSwap { amp: amplification }
+            },
+            _ => return Err(McpServerError::InvalidArguments("Invalid pool_type. Must be 'constant_product' or 'stable_swap'".to_string())),
+        };
+
+        // Parse assets - extract denominations and decimals
+        let mut asset_denoms = Vec::new();
+        let mut asset_decimals = Vec::new();
+
+        for asset_json in assets_json {
+            let denom = asset_json.get("denom")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| McpServerError::InvalidArguments("asset.denom is required".to_string()))?;
+
+            let decimals = asset_json.get("decimals")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(6) as u8; // Default to 6 decimals
+
+            asset_denoms.push(denom.to_string());
+            asset_decimals.push(decimals);
+        }
+
+        // Parse fees
+        let fees_json = args.get("fees");
+        let protocol_fee_str = fees_json
+            .and_then(|f| f.get("protocol_fee"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.01"); // Default 1%
+
+        let swap_fee_str = fees_json
+            .and_then(|f| f.get("swap_fee"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.03"); // Default 3%
+
+        let burn_fee_str = fees_json
+            .and_then(|f| f.get("burn_fee"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("0.0"); // Default 0%
+
+        // Parse fee decimals
+        let protocol_fee = Decimal::from_str(protocol_fee_str)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid protocol_fee: {}", e)))?;
+        let swap_fee = Decimal::from_str(swap_fee_str)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid swap_fee: {}", e)))?;
+        let burn_fee = Decimal::from_str(burn_fee_str)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid burn_fee: {}", e)))?;
+
+        // Create pool fees structure
+        let pool_fees = mantra_dex_std::fee::PoolFee {
+            protocol_fee: mantra_dex_std::fee::Fee { share: protocol_fee },
+            swap_fee: mantra_dex_std::fee::Fee { share: swap_fee },
+            burn_fee: mantra_dex_std::fee::Fee { share: burn_fee },
+            extra_fees: vec![],
+        };
+
+        // Parse optional pool identifier
+        let pool_identifier = args.get("pool_identifier")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // Clone pool_identifier for response formatting
+        let pool_identifier_for_response = pool_identifier.clone();
+
+        // Get active wallet (required for pool creation)
+        let wallet = self.get_active_wallet_with_validation().await?;
+
+        // Get network config and client with wallet
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client_with_wallet(&network_config, wallet).await?;
+
+        // Execute pool creation directly (without retry for now due to client not being Clone)
+        let create_result = client.create_pool(asset_denoms, asset_decimals, pool_fees, pool_type, pool_identifier)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        info!("Successfully created pool with tx hash: {}", create_result.txhash);
+
+        // Format the response
         Ok(serde_json::json!({
             "status": "success",
-            "transaction_hash": "0xabcdef1234567890",
+            "transaction_hash": create_result.txhash,
             "pool_details": {
-                "pool_id": "42",
-                "pool_type": args.get("pool_type").unwrap_or(&Value::String("constant_product".to_string())),
-                "assets": args.get("assets").unwrap_or(&Value::Array(vec![])),
-                "fees": args.get("fees").unwrap_or(&Value::Null),
-                "creation_fee": "88000000" // 88 OM in uom
+                "pool_type": pool_type_str,
+                "assets": assets_json,
+                "fees": {
+                    "protocol_fee": protocol_fee_str,
+                    "swap_fee": swap_fee_str,
+                    "burn_fee": burn_fee_str
+                },
+                "pool_identifier": pool_identifier_for_response,
+                "creation_fee": "88000000", // 88 OM in uom
+                "gas_used": create_result.gas_used,
+                "gas_wanted": create_result.gas_wanted
             },
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "block_height": create_result.height,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "events": create_result.events
         }))
     }
 }
