@@ -1616,18 +1616,11 @@ impl McpServerConfig {
         // Load network configuration
         if let Ok(network_name) = env::var("MANTRA_NETWORK") {
             match network_name.as_str() {
-                "mainnet" | "mantra-dukong" => {
+                "mantra-dukong" => {
                     if let Ok(constants) = NetworkConstants::load("mantra-dukong") {
                         config.network_config = MantraNetworkConfig::from_constants(&constants);
                     } else {
-                        warn!("Could not load mainnet constants, using default");
-                    }
-                }
-                "testnet" | "mantra-testnet" => {
-                    if let Ok(constants) = NetworkConstants::load("mantra-testnet") {
-                        config.network_config = MantraNetworkConfig::from_constants(&constants);
-                    } else {
-                        warn!("Could not load testnet constants, using default");
+                        warn!("Could not load mantra-dukong constants, using default");
                     }
                 }
                 _ => {
@@ -1702,27 +1695,18 @@ impl McpServerConfig {
         let mut config = Self::from_env()?;
 
         match network {
-            "mainnet" | "mantra-dukong" => {
+            "mantra-dukong" => {
                 if let Ok(constants) = NetworkConstants::load("mantra-dukong") {
                     config.network_config = MantraNetworkConfig::from_constants(&constants);
                 } else {
                     return Err(McpServerError::Network(
-                        "Could not load mainnet network constants".to_string(),
-                    ));
-                }
-            }
-            "testnet" | "mantra-testnet" => {
-                if let Ok(constants) = NetworkConstants::load("mantra-testnet") {
-                    config.network_config = MantraNetworkConfig::from_constants(&constants);
-                } else {
-                    return Err(McpServerError::Network(
-                        "Could not load testnet network constants".to_string(),
+                        "Could not load mantra-dukong network constants".to_string(),
                     ));
                 }
             }
             _ => {
                 return Err(McpServerError::Validation(format!(
-                    "Unsupported network: {}. Supported networks: mainnet, testnet, mantra-dukong, mantra-testnet",
+                    "Unsupported network: {}. Supported networks: mantra-dukong",
                     network
                 )));
             }
@@ -2053,25 +2037,17 @@ thread_keep_alive = 10
     /// Apply network-specific configuration
     fn apply_network_config(config: &mut McpServerConfig, network_name: &str) -> McpResult<()> {
         match network_name {
-            "mainnet" | "mantra-dukong" => {
+            "mantra-dukong" => {
                 if let Ok(constants) = NetworkConstants::load("mantra-dukong") {
                     config.network_config = MantraNetworkConfig::from_constants(&constants);
-                    info!("Applied mainnet network configuration");
+                    info!("Applied mantra-dukong network configuration");
                 } else {
-                    warn!("Could not load mainnet constants, using default");
-                }
-            }
-            "testnet" | "mantra-testnet" => {
-                if let Ok(constants) = NetworkConstants::load("mantra-testnet") {
-                    config.network_config = MantraNetworkConfig::from_constants(&constants);
-                    info!("Applied testnet network configuration");
-                } else {
-                    warn!("Could not load testnet constants, using default");
+                    warn!("Could not load mantra-dukong constants, using default");
                 }
             }
             _ => {
                 return Err(McpServerError::Validation(format!(
-                    "Unknown network: {}. Supported networks: mainnet, testnet, mantra-dukong, mantra-testnet",
+                    "Unknown network: {}. Supported networks: mantra-dukong",
                     network_name
                 )));
             }

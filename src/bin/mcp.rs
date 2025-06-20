@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .value_name("NETWORK")
                 .help("Network to connect to")
                 .default_value("mantra-dukong")
-                .value_parser(["mainnet", "testnet", "mantra-dukong", "mantra-testnet"]),
+                .value_parser(["mantra-dukong"]),
         )
         .arg(
             Arg::new("debug")
