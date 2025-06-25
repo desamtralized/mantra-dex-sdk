@@ -53,8 +53,6 @@ After saving the configuration, restart Claude Desktop. You should see the Mantr
 **Execute a swap:**
 > "Swap 1 OM for USDY with 3% slippage tolerance"
 
-**Get trading report:**
-> "Generate a detailed trading report for the last 30 days"
 
 ## 🛠️ Manual MCP Usage
 
@@ -91,7 +89,7 @@ cargo run --bin mcp-server --features mcp
 }
 ```
 
-## 📊 Available Tools (28 Total)
+## 📊 Available Tools (9 Total)
 
 ### Wallet Management (4 tools)
 - `generate_wallet` - Create new HD wallets
@@ -104,42 +102,25 @@ cargo run --bin mcp-server --features mcp
 - `get_block_height` - Current blockchain height
 - `get_contract_addresses` - DEX contract addresses
 
-### Pool Management (7 tools)
+### Pool Management (2 tools)
 - `get_pool` - Query specific pool information
 - `get_pools` - List all available pools
-- `validate_pool_status` - Check pool availability
-- `create_pool` - Create new liquidity pools (admin)
-- `update_pool_features` - Manage pool features (admin)
-- `enable_pool_operations` - Enable pool operations (admin)
-- `disable_pool_operations` - Disable pool operations (admin)
 
-### Trading Operations (6 tools)
+### Trading Operations (4 tools)
 - `simulate_swap` - Preview swap outcomes
 - `execute_swap` - Perform token swaps
 - `provide_liquidity` - Add liquidity to pools
-- `provide_liquidity_unchecked` - Add liquidity without validation
 - `withdraw_liquidity` - Remove liquidity from pools
-- `monitor_swap_transaction` - Track transaction status
 
-### LP Token Management (3 tools)
+### LP Token Management (2 tools)
 - `get_lp_token_balance` - Query LP token balances
 - `get_all_lp_token_balances` - Get all LP positions
-- `estimate_lp_withdrawal_amounts` - Estimate withdrawal values
 
-### Analytics & Reporting (2 tools)
-- `generate_trading_report` - Comprehensive trading analysis
-- `calculate_impermanent_loss` - LP position analysis
 
-### Transaction Monitoring (3 tools)
-- `get_transaction_monitor_status` - Check transaction status
-- `list_transaction_monitors` - List active monitors
-- `cleanup_transaction_monitors` - Clean completed monitors
 
-## 📋 Available Resources (3 Total)
+## 📋 Available Resources (0 Total)
 
-- **`trades://history`** - Historical trading data and transaction records
-- **`trades://pending`** - Currently pending or in-progress transactions  
-- **`liquidity://positions`** - Current and historical liquidity positions
+*No resources are currently available - analytics and monitoring resources have been removed to simplify the server.*
 
 ## 🔧 Troubleshooting
 
@@ -187,6 +168,5 @@ Enable debug logging:
 5. ✅ Check network status
 6. ✅ Explore available pools
 7. ✅ Try a simple swap on testnet
-8. ✅ Generate your first trading report
 
 Happy trading with the Mantra DEX MCP Server! 🚀 

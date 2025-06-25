@@ -207,9 +207,7 @@ The Cursor Agent will automatically detect and use these tools when relevant:
 - `withdraw_liquidity` - Remove liquidity
 
 #### Analytics Tools
-- `get_swap_history` - View trading history
-- `generate_trading_report` - Create reports
-- `calculate_impermanent_loss` - Analyze LP positions
+*Analytics tools have been removed to simplify the server - focus on core DEX operations*
 
 ### Example Interactions
 
@@ -252,22 +250,6 @@ You: "Yes, proceed"
 Swap executed successfully! Transaction hash: ABC123...
 ```
 
-#### Analyzing Performance
-
-```
-You: "Show me my trading performance for the last 30 days"
-
-Agent: I'll generate a comprehensive trading report for the last 30 days.
-
-[Tool Call: generate_trading_report]
-
-Here's your 30-day trading summary:
-- Total trades: 15
-- Success rate: 93.3%
-- Total volume: 1,250 OM
-- Average slippage: 0.15%
-- Best performing pool: Pool 1 (OM/aUSDY)
-```
 
 ### Tool Approval Settings
 
@@ -519,24 +501,24 @@ Agent: I can help you plan a DCA strategy. Let me first simulate the swap to sho
 [Tool calls for simulation and analysis]
 ```
 
-### Liquidity Mining Analysis
+### Liquidity Position Management
 
 ```
-You: "Analyze my liquidity mining performance and suggest optimizations"
+You: "Check my current liquidity positions and balances"
 
-Agent: I'll analyze your liquidity positions and mining performance to provide optimization suggestions.
+Agent: I'll check your current LP token balances and positions.
 
-[Tool calls for LP analysis and impermanent loss calculations]
+[Tool calls for LP balance queries]
 ```
 
-### Risk Management
+### Pool Information
 
 ```
-You: "Before I provide liquidity to pool 5, help me understand the risks"
+You: "Tell me about pool 5 before I provide liquidity"
 
-Agent: I'll help you analyze the risks of providing liquidity to pool 5. Let me gather information about the pool and calculate potential scenarios.
+Agent: I'll get detailed information about pool 5 for you.
 
-[Tool calls for pool analysis and risk assessment]
+[Tool calls for pool information and current status]
 ```
 
 ## 🔗 Additional Resources

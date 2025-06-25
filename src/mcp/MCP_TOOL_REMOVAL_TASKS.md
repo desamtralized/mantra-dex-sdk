@@ -86,49 +86,49 @@ calculate_impermanent_loss
 ### 4. Remove Supporting Methods and Infrastructure
 - [x] Remove `perform_swap_result_validation()` method
 - [x] Remove `generate_swap_execution_summary()` method
-- [ ] Remove `validate_swap_parameters_internal()` method
-- [ ] Remove `get_swap_history_from_blockchain()` method
-- [ ] Remove `filter_and_sort_swap_history()` method
-- [ ] Remove `format_swap_record()` method
-- [ ] Remove `calculate_time_period_boundaries()` method
-- [ ] Remove `get_swap_data_for_period()` method
-- [ ] Remove `calculate_pool_breakdown()` method
-- [ ] Remove `calculate_asset_breakdown()` method
-- [ ] Remove `calculate_performance_metrics()` method
-- [ ] Remove `calculate_trend_analysis()` method
-- [ ] Remove `store_swap_tracking_record()` method
-- [ ] Remove `get_swap_history_for_export()` method
-- [ ] Remove `format_swap_history_as_json()` method
-- [ ] Remove `format_swap_history_as_csv()` method
-- [ ] Remove `format_swap_history_as_tsv()` method
-- [ ] Remove `compress_data()` method
-- [ ] Remove `get_swap_data_for_analysis()` method
-- [ ] Remove `analyze_gas_performance()` method
-- [ ] Remove `analyze_slippage_performance()` method
-- [ ] Remove `analyze_timing_performance()` method
-- [ ] Remove `generate_performance_recommendations()` method
-- [ ] Remove `handle_trades_history_resource()` method
-- [ ] Remove `handle_trades_pending_resource()` method
-- [ ] Remove `handle_liquidity_positions_resource()` method
-- [ ] Remove `handle_estimate_lp_withdrawal_amounts()` method
-- [ ] Remove `format_trading_report_summary()` method
-- [ ] Remove `format_trading_report_detailed()` method
+- [x] Remove `validate_swap_parameters_internal()` method
+- [x] Remove `get_swap_history_from_blockchain()` method
+- [x] Remove `filter_and_sort_swap_history()` method
+- [x] Remove `format_swap_record()` method
+- [x] Remove `calculate_time_period_boundaries()` method
+- [x] Remove `get_swap_data_for_period()` method
+- [x] Remove `calculate_pool_breakdown()` method
+- [x] Remove `calculate_asset_breakdown()` method
+- [x] Remove `calculate_performance_metrics()` method
+- [x] Remove `calculate_trend_analysis()` method
+- [x] Remove `store_swap_tracking_record()` method
+- [x] Remove `get_swap_history_for_export()` method
+- [x] Remove `format_swap_history_as_json()` method
+- [x] Remove `format_swap_history_as_csv()` method
+- [x] Remove `format_swap_history_as_tsv()` method
+- [x] Remove `compress_data()` method
+- [x] Remove `get_swap_data_for_analysis()` method
+- [x] Remove `analyze_gas_performance()` method
+- [x] Remove `analyze_slippage_performance()` method
+- [x] Remove `analyze_timing_performance()` method
+- [x] Remove `generate_performance_recommendations()` method
+- [x] Remove `handle_trades_history_resource()` method
+- [x] Remove `handle_trades_pending_resource()` method
+- [x] Remove `handle_liquidity_positions_resource()` method
+- [x] Remove `handle_estimate_lp_withdrawal_amounts()` method
+- [x] Remove `format_trading_report_summary()` method
+- [x] Remove `format_trading_report_detailed()` method
 
 ### 5. Remove Data Structures and Types
-- [ ] Remove `SwapTrackingRecord` struct
-- [ ] Remove `SwapAnalyticsData` struct
-- [ ] Review and remove unused `TransactionMonitor` related types if no longer needed
-- [ ] Review and remove unused `TransactionMonitorConfig` if no longer needed
-- [ ] Review and remove unused `TransactionStatus` enum if no longer needed
-- [ ] Review and remove unused `TransactionMonitorManager` if no longer needed
+- [x] Remove `SwapTrackingRecord` struct
+- [x] Remove `SwapAnalyticsData` struct
+- [x] Review and remove unused `TransactionMonitor` related types if no longer needed
+- [x] Review and remove unused `TransactionMonitorConfig` if no longer needed
+- [x] Review and remove unused `TransactionStatus` enum if no longer needed
+- [x] Review and remove unused `TransactionMonitorManager` if no longer needed
 
 ### 6. Clean Up State Management
-- [ ] Remove `transaction_monitor_manager` field from `McpServerStateData` if no longer needed
-- [ ] Update `McpServerStateData::new()` constructor to remove transaction monitor manager initialization
-- [ ] Review and clean up any transaction monitoring related initialization code
+- [x] Remove `transaction_monitor_manager` field from `McpServerStateData` if no longer needed (SKIPPED - still used by core functionality)
+- [x] Update `McpServerStateData::new()` constructor to remove transaction monitor manager initialization (SKIPPED - still needed)
+- [x] Review and clean up any transaction monitoring related initialization code (SKIPPED - still needed)
 
 ### 7. Update Dependencies
-- [ ] Review `Cargo.toml` for any dependencies that were only used by removed tools
+- [x] Review `Cargo.toml` for any dependencies that were only used by removed tools
 - [ ] Remove unused dependencies if any (like regex for pool ID extraction)
 - [ ] Update import statements to remove unused imports
 
