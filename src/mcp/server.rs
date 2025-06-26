@@ -3401,7 +3401,17 @@ impl MantraDexMcpServer {
         arguments: serde_json::Value,
     ) -> McpResult<serde_json::Value> {
         info!(?arguments, "Handling execute_swap tool call");
-        self.state.sdk_adapter.execute_swap(arguments).await
+        let result = self.state.sdk_adapter.execute_swap(arguments).await?;
+        
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
     }
 
     async fn handle_provide_liquidity(
@@ -3409,7 +3419,17 @@ impl MantraDexMcpServer {
         arguments: serde_json::Value,
     ) -> McpResult<serde_json::Value> {
         info!(?arguments, "Handling provide_liquidity tool call");
-        self.state.sdk_adapter.provide_liquidity(arguments).await
+        let result = self.state.sdk_adapter.provide_liquidity(arguments).await?;
+        
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
     }
 
     async fn handle_provide_liquidity_unchecked(
@@ -3428,7 +3448,17 @@ impl MantraDexMcpServer {
         arguments: serde_json::Value,
     ) -> McpResult<serde_json::Value> {
         info!(?arguments, "Handling withdraw_liquidity tool call");
-        self.state.sdk_adapter.withdraw_liquidity(arguments).await
+        let result = self.state.sdk_adapter.withdraw_liquidity(arguments).await?;
+        
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
     }
 
     async fn handle_monitor_swap_transaction(
@@ -3540,7 +3570,17 @@ impl MantraDexMcpServer {
         arguments: serde_json::Value,
     ) -> McpResult<serde_json::Value> {
         info!(?arguments, "Handling create_pool tool call");
-        self.state.sdk_adapter.create_pool(arguments).await
+        let result = self.state.sdk_adapter.create_pool(arguments).await?;
+        
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
     }
 
 
@@ -3797,16 +3837,16 @@ async fn start_stdio_transport(server: MantraDexMcpServer) -> McpResult<()> {
                     match serde_json::to_string(&response) {
                         Ok(response_json) => {
                             if let Err(e) = stdout.write_all(response_json.as_bytes()).await {
-                                warn!("Failed to write response to stdout: {}", e);
-                                break;
+                                warn!("Failed to write response to stdout: {} - continuing", e);
+                                continue;
                             }
                             if let Err(e) = stdout.write_all(b"\n").await {
-                                warn!("Failed to write newline to stdout: {}", e);
-                                break;
+                                warn!("Failed to write newline to stdout: {} - continuing", e);
+                                continue;
                             }
                             if let Err(e) = stdout.flush().await {
-                                warn!("Failed to flush stdout: {}", e);
-                                break;
+                                warn!("Failed to flush stdout: {} - continuing", e);
+                                continue;
                             }
                             // Only log response details in debug mode to reduce noise
                             if tracing::enabled!(tracing::Level::DEBUG) {
@@ -3814,8 +3854,8 @@ async fn start_stdio_transport(server: MantraDexMcpServer) -> McpResult<()> {
                             }
                         }
                         Err(e) => {
-                            warn!("Failed to serialize response: {}", e);
-                            break;
+                            warn!("Failed to serialize response: {} - continuing", e);
+                            continue;
                         }
                     }
                 } else {

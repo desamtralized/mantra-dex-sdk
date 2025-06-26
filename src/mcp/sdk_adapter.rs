@@ -955,7 +955,7 @@ impl McpSdkAdapter {
         Ok(serde_json::json!({
             "status": "success",
             "transaction_hash": liquidity_result.txhash,
-            "explorer_url": format!("https://explorer.mantrachain.io/MANTRA-Dukong/tx/{}", liquidity_result.txhash),
+            "explorer_url": format!("https://explorer.mantrachain.io/mantra-dukong/tx/{}", liquidity_result.txhash),
             "liquidity_details": {
                 "pool_id": pool_id,
                 "assets": assets_json,
@@ -1012,7 +1012,7 @@ impl McpSdkAdapter {
         Ok(serde_json::json!({
             "status": "success",
             "transaction_hash": withdraw_result.txhash,
-            "explorer_url": format!("https://explorer.mantrachain.io/MANTRA-Dukong/tx/{}", withdraw_result.txhash),
+            "explorer_url": format!("https://explorer.mantrachain.io/mantra-dukong/tx/{}", withdraw_result.txhash),
             "withdrawal_details": {
                 "pool_id": pool_id,
                 "lp_amount": amount_str,
@@ -1146,7 +1146,7 @@ impl McpSdkAdapter {
         Ok(serde_json::json!({
             "status": "success",
             "transaction_hash": swap_result.txhash,
-            "explorer_url": format!("https://explorer.mantrachain.io/MANTRA-Dukong/tx/{}", swap_result.txhash),
+            "explorer_url": format!("https://explorer.mantrachain.io/mantra-dukong/tx/{}", swap_result.txhash),
             "swap_details": {
                 "pool_id": pool_id,
                 "offer_asset": {
@@ -1546,7 +1546,7 @@ impl McpSdkAdapter {
         Ok(serde_json::json!({
             "status": "success",
             "transaction_hash": create_result.txhash,
-            "explorer_url": format!("https://explorer.mantrachain.io/MANTRA-Dukong/tx/{}", create_result.txhash),
+            "explorer_url": format!("https://explorer.mantrachain.io/mantra-dukong/tx/{}", create_result.txhash),
             "pool_details": {
                 "pool_type": pool_type_str,
                 "assets": assets_json,
