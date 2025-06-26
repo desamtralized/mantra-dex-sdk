@@ -3208,7 +3208,9 @@ impl MantraDexMcpServer {
             for balance in &formatted_balances {
                 let token = balance.get("token").and_then(|t| t.as_str()).unwrap_or("Unknown");
                 let amount = balance.get("amount").and_then(|a| a.as_str()).unwrap_or("0");
+                let denom = balance.get("denom").and_then(|d| d.as_str()).unwrap_or("unknown");
                 response_text.push_str(&format!("- **{}**: {}\n", token, amount));
+                response_text.push_str(&format!("  - **Full Denom:** `{}`\n", denom));
             }
             
             if total_om_value > 0.0 {

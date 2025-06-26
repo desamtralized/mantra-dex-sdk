@@ -656,6 +656,22 @@ impl MantraDexClient {
         self.execute(&pool_manager_address, &msg, funds).await
     }
 
+    /// Query the pool manager configuration
+    pub async fn get_pool_manager_config(&self) -> Result<mantra_dex_std::pool_manager::Config, Error> {
+        let query = pool_manager::QueryMsg::Config {};
+        let pool_manager_address = self.config.contracts.pool_manager.clone();
+        // The contract returns Config directly, not wrapped in ConfigResponse
+        let config: mantra_dex_std::pool_manager::Config = 
+            self.query(&pool_manager_address, &query).await?;
+        Ok(config)
+    }
+
+    /// Get the pool creation fee from the pool manager configuration
+    pub async fn get_pool_creation_fee(&self) -> Result<Coin, Error> {
+        let config = self.get_pool_manager_config().await?;
+        Ok(config.pool_creation_fee)
+    }
+
     /// Create a new pool with the specified assets and configuration
     ///
     /// **v3.0.0 New Feature**: Enhanced fee validation ensures total fees ≤ 20%
@@ -680,7 +696,7 @@ impl MantraDexClient {
     ///
     /// # Notes
     ///
-    /// Pool creation requires a fee of 98 OM (98,000,000 uom)
+    /// Pool creation requires a fee that is determined by querying the pool manager configuration
     pub async fn create_pool(
         &self,
         asset_denoms: Vec<String>,
@@ -702,11 +718,19 @@ impl MantraDexClient {
 
         let pool_manager_address = self.config.contracts.pool_manager.clone();
 
-        // Pool creation requires a fee of 98 OM (98,000,000 uom)
-        let pool_creation_fee = vec![Coin {
-            denom: "uom".to_string(),
-            amount: Uint128::new(98_000_000), // 98 OM
-        }];
+        // Query the actual pool creation fee from the contract configuration
+        let creation_fee = self.get_pool_creation_fee().await?;
+        
+        // Handle case where contract config shows 0 but contract actually expects 88 OM
+        let pool_creation_fee = if creation_fee.amount.is_zero() {
+            // Fallback to known testnet pool creation fee of 88 OM
+            vec![Coin {
+                denom: "uom".to_string(),
+                amount: Uint128::new(88_000_000), // 88 OM
+            }]
+        } else {
+            vec![creation_fee]
+        };
 
         self.execute(&pool_manager_address, &msg, pool_creation_fee)
             .await

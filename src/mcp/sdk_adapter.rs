@@ -444,13 +444,39 @@ impl McpSdkAdapter {
 
     /// Get the currently active wallet
     /// 
-    /// Note: Since MantraWallet doesn't implement Clone, this method
-    /// should primarily be used by the server layer that manages the wallet lifecycle.
-    /// For balance queries and other operations, use the methods that accept wallet parameters.
+    /// Note: Since MantraWallet doesn't implement Clone, this method recreates
+    /// the wallet instance from stored mnemonic when available.
     pub async fn get_active_wallet(&self) -> McpResult<Option<MantraWallet>> {
-        // For now, return None since we can't clone the wallet
-        // The server layer should manage wallet access directly
-        Ok(None)
+        use std::env;
+        use crate::wallet::MantraWallet;
+        
+        // Check if we have an active wallet address
+        let active_address = self.active_wallet.lock().await.clone();
+        if active_address.is_none() {
+            return Ok(None);
+        }
+        
+        // Try to recreate wallet from environment mnemonic
+        if let Ok(mnemonic) = env::var("WALLET_MNEMONIC") {
+            if !mnemonic.trim().is_empty() {
+                match MantraWallet::from_mnemonic(&mnemonic, 0) {
+                    Ok(wallet) => {
+                        debug!("Recreated wallet instance from WALLET_MNEMONIC for transaction");
+                        return Ok(Some(wallet));
+                    }
+                    Err(e) => {
+                        error!("Failed to recreate wallet from WALLET_MNEMONIC: {}", e);
+                    }
+                }
+            }
+        }
+        
+        // Fall back to stored instance if available (though this will consume it)
+        let wallet = self.active_wallet_instance.lock().await.take();
+        if wallet.is_some() {
+            debug!("Using stored wallet instance (will be consumed)");
+        }
+        Ok(wallet)
     }
 
     /// Get the currently active wallet info
@@ -929,6 +955,7 @@ impl McpSdkAdapter {
         Ok(serde_json::json!({
             "status": "success",
             "transaction_hash": liquidity_result.txhash,
+            "explorer_url": format!("https://explorer.mantrachain.io/MANTRA-Dukong/tx/{}", liquidity_result.txhash),
             "liquidity_details": {
                 "pool_id": pool_id,
                 "assets": assets_json,
@@ -985,6 +1012,7 @@ impl McpSdkAdapter {
         Ok(serde_json::json!({
             "status": "success",
             "transaction_hash": withdraw_result.txhash,
+            "explorer_url": format!("https://explorer.mantrachain.io/MANTRA-Dukong/tx/{}", withdraw_result.txhash),
             "withdrawal_details": {
                 "pool_id": pool_id,
                 "lp_amount": amount_str,
@@ -1118,6 +1146,7 @@ impl McpSdkAdapter {
         Ok(serde_json::json!({
             "status": "success",
             "transaction_hash": swap_result.txhash,
+            "explorer_url": format!("https://explorer.mantrachain.io/MANTRA-Dukong/tx/{}", swap_result.txhash),
             "swap_details": {
                 "pool_id": pool_id,
                 "offer_asset": {
@@ -1502,6 +1531,10 @@ impl McpSdkAdapter {
         let network_config = self.get_default_network_config().await?;
         let client = self.get_client_with_wallet(&network_config, wallet).await?;
 
+        // Query the actual pool creation fee for response
+        let creation_fee = client.get_pool_creation_fee().await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
         // Execute pool creation directly (without retry for now due to client not being Clone)
         let create_result = client.create_pool(asset_denoms, asset_decimals, pool_fees, pool_type, pool_identifier)
             .await
@@ -1513,6 +1546,7 @@ impl McpSdkAdapter {
         Ok(serde_json::json!({
             "status": "success",
             "transaction_hash": create_result.txhash,
+            "explorer_url": format!("https://explorer.mantrachain.io/MANTRA-Dukong/tx/{}", create_result.txhash),
             "pool_details": {
                 "pool_type": pool_type_str,
                 "assets": assets_json,
@@ -1522,7 +1556,7 @@ impl McpSdkAdapter {
                     "burn_fee": burn_fee_str
                 },
                 "pool_identifier": pool_identifier_for_response,
-                "creation_fee": "88000000", // 88 OM in uom
+                "creation_fee": creation_fee.amount.to_string(),
                 "gas_used": create_result.gas_used,
                 "gas_wanted": create_result.gas_wanted
             },
