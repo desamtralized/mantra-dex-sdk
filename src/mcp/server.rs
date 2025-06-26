@@ -4,9 +4,18 @@ use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use std::net::SocketAddr;
 
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::Json,
+    routing::post,
+    Router,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::net::TcpListener;
 use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
@@ -3620,15 +3629,86 @@ pub async fn create_stdio_server(config: McpServerConfig) -> McpResult<MantraDex
     Ok(server)
 }
 
+/// JSON-RPC request structure for HTTP transport
+#[derive(Debug, Deserialize)]
+struct HttpJsonRpcRequest {
+    jsonrpc: String,
+    method: String,
+    params: Option<Value>,
+    id: Option<Value>,
+}
+
+/// HTTP handler for JSON-RPC requests
+async fn handle_jsonrpc_request(
+    State(server): State<Arc<MantraDexMcpServer>>,
+    Json(request): Json<HttpJsonRpcRequest>,
+) -> Result<Json<JsonRpcResponse>, StatusCode> {
+    debug!("HTTP JSON-RPC request: {:?}", request);
+
+    // Convert HTTP JSON-RPC to MCP format and process
+    let response = match process_mcp_request(&server, &request).await {
+        Ok(result) => JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            result: Some(result),
+            error: None,
+            id: request.id.clone(),
+        },
+        Err(error) => JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            result: None,
+            error: Some(JsonRpcError {
+                code: error.to_json_rpc_error_code(),
+                message: error.to_string(),
+                data: None,
+            }),
+            id: request.id.clone(),
+        },
+    };
+
+    debug!("HTTP JSON-RPC response: {:?}", response);
+    Ok(Json(response))
+}
+
+/// Process MCP request and return result
+async fn process_mcp_request(
+    server: &MantraDexMcpServer,
+    request: &HttpJsonRpcRequest,
+) -> McpResult<Value> {
+    // Process the request using existing MCP server logic
+    server.handle_request(&request.method, request.params.clone()).await
+}
+
 /// Create an MCP server with HTTP transport
 pub async fn create_http_server(config: McpServerConfig) -> McpResult<MantraDexMcpServer> {
     let http_host = config.http_host.clone();
     let http_port = config.http_port;
     let server = create_mcp_server(config).await?;
-    info!(
-        "Created MCP server with HTTP transport on {}:{}",
-        http_host, http_port
-    );
+    
+    info!("Starting MCP server with HTTP transport on {}:{}", http_host, http_port);
+
+    // Create HTTP server with JSON-RPC endpoint
+    let app = Router::new()
+        .route("/", post(handle_jsonrpc_request))
+        .route("/jsonrpc", post(handle_jsonrpc_request))
+        .with_state(Arc::new(server.clone()));
+
+    // Bind to address
+    let addr: SocketAddr = format!("{}:{}", http_host, http_port)
+        .parse()
+        .map_err(|e| McpServerError::Internal(format!("Invalid address: {}", e)))?;
+
+    let listener = TcpListener::bind(addr).await
+        .map_err(|e| McpServerError::Internal(format!("Failed to bind to {}: {}", addr, e)))?;
+
+    info!("MCP HTTP server listening on {}", addr);
+
+    // Start the HTTP server
+    tokio::spawn(async move {
+        if let Err(e) = axum::serve(listener, app).await {
+            error!("HTTP server error: {}", e);
+        }
+    });
+
     Ok(server)
 }
 
