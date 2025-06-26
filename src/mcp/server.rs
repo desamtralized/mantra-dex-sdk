@@ -2921,10 +2921,7 @@ impl McpToolProvider for MantraDexMcpServer {
             "monitor_swap_transaction" => self.handle_monitor_swap_transaction(arguments).await,
             "get_lp_token_balance" => self.handle_get_lp_token_balance(arguments).await,
             "get_all_lp_token_balances" => self.handle_get_all_lp_token_balances(arguments).await,
-            "estimate_lp_withdrawal_amounts" => Ok(serde_json::json!({
-                "status": "error",
-                "message": "LP withdrawal estimation tool not available"
-            })),
+            "estimate_lp_withdrawal_amounts" => self.handle_estimate_lp_withdrawal_amounts(arguments).await,
             _ => Err(McpServerError::UnknownTool(tool_name.to_string())),
         }
     }
@@ -3458,6 +3455,24 @@ impl MantraDexMcpServer {
     ) -> McpResult<serde_json::Value> {
         info!(?arguments, "Handling withdraw_liquidity tool call");
         let result = self.state.sdk_adapter.withdraw_liquidity(arguments).await?;
+        
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    async fn handle_estimate_lp_withdrawal_amounts(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling estimate_lp_withdrawal_amounts tool call");
+        let result = self.state.sdk_adapter.estimate_lp_withdrawal_amounts(arguments).await?;
         
         // Format as MCP response
         Ok(serde_json::json!({
