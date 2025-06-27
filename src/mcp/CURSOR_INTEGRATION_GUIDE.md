@@ -298,7 +298,7 @@ Configure multiple networks simultaneously:
       "args": ["--transport", "stdio", "--network", "testnet"],
       "env": {
         "MANTRA_RPC_URL": "https://custom-rpc.mantra.com",
-        "MANTRA_CHAIN_ID": "mantra-dukong-1"
+        "MANTRA_CHAIN_ID": "mantra-dukong"
       }
     }
   }

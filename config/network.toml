@@ -1,6 +1,6 @@
 [mantra-dukong]
 network_name = "mantra-dukong"
-network_id = "mantra-dukong-1"
+network_id = "mantra-dukong"
 default_rpc = "https://rpc.dukong.mantrachain.io/"
 default_gas_price = 0.025
 default_gas_adjustment = 1.3

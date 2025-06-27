@@ -5,7 +5,7 @@
 # Block height: 6032195
 
 [mantra-dukong]
-chain_id = "mantra-dukong-1"
+chain_id = "mantra-dukong"
 deployer = "mantra1cc0jfcd3rv3d36g6m575mdk8p2nmdjgnaf7ngq"
 
 [mantra-dukong.epoch_manager]

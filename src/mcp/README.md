@@ -180,7 +180,7 @@ cache_ttl_secs = 300
 [network]
 name = "testnet"
 rpc_url = "https://rpc.testnet.mantra.com"
-chain_id = "mantra-dukong-1"
+chain_id = "mantra-dukong"
 
 [transport]
 type = "stdio"

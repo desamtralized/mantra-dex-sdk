@@ -476,7 +476,7 @@ impl SettingsState {
             NetworkEnvironment::Mainnet => {
                 new_config.network = MantraNetworkConfig {
                     network_name: "mantra-mainnet".to_string(),
-                    network_id: "mantra-mainnet-1".to_string(),
+                    network_id: "mantra-mainnet".to_string(),
                     rpc_url: "https://rpc.mantrachain.io/".to_string(),
                     gas_price: 0.025,
                     gas_adjustment: 1.3,

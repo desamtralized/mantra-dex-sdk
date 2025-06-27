@@ -9,7 +9,7 @@ cache_ttl_secs = 300
 [network]
 name = "mantra-dukong"
 rpc_url = "https://rpc.dukong.mantrachain.io/"
-chain_id = "mantra-dukong-1"
+chain_id = "mantra-dukong"
 
 [transport]
 type = "stdio"

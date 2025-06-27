@@ -1967,7 +1967,7 @@ thread_keep_alive = 10
 # Examples of network-specific overrides:
 # [network_config]
 # rpc_endpoint = "https://rpc.mantra.com"
-# chain_id = "mantra-dukong-1"
+# chain_id = "mantra-dukong"
 # gas_price = "0.01uom"
 "#,
             example_config.name,

@@ -76,7 +76,7 @@ async fn test_wallet_sign_tx() {
     let msgs = Vec::new();
 
     // Sign a transaction
-    let chain_id = "mantra-dukong-1";
+    let chain_id = "mantra-dukong";
     let account_number = 1;
     let sequence = 0;
 

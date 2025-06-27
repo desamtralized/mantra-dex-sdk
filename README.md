@@ -116,7 +116,7 @@ request_timeout_secs = 30
 cache_ttl_secs = 300
 
 [network]
-chain_id = "mantra-dukong-1"
+chain_id = "mantra-dukong"
 rpc_endpoint = "https://rpc.testnet.mantra.com"
 lcd_endpoint = "https://api.testnet.mantra.com"
 grpc_endpoint = "https://grpc.testnet.mantra.com"
