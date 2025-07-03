@@ -42,6 +42,7 @@ use ratatui::{
     Frame,
 };
 use tui_input::{Input, InputRequest, InputResponse};
+use cosmrs::AccountId;
 
 /// Text input component with validation for addresses, amounts, and pool IDs
 #[derive(Debug, Clone)]
@@ -192,12 +193,21 @@ impl TextInput {
     }
 
     fn validate_address(&mut self, value: &str) -> bool {
-        // Basic address validation (mantra addresses start with "mantra")
-        if value.starts_with("mantra") && value.len() >= 40 {
-            true
-        } else {
-            self.error = Some("Invalid address format (should start with 'mantra')".to_string());
-            false
+        // Proper bech32 validation for Cosmos-based addresses
+        match value.parse::<cosmrs::AccountId>() {
+            Ok(account_id) => {
+                // Verify it has the correct "mantra" prefix
+                if account_id.prefix() == "mantra" {
+                    true
+                } else {
+                    self.error = Some("Invalid address prefix (should be 'mantra')".to_string());
+                    false
+                }
+            }
+            Err(_) => {
+                self.error = Some("Invalid bech32 address format or checksum".to_string());
+                false
+            }
         }
     }
 
