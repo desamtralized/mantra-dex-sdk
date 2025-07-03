@@ -437,7 +437,7 @@ async fn test_dependency_compatibility() {
     // Test that mantra-dex-std v3.0.0 and mantrachain-std v0.2.0 work together
     let config = client.config();
     assert!(!config.rpc_url.is_empty());
-    assert!(!config.network_id.is_empty());
+    assert!(!config.chain_id.is_empty());
 
     // Test basic client functionality
     let balances_result = client.get_balances().await;

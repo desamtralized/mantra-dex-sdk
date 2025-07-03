@@ -59,4 +59,12 @@ pub enum Error {
     /// Transaction error - occurs when transaction execution fails
     #[error("Transaction error: {0}")]
     Tx(String),
+
+    /// Network error - occurs when network connectivity issues arise
+    #[error("Network error: {0}")]
+    Network(String),
+
+    /// Timeout error - occurs when operations exceed their timeout limit
+    #[error("Timeout error: {0}")]
+    Timeout(String),
 }

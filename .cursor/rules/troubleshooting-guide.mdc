@@ -1,0 +1,233 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Troubleshooting Guide
+
+This guide provides solutions for common issues encountered during development and usage of the Mantra DEX SDK TUI.
+
+## Build and Compilation Issues
+
+### Feature Flag Problems
+```bash
+# Error: TUI dependencies not found
+# Solution: Ensure you're using the tui feature flag
+cargo run --bin tui --features tui
+
+# Error: Binary not found
+# Solution: Check binary names in Cargo.toml
+cargo run --bin mantra-dex-tui --features tui
+```
+
+### Dependency Issues
+If you encounter dependency resolution problems, check [Cargo.toml](mdc:Cargo.toml) for version conflicts:
+
+```bash
+# Clean and rebuild
+cargo clean
+cargo build --features tui
+
+# Update dependencies
+cargo update
+```
+
+## TUI Navigation Issues
+
+### Focus and Navigation Problems
+The project recently resolved major navigation issues documented in [FOCUS_FIXES.md](mdc:FOCUS_FIXES.md):
+
+#### ✅ Fixed Issues:
+1. **Enter Key Not Working**: Now properly initializes focus for each screen
+2. **Number Key Navigation**: 1-8 keys now jump directly to tabs
+3. **Missing Focus Indicators**: Visual indicators show current mode and focused elements
+
+#### Navigation Modes:
+- **Tab Mode** (`[TAB MODE]`): Navigate between screens (1-8, Tab/Shift+Tab)
+- **Content Mode** (`[CONTENT MODE]`): Navigate within screen elements
+
+#### If Navigation Still Doesn't Work:
+1. Check if you're in the correct mode (Tab vs Content)
+2. Verify focus indicators are visible (yellow borders)
+3. Try pressing `Esc` to return to Tab Mode
+4. Restart the TUI if focus gets stuck
+
+## Runtime Errors
+
+### Blockchain Connection Issues
+```bash
+# Connection timeout or RPC errors
+RUST_LOG=debug cargo run --bin tui --features tui
+
+# Check network configuration in src/config.rs
+# Try different RPC endpoint:
+cargo run --bin tui --features tui -- --rpc-url "https://alternative-rpc.mantra.com"
+```
+
+### Wallet and Key Management
+Common wallet issues and solutions:
+
+```bash
+# Invalid mnemonic errors
+# Solution: Check mnemonic format and word count (12/24 words)
+
+# Address derivation errors  
+# Solution: Verify network configuration matches wallet
+
+# Transaction signing failures
+# Solution: Check wallet has sufficient balance for gas fees
+```
+
+### Memory and Performance Issues
+If the TUI becomes unresponsive:
+
+1. **Check Async Operations**: Blockchain calls might be blocking
+2. **Monitor State Size**: Large state objects can slow rendering
+3. **Logging Overhead**: Reduce log level in production
+
+```bash
+# Minimal logging for performance
+RUST_LOG=warn cargo run --bin tui --features tui
+
+# Profile memory usage
+cargo run --bin tui --features tui --profile dev
+```
+
+## Development Issues
+
+### Code Organization Problems
+When adding new features, follow the established patterns:
+
+#### Adding New Screens
+1. Create in `src/tui/screens/` directory
+2. Add to screen enum in [src/tui/app.rs](mdc:src/tui/app.rs)
+3. Update event handling in [src/tui/events.rs](mdc:src/tui/events.rs)
+4. Add navigation in [src/tui/ui.rs](mdc:src/tui/ui.rs)
+
+#### Common Code Issues
+```rust
+// ❌ Don't access blockchain directly from UI
+impl Screen {
+    fn render(&self) {
+        let data = blockchain_client.query(); // Wrong!
+    }
+}
+
+// ✅ Use centralized state management
+impl Screen {
+    fn render(&self, app_state: &AppState) {
+        let data = &app_state.cached_data; // Correct!
+    }
+}
+```
+
+### Testing Issues
+```bash
+# Tests failing due to missing features
+cargo test --features tui
+
+# Blockchain integration tests failing
+# Use mock mode for unit tests
+cargo test --features mock-blockchain
+
+# Note: TUI tests are not implemented by design
+# Focus on SDK functionality testing only
+# If TUI issues arise, test manually through the interface
+```
+
+## State Management Issues
+
+### State Corruption
+If the application state becomes inconsistent:
+
+1. **Reset to Dashboard**: Press `1` to go to dashboard
+2. **Clear Cache**: Restart application to clear cached data
+3. **Check for Race Conditions**: Verify async operations don't conflict
+
+### Focus State Problems
+If focus indicators become inconsistent:
+
+```rust
+// Reset focus state programmatically
+app_state.reset_focus();
+app_state.navigation_mode = NavigationMode::TabLevel;
+```
+
+## Network and Blockchain Issues
+
+### Transaction Failures
+```bash
+# Common transaction issues:
+# 1. Insufficient gas
+# 2. Invalid slippage settings
+# 3. Pool liquidity changes
+# 4. Contract execution errors
+
+# Debug transaction details:
+RUST_LOG=cosmrs=debug cargo run --bin tui --features tui
+```
+
+### Pool Query Failures
+```bash
+# Pool not found or invalid ID
+# Check pool exists on current network (mainnet/testnet)
+
+# Pool feature disabled
+# Verify pool has required features enabled (swaps, deposits, etc.)
+```
+
+## Debugging Strategies
+
+### Enable Comprehensive Logging
+```bash
+# Full debug output
+RUST_LOG=debug cargo run --bin tui --features tui
+
+# Specific module debugging
+RUST_LOG=mantra_dex_sdk::tui=trace cargo run --bin tui --features tui
+
+# Network operations only
+RUST_LOG=cosmrs=debug,reqwest=debug cargo run --bin tui --features tui
+```
+
+### Use Development Tools
+```bash
+# Build with debug symbols
+cargo build --features tui
+
+# Run with backtrace
+RUST_BACKTRACE=1 cargo run --bin tui --features tui
+
+# Memory debugging
+valgrind --tool=memcheck ./target/debug/tui
+```
+
+### Check Project Status
+Review current development status and known issues:
+
+- **[RATATUI_TASKS.md](mdc:RATATUI_TASKS.md)**: Development roadmap and progress
+- **[FOCUS_FIXES.md](mdc:FOCUS_FIXES.md)**: Recent navigation improvements
+- **[NAVIGATION_FIXES.md](mdc:NAVIGATION_FIXES.md)**: Navigation system fixes
+- **[WALLET_PERSISTENCE_TASKS.md](mdc:WALLET_PERSISTENCE_TASKS.md)**: Wallet features
+
+## Getting Help
+
+### Check Documentation
+1. Review relevant task files for your issue area
+2. Check error definitions in [src/error.rs](mdc:src/error.rs)
+3. Examine configuration options in [src/config.rs](mdc:src/config.rs)
+
+### Create Debugging Reports
+When reporting issues, include:
+
+```bash
+# System information
+rustc --version
+cargo --version
+
+# Build information
+cargo build --features tui --verbose
+
+# Runtime logs
+RUST_LOG=debug cargo run --bin tui --features tui > debug.log 2>&1
+```

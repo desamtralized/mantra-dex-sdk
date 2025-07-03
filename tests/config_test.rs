@@ -15,7 +15,7 @@ fn test_network_config_loading() {
         "Network name should match"
     );
     assert_eq!(
-        network.network_id, "mantra-dukong-1",
+        network.chain_id, "mantra-dukong-1",
         "Network ID should match"
     );
     assert!(
@@ -90,7 +90,7 @@ fn test_create_network_config() {
         "Network name should match"
     );
     assert_eq!(
-        network_config.network_id, "mantra-dukong-1",
+        network_config.chain_id, "mantra-dukong-1",
         "Network ID should match"
     );
     assert!(
@@ -128,20 +128,20 @@ fn test_default_network_config() {
         "Default network name should be mantra-dukong"
     );
     assert_eq!(
-        default_config.network_id, "mantra-dukong-1",
-        "Default network ID should be mantra-dukong-1"
+        default_config.chain_id, "mantra-dukong-1",
+        "Default network ID should be mantra-dukong"
     );
     assert_eq!(
-        default_config.rpc_url, "https://rpc.dukong.mantrachain.io/",
+        default_config.rpc_url, "https://rpc.dukong.mantrachain.io:443",
         "Default RPC URL should match"
     );
     assert_eq!(
-        default_config.gas_price, 0.025,
-        "Default gas price should be 0.025"
+        default_config.gas_price, 0.01,
+        "Default gas price should be 0.01"
     );
     assert_eq!(
-        default_config.gas_adjustment, 1.3,
-        "Default gas adjustment should be 1.3"
+        default_config.gas_adjustment, 1.5,
+        "Default gas adjustment should be 1.5"
     );
     assert_eq!(
         default_config.native_denom, "uom",

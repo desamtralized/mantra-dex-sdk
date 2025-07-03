@@ -11,6 +11,10 @@ use std::str::FromStr;
 
 use crate::error::Error;
 
+// Storage module for wallet persistence
+pub mod storage;
+pub use storage::*;
+
 /// HD Path prefix for Cosmos chains (BIP-44)
 const HD_PATH_PREFIX: &str = "m/44'/118'/0'/0/";
 
@@ -20,6 +24,21 @@ pub struct MantraWallet {
     signing_account: cosmrs::crypto::secp256k1::SigningKey,
     /// The account prefix (mantra)
     account_prefix: String,
+}
+
+// Note: MantraWallet intentionally does not implement Clone for security reasons
+// The signing key should not be easily duplicated
+
+impl std::fmt::Debug for MantraWallet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MantraWallet")
+            .field("account_prefix", &self.account_prefix)
+            .field(
+                "public_key",
+                &hex::encode(self.signing_account.public_key().to_bytes()),
+            )
+            .finish()
+    }
 }
 
 /// Wallet info that can be serialized safely

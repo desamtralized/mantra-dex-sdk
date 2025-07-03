@@ -1,0 +1,6 @@
+[alias]
+# Run the MANTRA DEX Terminal UI quickly (equivalent to `cargo run --bin tui --features tui`)
+tui = "run --bin tui --features tui"
+
+# Same as above but follows the pattern `cargo run-tui`
+run-tui = "run --bin tui --features tui"
