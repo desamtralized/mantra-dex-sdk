@@ -409,7 +409,7 @@ mod tests {
         let wrapper = McpClientWrapper::new(adapter, config);
 
         // Should be able to create wrapper without errors
-        assert!(!wrapper.network_config.network_id.is_empty());
+        assert!(!wrapper.network_config.chain_id.is_empty());
     }
 
     #[tokio::test(flavor = "multi_thread")]
