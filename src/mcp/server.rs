@@ -2547,7 +2547,7 @@ impl McpServerStateManager for MantraDexMcpServer {
             "server_name": self.state.config.name,
             "server_version": self.state.config.version,
             "network": {
-                "chain_id": self.state.config.network_config.network_id,
+                "chain_id": self.state.config.network_config.chain_id,
                 "rpc_endpoint": self.state.config.network_config.rpc_url,
                 "lcd_endpoint": self.state.config.network_config.rpc_url,
                 "grpc_endpoint": self.state.config.network_config.rpc_url
@@ -2624,7 +2624,7 @@ impl McpServerStateManager for MantraDexMcpServer {
             "components": {
                 "client": {
                     "status": client_status,
-                    "network": self.state.config.network_config.network_id
+                    "network": self.state.config.network_config.chain_id
                 },
                 "wallet": {
                     "active": active_wallet,
@@ -2947,7 +2947,7 @@ impl MantraDexMcpServer {
         
         let mut result = serde_json::json!({
             "network": self.state.config.network_config.network_name,
-            "chain_id": self.state.config.network_config.network_id,
+            "chain_id": self.state.config.network_config.chain_id,
             "contracts": {
                 "pool_manager": contracts.pool_manager
             }
@@ -2989,7 +2989,7 @@ impl MantraDexMcpServer {
         // Create formatted response text
         let mut response_text = format!("📄 **Contract Addresses**\n\n");
         response_text.push_str(&format!("**Network:** {}\n", self.state.config.network_config.network_name));
-        response_text.push_str(&format!("**Chain ID:** {}\n\n", self.state.config.network_config.network_id));
+        response_text.push_str(&format!("**Chain ID:** {}\n\n", self.state.config.network_config.chain_id));
 
         response_text.push_str("### 🏗️ Core Contracts:\n\n");
         response_text.push_str(&format!("**Pool Manager:** `{}`\n", contracts.pool_manager));

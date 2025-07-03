@@ -12,8 +12,8 @@ use crate::error::Error;
 pub struct NetworkConstants {
     /// Network name
     pub network_name: String,
-    /// Network ID
-    pub network_id: String,
+    /// Chain ID (for transaction signing)
+    pub chain_id: String,
     /// Default RPC endpoint
     pub default_rpc: String,
     /// Default gas price (in uaum)
@@ -52,10 +52,10 @@ impl NetworkConstants {
         match network {
             "mantra-dukong" => Ok(NetworkConstants {
                 network_name: "mantra-dukong".to_string(),
-                network_id: "mantra-dukong".to_string(),
-                default_rpc: "https://rpc.dukong.mantrachain.io/".to_string(),
-                default_gas_price: 0.025,
-                default_gas_adjustment: 1.3,
+                chain_id: "mantra-dukong-1".to_string(),
+                default_rpc: "https://rpc.dukong.mantrachain.io:443".to_string(),
+                default_gas_price: 0.01,
+                default_gas_adjustment: 1.5,
                 native_denom: "uom".to_string(),
             }),
             _ => Err(ConfigError::NotFound(format!("Network configuration for '{}' not found", network))),
@@ -97,8 +97,8 @@ impl Default for ContractAddresses {
 pub struct MantraNetworkConfig {
     /// Network name (e.g., mantra-dukong)
     pub network_name: String,
-    /// Network ID (e.g., mantra-dukong)
-    pub network_id: String,
+    /// Chain ID (e.g., mantra-dukong)
+    pub chain_id: String,
     /// RPC endpoint URL
     pub rpc_url: String,
     /// Gas price in native token
@@ -119,7 +119,7 @@ impl MantraNetworkConfig {
 
         Self {
             network_name: constants.network_name.clone(),
-            network_id: constants.network_id.clone(),
+            chain_id: constants.chain_id.clone(),
             rpc_url: constants.default_rpc.clone(),
             gas_price: constants.default_gas_price,
             gas_adjustment: constants.default_gas_adjustment,
@@ -183,10 +183,10 @@ impl Default for MantraNetworkConfig {
             Ok(constants) => Self::from_constants(&constants),
             Err(_) => Self {
                 network_name: "mantra-dukong".to_string(),
-                network_id: "mantra-dukong".to_string(),
-                rpc_url: "https://rpc.dukong.mantrachain.io/".to_string(),
-                gas_price: 0.025,
-                gas_adjustment: 1.3,
+                chain_id: "mantra-dukong-1".to_string(),
+                rpc_url: "https://rpc.dukong.mantrachain.io:443".to_string(),
+                gas_price: 0.01,
+                gas_adjustment: 1.5,
                 native_denom: "uom".to_string(),
                 contracts: ContractAddresses::default(),
             },

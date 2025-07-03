@@ -316,7 +316,7 @@ impl MantraDexClient {
         // Create auth info with fee
         let auth_info = signer_info.auth_info(fee);
 
-        let chain_id = Id::try_from(self.config.network_id.as_str())
+        let chain_id = Id::try_from(self.config.chain_id.as_str())
             .map_err(|e| Error::Tx(format!("Invalid chain ID: {}", e)))?;
 
         let sign_doc = SignDoc::new(&tx_body, &auth_info, &chain_id, account_number)

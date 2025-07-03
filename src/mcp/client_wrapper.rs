@@ -159,13 +159,13 @@ impl McpClientWrapper {
             Some(info) => Ok(serde_json::json!({
                 "address": info.address,
                 "public_key": info.public_key,
-                "network": self.network_config.network_id,
+                "network": self.network_config.chain_id,
                 "status": "active"
             })),
             None => Ok(serde_json::json!({
                 "address": null,
                 "public_key": null,
-                "network": self.network_config.network_id,
+                "network": self.network_config.chain_id,
                 "status": "no_active_wallet"
             })),
         }
@@ -203,7 +203,7 @@ impl McpClientWrapper {
             Ok(height) => {
                 info!("Network status retrieved - block height: {}", height);
                 Ok(serde_json::json!({
-                    "network": self.network_config.network_id,
+                    "network": self.network_config.chain_id,
                     "rpc_url": self.network_config.rpc_url,
                     "block_height": height,
                     "status": "connected"
@@ -212,7 +212,7 @@ impl McpClientWrapper {
             Err(e) => {
                 warn!("Failed to get network status: {}", e);
                 Ok(serde_json::json!({
-                    "network": self.network_config.network_id,
+                    "network": self.network_config.chain_id,
                     "rpc_url": self.network_config.rpc_url,
                     "block_height": null,
                     "status": "disconnected",
@@ -235,7 +235,7 @@ impl McpClientWrapper {
         &mut self,
         new_config: MantraNetworkConfig,
     ) -> McpResult<JsonValue> {
-        debug!("Switching network to: {}", new_config.network_id);
+        debug!("Switching network to: {}", new_config.chain_id);
 
         // Update internal network config
         self.network_config = new_config.clone();
@@ -246,12 +246,12 @@ impl McpClientWrapper {
 
         info!(
             "Successfully switched to network: {}",
-            new_config.network_id
+            new_config.chain_id
         );
 
         Ok(serde_json::json!({
-            "previous_network": self.network_config.network_id,
-            "current_network": new_config.network_id,
+            "previous_network": self.network_config.chain_id,
+            "current_network": new_config.chain_id,
             "status": "switched"
         }))
     }
@@ -311,11 +311,11 @@ impl McpClientWrapper {
     pub async fn get_contract_addresses(&self) -> McpResult<JsonValue> {
         debug!(
             "Getting contract addresses for network: {}",
-            self.network_config.network_id
+            self.network_config.chain_id
         );
 
         Ok(serde_json::json!({
-            "network": self.network_config.network_id,
+            "network": self.network_config.chain_id,
             "contracts": {
                 "pool_manager": self.network_config.contracts.pool_manager,
                 "fee_collector": self.network_config.contracts.fee_collector
@@ -357,7 +357,7 @@ impl McpClientWrapper {
                 "network": {
                     "status": if network_connected { "connected" } else { "disconnected" },
                     "healthy": network_connected,
-                    "network": self.network_config.network_id
+                    "network": self.network_config.chain_id
                 },
                 "cache": {
                     "status": "operational",
@@ -373,7 +373,7 @@ impl Default for McpClientWrapper {
         // Create a default testnet configuration
         let testnet_constants = crate::config::NetworkConstants {
             network_name: "mantra-dukong".to_string(),
-            network_id: "mantra-dukong".to_string(),
+            chain_id: "mantra-dukong-1".to_string(),
             default_rpc: "https://rpc.dukong.mantrachain.io".to_string(),
             default_gas_price: 0.01,
             default_gas_adjustment: 1.5,
@@ -398,7 +398,7 @@ mod tests {
         // Create a testnet configuration
         let testnet_constants = crate::config::NetworkConstants {
             network_name: "mantra-dukong".to_string(),
-            network_id: "mantra-dukong".to_string(),
+            chain_id: "mantra-dukong-1".to_string(),
             default_rpc: "https://rpc.dukong.mantrachain.io".to_string(),
             default_gas_price: 0.01,
             default_gas_adjustment: 1.5,

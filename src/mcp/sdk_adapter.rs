@@ -136,7 +136,7 @@ impl NetworkConnectionPool {
                 pooled_conn.mark_used();
                 debug!(
                     "Reusing existing connection for network: {}",
-                    self.network_config.network_id
+                    self.network_config.chain_id
                 );
                 // Since MantraDexClient can't be cloned, we need to create a new client
                 // with the same configuration. This is a limitation of the current SDK design.
@@ -166,7 +166,7 @@ impl NetworkConnectionPool {
 
         debug!(
             "Created new connection for network: {} (pool size: {})",
-            self.network_config.network_id,
+            self.network_config.chain_id,
             self.connections.len()
         );
 
@@ -177,21 +177,21 @@ impl NetworkConnectionPool {
     async fn create_new_client(&self) -> McpResult<MantraDexClient> {
         debug!(
             "Creating new DEX client for network: {}",
-            self.network_config.network_id
+            self.network_config.chain_id
         );
 
         match MantraDexClient::new(self.network_config.clone()).await {
             Ok(client) => {
                 info!(
                     "Successfully created DEX client for network: {}",
-                    self.network_config.network_id
+                    self.network_config.chain_id
                 );
                 Ok(client)
             }
             Err(e) => {
                 error!(
                     "Failed to create DEX client for network {}: {}",
-                    self.network_config.network_id, e
+                    self.network_config.chain_id, e
                 );
                 Err(McpServerError::Sdk(e))
             }
@@ -212,7 +212,7 @@ impl NetworkConnectionPool {
         if removed_count > 0 {
             debug!(
                 "Cleaned up {} expired/unhealthy connections for network: {}",
-                removed_count, self.network_config.network_id
+                removed_count, self.network_config.chain_id
             );
         }
     }
@@ -228,7 +228,7 @@ impl NetworkConnectionPool {
                 Err(e) => {
                     warn!(
                         "Health check failed for connection to network {}: {}",
-                        self.network_config.network_id, e
+                        self.network_config.chain_id, e
                     );
                     pooled_conn.set_health(false);
                 }
@@ -322,7 +322,7 @@ impl McpSdkAdapter {
         &self,
         network_config: &MantraNetworkConfig,
     ) -> McpResult<MantraDexClient> {
-        let network_id = network_config.network_id.clone();
+        let network_id = network_config.chain_id.clone();
 
         // Get or create the network pool
         {
@@ -563,7 +563,7 @@ impl McpSdkAdapter {
         network_config: &MantraNetworkConfig,
         wallet_address: &str,
     ) -> McpResult<Value> {
-        debug!("Getting balances for network: {}", network_config.network_id);
+        debug!("Getting balances for network: {}", network_config.chain_id);
         info!("Querying balances for address: {}", wallet_address);
 
         // Get client and execute balance query
@@ -590,7 +590,7 @@ impl McpSdkAdapter {
             "address": wallet_address,
             "balances": balance_json,
             "total_tokens": balance_json.len(),
-            "network": network_config.network_id,
+            "network": network_config.chain_id,
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
 
