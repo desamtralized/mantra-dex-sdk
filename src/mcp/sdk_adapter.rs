@@ -781,15 +781,6 @@ impl McpSdkAdapter {
         }))
     }
 
-    pub async fn get_pool_status(
-        &self,
-        _pool_id: u64,
-        _include_metrics: bool,
-        _include_history: bool,
-    ) -> McpResult<Value> {
-        // Placeholder
-        Ok(serde_json::json!({}))
-    }
 
     pub async fn validate_pool_status(
         &self,
