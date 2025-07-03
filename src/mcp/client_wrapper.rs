@@ -428,7 +428,7 @@ mod tests {
         let result = wrapper.get_contract_addresses().await.unwrap();
 
         // Should return contract information
-        assert_eq!(result["network"], "mantra-dukong");
+        assert_eq!(result["network"], "mantra-dukong-1");
         assert!(result["contracts"]["pool_manager"].is_string());
     }
 

@@ -1036,7 +1036,7 @@ impl App {
                             if let Some(focused_component) = self
                                 .state
                                 .focus_manager
-                                .handle_event(&Event::MoveFocus(direction))
+                                .handle_event(&Event::MoveFocus(direction.clone()))
                             {
                                 self.update_component_focus(&focused_component);
                             }
@@ -1045,7 +1045,7 @@ impl App {
                 } else if self.state.current_screen == Screen::WalletSelection {
                     // Special case: Allow wallet selection screen to handle MoveFocus events even in ScreenLevel mode
                     // This is needed because wallet selection is often the first screen and needs arrow key navigation
-                    self.handle_screen_specific_event(Event::MoveFocus(direction))
+                    self.handle_screen_specific_event(Event::MoveFocus(direction.clone()))
                         .await?;
                 }
             }
