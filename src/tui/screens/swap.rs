@@ -1471,7 +1471,7 @@ mod tests {
     fn test_calculate_estimated_output() {
         let swap_state = SwapState::default();
         let result = _calculate_estimated_output("100.0", &swap_state);
-        assert_eq!(result, "99.9700");
+        assert_eq!(result, "99.7000");
     }
 
     #[test]

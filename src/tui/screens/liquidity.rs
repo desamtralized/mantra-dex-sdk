@@ -930,8 +930,16 @@ fn render_provide_liquidity_form(f: &mut Frame, area: Rect, app: &App) {
     render_provide_execute_button(f, chunks[4], app);
 }
 
-/// Render first asset input with balance display (like swap screen)
-fn render_first_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
+/// Helper function to render asset input with balance display
+fn render_asset_input_with_balance<F>(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    input_widget: &TextInput,
+    token_extractor: F,
+) where
+    F: Fn(&str) -> String,
+{
     let liquidity_state = get_liquidity_screen_state();
 
     let chunks = Layout::default()
@@ -940,7 +948,7 @@ fn render_first_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
         .split(area);
 
     // Render input field
-    liquidity_state.first_asset_input.render(f, chunks[0]);
+    input_widget.render(f, chunks[0]);
 
     // Render balance display - extract token from selected pool
     let pool_label = liquidity_state
@@ -948,9 +956,9 @@ fn render_first_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
         .get_selected_label()
         .unwrap_or("Select Pool");
 
-    let first_token = extract_first_token_from_pool(pool_label);
+    let token = token_extractor(pool_label);
 
-    let balance_text = if first_token == "Select Pool" {
+    let balance_text = if token == "Select Pool" {
         vec![
             Line::from(vec![Span::styled(
                 "Select pool",
@@ -963,9 +971,9 @@ fn render_first_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
         ]
     } else {
         // Get the balance using the token symbol mapping
-        if let Some(micro_balance) = app.get_balance_by_token_name(&first_token) {
+        if let Some(micro_balance) = app.get_balance_by_token_name(&token) {
             // Map the token symbol back to denomination to get decimals
-            if let Some(denom) = app.map_token_name_to_denom(&first_token) {
+            if let Some(denom) = app.map_token_name_to_denom(&token) {
                 // Convert from micro units to actual token amount
                 let token_amount = app.micro_to_token_amount(micro_balance, &denom);
 
@@ -975,7 +983,7 @@ fn render_first_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
                         Style::default().fg(Color::Gray),
                     )]),
                     Line::from(vec![Span::styled(
-                        format!("{} {}", token_amount, first_token),
+                        format!("{} {}", token_amount, token),
                         Style::default()
                             .fg(Color::Green)
                             .add_modifier(Modifier::BOLD),
@@ -989,7 +997,7 @@ fn render_first_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
                         Style::default().fg(Color::Gray),
                     )]),
                     Line::from(vec![Span::styled(
-                        format!("{} {} (raw)", micro_balance, first_token),
+                        format!("{} {} (raw)", micro_balance, token),
                         Style::default()
                             .fg(Color::Green)
                             .add_modifier(Modifier::BOLD),
@@ -1004,7 +1012,7 @@ fn render_first_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
                     Style::default().fg(Color::Gray),
                 )]),
                 Line::from(vec![Span::styled(
-                    format!("0.0 {}", first_token),
+                    format!("0.0 {}", token),
                     Style::default()
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
@@ -1025,99 +1033,28 @@ fn render_first_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(balance_paragraph, chunks[1]);
 }
 
+/// Render first asset input with balance display (like swap screen)
+fn render_first_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
+    let liquidity_state = get_liquidity_screen_state();
+    render_asset_input_with_balance(
+        f,
+        area,
+        app,
+        &liquidity_state.first_asset_input,
+        extract_first_token_from_pool,
+    );
+}
+
 /// Render second asset input with balance display (like swap screen)
 fn render_second_asset_input_with_balance(f: &mut Frame, area: Rect, app: &App) {
     let liquidity_state = get_liquidity_screen_state();
-
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(area);
-
-    // Render input field
-    liquidity_state.second_asset_input.render(f, chunks[0]);
-
-    // Render balance display - extract token from selected pool
-    let pool_label = liquidity_state
-        .pool_dropdown
-        .get_selected_label()
-        .unwrap_or("Select Pool");
-
-    let second_token = extract_second_token_from_pool(pool_label);
-
-    let balance_text = if second_token == "Select Pool" {
-        vec![
-            Line::from(vec![Span::styled(
-                "Select pool",
-                Style::default().fg(Color::Gray),
-            )]),
-            Line::from(vec![Span::styled(
-                "to view balance",
-                Style::default().fg(Color::Gray),
-            )]),
-        ]
-    } else {
-        // Get the balance using the token symbol mapping
-        if let Some(micro_balance) = app.get_balance_by_token_name(&second_token) {
-            // Map the token symbol back to denomination to get decimals
-            if let Some(denom) = app.map_token_name_to_denom(&second_token) {
-                // Convert from micro units to actual token amount
-                let token_amount = app.micro_to_token_amount(micro_balance, &denom);
-
-                vec![
-                    Line::from(vec![Span::styled(
-                        "Available:",
-                        Style::default().fg(Color::Gray),
-                    )]),
-                    Line::from(vec![Span::styled(
-                        format!("{} {}", token_amount, second_token),
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    )]),
-                ]
-            } else {
-                // Fallback: show raw balance if denomination mapping fails
-                vec![
-                    Line::from(vec![Span::styled(
-                        "Available:",
-                        Style::default().fg(Color::Gray),
-                    )]),
-                    Line::from(vec![Span::styled(
-                        format!("{} {} (raw)", micro_balance, second_token),
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
-                    )]),
-                ]
-            }
-        } else {
-            // No balance found
-            vec![
-                Line::from(vec![Span::styled(
-                    "Available:",
-                    Style::default().fg(Color::Gray),
-                )]),
-                Line::from(vec![Span::styled(
-                    format!("0.0 {}", second_token),
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                )]),
-            ]
-        }
-    };
-
-    let balance_paragraph = Paragraph::new(Text::from(balance_text))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Balance")
-                .border_style(Style::default().fg(Color::Green)),
-        )
-        .alignment(Alignment::Center);
-
-    f.render_widget(balance_paragraph, chunks[1]);
+    render_asset_input_with_balance(
+        f,
+        area,
+        app,
+        &liquidity_state.second_asset_input,
+        extract_second_token_from_pool,
+    );
 }
 
 /// Extract first token from pool label (like swap screen token extraction)
@@ -1883,16 +1820,16 @@ mod tests {
         let mut state = LiquidityScreenState::default();
 
         // Test provide mode navigation
+        assert_eq!(state.input_focus, LiquidityInputFocus::Pool);
+        state.next_focus();
         assert_eq!(state.input_focus, LiquidityInputFocus::FirstAssetAmount);
         state.next_focus();
         assert_eq!(state.input_focus, LiquidityInputFocus::SecondAssetAmount);
-        state.next_focus();
-        assert_eq!(state.input_focus, LiquidityInputFocus::PoolSelection);
 
         // Test mode switching
         state.set_mode(LiquidityMode::Withdraw);
         assert_eq!(state.mode, LiquidityMode::Withdraw);
-        assert_eq!(state.input_focus, LiquidityInputFocus::WithdrawAmount);
+        assert_eq!(state.input_focus, LiquidityInputFocus::Pool);
     }
 
     #[test]

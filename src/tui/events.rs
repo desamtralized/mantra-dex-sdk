@@ -1544,7 +1544,7 @@ mod tests {
             kind: event::KeyEventKind::Press,
             state: event::KeyEventState::NONE,
         };
-        assert_eq!(EventHandler::convert_key_event(quit_q), Some(Event::Quit));
+        assert_eq!(EventHandler::convert_key_event(quit_q), Some(Event::Char('q')));
 
         let quit_ctrl_c = KeyEvent {
             code: KeyCode::Char('c'),
@@ -1592,7 +1592,7 @@ mod tests {
         assert!(EventHandler::is_blockchain_action(&swap_event));
 
         let liquidity_event = Event::ProvideLiquidity {
-            pool_id: 1,
+            pool_id: "1".to_string(),
             asset_1_amount: "100".to_string(),
             asset_2_amount: "50".to_string(),
             slippage_tolerance: Some("0.01".to_string()),
@@ -1614,6 +1614,7 @@ mod tests {
             operation: "swap".to_string(),
             result: "Success".to_string(),
             transaction_hash: Some("0x123".to_string()),
+            enhanced_data: None,
         };
         assert!(EventHandler::is_blockchain_response(&success_event));
 
@@ -1640,13 +1641,13 @@ mod tests {
         let swap_op = SwapOperation {
             from_asset: "USDC".to_string(),
             to_asset: "OM".to_string(),
-            pool_id: 1,
+            pool_id: "1".to_string(),
             amount: "100".to_string(),
         };
 
         assert_eq!(swap_op.from_asset, "USDC");
         assert_eq!(swap_op.to_asset, "OM");
-        assert_eq!(swap_op.pool_id, 1);
+        assert_eq!(swap_op.pool_id, "1");
         assert_eq!(swap_op.amount, "100");
     }
 

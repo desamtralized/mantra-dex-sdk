@@ -7,7 +7,7 @@
 use crate::tui::{
     app::{App, LoadingState},
     components::{
-        forms::{Dropdown, InputType, TextInput},
+        forms::{Dropdown, DropdownOption, InputType, TextInput},
         header::render_header,
         modals::{render_modal, ModalState},
         navigation::render_navigation,
@@ -1090,13 +1090,13 @@ mod tests {
         let mut state = MultiHopScreenState::default();
 
         // Add a hop
-        state.from_token_dropdown.select_by_value("USDC");
-        state.to_token_dropdown.select_by_value("ATOM");
-        state.amount_input.set_value("100".to_string());
-        state
-            .pool_dropdown
-            .add_option(DropdownOption::new("Pool 1".to_string(), "1".to_string()));
-        state.pool_dropdown.select_by_value("1");
+        state.from_token_dropdown = state.from_token_dropdown.add_option(DropdownOption::new("USDC".to_string(), "USDC".to_string()));
+        state.from_token_dropdown.select_by_value(&"USDC".to_string());
+        state.to_token_dropdown = state.to_token_dropdown.add_option(DropdownOption::new("ATOM".to_string(), "ATOM".to_string()));
+        state.to_token_dropdown.select_by_value(&"ATOM".to_string());
+        state.amount_input.set_value("100");
+        state.pool_dropdown = state.pool_dropdown.add_option(DropdownOption::new("Pool 1".to_string(), "1".to_string()));
+        state.pool_dropdown.select_by_value(&"1".to_string());
 
         assert!(state.validate_current_hop());
         state.add_hop();

@@ -96,7 +96,7 @@ async fn test_client_query_pool() {
             println!("Warning: Pool query failed: {:?}", pool_result.err());
         }
     } else {
-        println!("Warning: Could not get or create OM/USDC pool");
+        println!("Warning: Could not get or create OM/USDY pool");
     }
 }
 
@@ -170,9 +170,9 @@ async fn test_client_simulate_swap() {
             .denom
             .clone()
             .unwrap();
-        let uusdc_denom = test_config
+        let uusdy_denom = test_config
             .tokens
-            .get("uusdc")
+            .get("uusdy")
             .unwrap()
             .denom
             .clone()
@@ -185,7 +185,7 @@ async fn test_client_simulate_swap() {
                     denom: uom_denom,
                     amount: cosmwasm_std::Uint128::from(1000000u128),
                 },
-                &uusdc_denom,
+                &uusdy_denom,
             )
             .await;
 
@@ -220,7 +220,7 @@ async fn test_client_simulate_swap() {
             }
         }
     } else {
-        println!("Warning: Could not get or create OM/USDC pool for simulation");
+        println!("Warning: Could not get or create OM/USDY pool for simulation");
     }
 }
 
