@@ -353,13 +353,8 @@ pub struct AppState {
     pub claimable_rewards: HashMap<String, Uint128>,
     /// Rewards screen state
     pub rewards_state: crate::tui::screens::rewards::RewardsState,
-<<<<<<< HEAD
     /// Admin screen state  
     pub admin_screen_state: crate::tui::screens::admin::AdminScreenState,
-=======
-    /// Admin screen state
-    pub admin_state: crate::tui::screens::admin::AdminState,
->>>>>>> main
     /// Settings screen state
     pub settings_state: crate::tui::screens::settings::SettingsState,
     /// Transaction screen state
@@ -374,11 +369,8 @@ pub struct AppState {
     pub wallet_selection_state: crate::tui::screens::wallet_selection::WalletSelectionScreen,
     /// Wallet setup wizard state
     pub wizard_state: crate::tui::screens::wizard::WizardState,
-<<<<<<< HEAD
     /// Asset decimals cache (denom -> decimal places)
     pub asset_decimals_cache: HashMap<String, u8>,
-=======
->>>>>>> main
 }
 
 /// Pending operation tracking for comprehensive loading states
@@ -440,11 +432,7 @@ impl Default for AppState {
             current_epoch: None,
             claimable_rewards: HashMap::new(),
             rewards_state: crate::tui::screens::rewards::RewardsState::default(),
-<<<<<<< HEAD
             admin_screen_state: crate::tui::screens::admin::AdminScreenState::default(),
-=======
-            admin_state: crate::tui::screens::admin::AdminState::default(),
->>>>>>> main
             settings_state: crate::tui::screens::settings::SettingsState::default(),
             transaction_state: crate::tui::screens::transaction::TransactionState::default(),
             network_info: NetworkInfo::default(),
@@ -458,10 +446,7 @@ impl Default for AppState {
                 wizard.show_wizard = false;
                 wizard
             },
-<<<<<<< HEAD
             asset_decimals_cache: HashMap::new(),
-=======
->>>>>>> main
         }
     }
 }
@@ -669,7 +654,6 @@ impl App {
         }
     }
 
-<<<<<<< HEAD
     /// Format insufficient funds error in a user-friendly way
     fn format_insufficient_funds_error(&self, error: &str) -> String {
         // Simple parsing to extract token symbols from insufficient funds error
@@ -708,8 +692,6 @@ impl App {
         }
     }
 
-=======
->>>>>>> main
     /// Handle async blockchain operations with comprehensive status updates
     pub async fn handle_event(&mut self, event: Event) -> Result<bool, Error> {
         // Handle network state changes
@@ -770,7 +752,6 @@ impl App {
             operation,
             result,
             transaction_hash,
-<<<<<<< HEAD
             enhanced_data,
         } = &event
         {
@@ -835,25 +816,11 @@ impl App {
                 operation
             ));
 
-=======
-        } = &event
-        {
-            let mut success_details = vec![result.clone()];
-            if let Some(tx_hash) = transaction_hash {
-                success_details.push(format!("Transaction: {}", tx_hash));
-            }
-
-            self.state.loading_state = LoadingState::success_with_details(
-                format!("{} completed successfully", operation),
-                success_details,
-            );
->>>>>>> main
             return Ok(false);
         }
 
         // Handle blockchain error events
         if let Event::BlockchainError { operation, error } = &event {
-<<<<<<< HEAD
             // Clear the loading state first
             self.state.loading_state = LoadingState::Idle;
 
@@ -908,22 +875,6 @@ impl App {
                 operation
             ));
 
-=======
-            let error_type = if error.to_lowercase().contains("network") {
-                ErrorType::Network
-            } else if error.to_lowercase().contains("contract") {
-                ErrorType::Contract
-            } else {
-                ErrorType::Unknown
-            };
-
-            self.state.loading_state = LoadingState::error_with_details(
-                format!("{} failed", operation),
-                error_type,
-                vec![error.clone()],
-                Some("retry_operation".to_string()),
-            );
->>>>>>> main
             return Ok(false);
         }
 
@@ -969,7 +920,6 @@ impl App {
                 pool_id,
                 slippage_tolerance,
             } => {
-<<<<<<< HEAD
                 // Set loading state immediately so UI can render it
                 self.set_loading(format!(
                     "Executing swap: {} {} → {}",
@@ -996,8 +946,6 @@ impl App {
                 pool_id,
                 slippage_tolerance,
             } => {
-=======
->>>>>>> main
                 // Execute real swap transaction
                 self.execute_real_swap(
                     from_asset.clone(),
@@ -1015,7 +963,6 @@ impl App {
                 asset_2_amount,
                 slippage_tolerance,
             } => {
-<<<<<<< HEAD
                 crate::tui::utils::logger::log_info(&format!(
                     "=== PROCESSING PROVIDE LIQUIDITY EVENT ===",
                 ));
@@ -1113,28 +1060,6 @@ impl App {
                     );
                 }
 
-=======
-                let operation_name = "provide_liquidity";
-                let _pool_id = *pool_id;
-                let _asset_1_amount = asset_1_amount.clone();
-                let _asset_2_amount = asset_2_amount.clone();
-                let _slippage_tolerance = slippage_tolerance.clone();
-
-                let result = self
-                    .execute_async_operation(operation_name, || async {
-                        // TODO: Implement actual liquidity provision
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        Ok(())
-                    })
-                    .await;
-
-                if let Err(e) = result {
-                    crate::tui::utils::logger::log_error(&format!(
-                        "Liquidity provision failed: {}",
-                        e
-                    ));
-                }
->>>>>>> main
                 return Ok(false);
             }
             Event::ClaimRewards {
@@ -1142,7 +1067,6 @@ impl App {
                 epochs,
                 claim_all,
             } => {
-<<<<<<< HEAD
                 // Show loading modal for rewards claiming
                 let operation_description = if *claim_all {
                     "Claiming all available rewards".to_string()
@@ -1158,17 +1082,10 @@ impl App {
                 let pool_id_val = pool_id.clone();
                 let epochs_val = epochs.clone();
                 let claim_all_val = *claim_all;
-=======
-                let operation_name = "claim_rewards";
-                let _pool_id = *pool_id;
-                let _epochs = epochs.clone();
-                let _claim_all = *claim_all;
->>>>>>> main
 
                 let result = self
                     .execute_async_operation(operation_name, || async {
                         // TODO: Implement actual rewards claiming
-<<<<<<< HEAD
                         // Simulate the process
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
@@ -1235,25 +1152,12 @@ impl App {
                             e
                         ));
                     }
-=======
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        Ok(())
-                    })
-                    .await;
-
-                if let Err(e) = result {
-                    crate::tui::utils::logger::log_error(&format!(
-                        "Rewards claiming failed: {}",
-                        e
-                    ));
->>>>>>> main
                 }
                 return Ok(false);
             }
             _ => {}
         }
 
-<<<<<<< HEAD
         // Handle modal events FIRST - they take priority over everything else
         if self.state.modal_state.is_some() {
             if self.handle_modal_event(&event) {
@@ -1262,52 +1166,10 @@ impl App {
         }
 
         // Handle wizard events SECOND - they should take priority when active
-=======
-        // Handle focus management events (but allow screens to steal arrow keys when needed)
-        let mut focus_handled = false;
-
-        if let Event::MoveFocus(direction) = &event {
-            if self.state.navigation_mode == NavigationMode::WithinScreen {
-                // Decide whether to let the FocusManager process this directional move.
-                let allow_focus_move = match self.state.current_screen {
-                    Screen::Swap => {
-                        let swap_state = crate::tui::screens::swap::get_swap_screen_state();
-                        let is_list_focus = matches!(
-                            swap_state.input_focus,
-                            crate::tui::screens::swap::SwapInputFocus::Pool
-                                | crate::tui::screens::swap::SwapInputFocus::FromToken
-                        );
-
-                        !(is_list_focus || swap_state.is_any_list_editing())
-                    }
-                    _ => true,
-                };
-
-                if allow_focus_move {
-                    if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
-                        self.update_component_focus(&focused_component);
-                        focus_handled = true;
-                    }
-                }
-            }
-        } else {
-            // Non-directional focus related events can be passed through directly.
-            // However, exclude ESC events to let the main handler manage navigation mode switches
-            if !matches!(event, Event::Escape) {
-                if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
-                    self.update_component_focus(&focused_component);
-                    focus_handled = true;
-                }
-            }
-        }
-
-        // Handle wizard events first if wizard is active
->>>>>>> main
         if self.state.wizard_state.show_wizard {
             return self.handle_wizard_event(event).await;
         }
 
-<<<<<<< HEAD
         // Handle focus management events
         let mut focus_handled = false;
 
@@ -1322,8 +1184,6 @@ impl App {
             focus_handled = true;
         }
 
-=======
->>>>>>> main
         // Handle standard navigation events
         match event {
             Event::Quit => {
@@ -1396,16 +1256,7 @@ impl App {
             }
             Event::Enter => {
                 // Handle enter key based on navigation mode
-<<<<<<< HEAD
                 if self.state.current_screen == Screen::WalletSelection {
-=======
-                if let Some(modal) = &self.state.modal_state {
-                    if modal.is_confirmed() {
-                        self.handle_confirmation();
-                        self.state.modal_state = None;
-                    }
-                } else if self.state.current_screen == Screen::WalletSelection {
->>>>>>> main
                     // Special case: Wallet selection screen should handle Enter directly
                     // without needing to switch to WithinScreen mode first
                     self.handle_screen_specific_event(Event::Enter).await?;
@@ -1424,7 +1275,6 @@ impl App {
                 }
             }
             Event::MoveFocus(direction) => {
-<<<<<<< HEAD
                 // MoveFocus events should already be handled by screen-specific handlers above
                 // If we reach here, it means the screen didn't handle it, so we fall back to global navigation
                 if self.state.navigation_mode == NavigationMode::WithinScreen && !focus_handled {
@@ -1440,62 +1290,6 @@ impl App {
                     {
                         self.update_component_focus(&focused_component);
                     }
-=======
-                if self.state.navigation_mode == NavigationMode::WithinScreen {
-                    // Check if any list is in editing mode - if so, let screen handle the event
-                    let should_handle_as_focus = match self.state.current_screen {
-                        Screen::Swap => {
-                            let swap_state = crate::tui::screens::swap::get_swap_screen_state();
-                            // Always let the swap screen handle all navigation events
-                            // The swap screen has its own internal navigation logic
-                            false
-                        }
-                        Screen::Liquidity => {
-                            let liquidity_state =
-                                crate::tui::screens::liquidity::get_liquidity_screen_state();
-                            // When pool dropdown is focused or in Mode focus, keep arrow keys inside screen
-                            let is_list_or_mode_focus = matches!(
-                                liquidity_state.input_focus,
-                                crate::tui::screens::liquidity::LiquidityInputFocus::PoolSelection
-                                    | crate::tui::screens::liquidity::LiquidityInputFocus::Mode
-                            );
-
-                            // Allow focus movement only if we're NOT inside list/mode focus or editing state
-                            !(is_list_or_mode_focus || liquidity_state.is_any_list_editing())
-                        }
-                        _ => true, // Other screens use normal focus management
-                    };
-
-                    if should_handle_as_focus {
-                        if let Some(focused_component) = self
-                            .state
-                            .focus_manager
-                            .handle_event(&Event::MoveFocus(direction))
-                        {
-                            self.update_component_focus(&focused_component);
-                        }
-                    } else {
-                        // Let the screen-specific handler deal with it
-                        if !self
-                            .handle_screen_specific_event(Event::MoveFocus(direction.clone()))
-                            .await?
-                        {
-                            // If screen didn't handle it, fall back to focus management
-                            if let Some(focused_component) = self
-                                .state
-                                .focus_manager
-                                .handle_event(&Event::MoveFocus(direction.clone()))
-                            {
-                                self.update_component_focus(&focused_component);
-                            }
-                        }
-                    }
-                } else if self.state.current_screen == Screen::WalletSelection {
-                    // Special case: Allow wallet selection screen to handle MoveFocus events even in ScreenLevel mode
-                    // This is needed because wallet selection is often the first screen and needs arrow key navigation
-                    self.handle_screen_specific_event(Event::MoveFocus(direction.clone()))
-                        .await?;
->>>>>>> main
                 }
             }
             Event::ContextAction => {
@@ -1509,7 +1303,6 @@ impl App {
                 self.refresh_current_screen_data().await?;
             }
             _ => {
-<<<<<<< HEAD
                 // Handle character events that need special context-aware processing
                 if let Event::Char(c) = &event {
                     // Handle 'q' as quit only when in ScreenLevel mode (not in text input)
@@ -1520,22 +1313,6 @@ impl App {
                     }
 
                     // Handle number key navigation for tab switching (1-8) when in ScreenLevel mode
-=======
-                // Handle modal events if modal is open
-                if self.state.modal_state.is_some() {
-                    if self.handle_modal_event(&event) {
-                        return Ok(false);
-                    }
-                }
-
-                // Screen-specific handlers should be checked before general navigation
-                if self.handle_screen_specific_event(event.clone()).await? {
-                    return Ok(false);
-                }
-
-                // Handle number key navigation for tab switching (1-8) when in ScreenLevel mode
-                if let Event::Char(c) = &event {
->>>>>>> main
                     if self.state.navigation_mode == NavigationMode::ScreenLevel {
                         if let Some(screen) =
                             crate::tui::components::navigation::number_key_to_screen(*c)
@@ -1628,22 +1405,14 @@ impl App {
                         }
                         "liquidity_slippage_swap" => {
                             liquidity_state.input_focus =
-<<<<<<< HEAD
                                 crate::tui::screens::liquidity::LiquidityInputFocus::SlippageAmount
-=======
-                                crate::tui::screens::liquidity::LiquidityInputFocus::SlippageSwap
->>>>>>> main
                         }
                         _ => {}
                     },
                     FocusableComponent::Dropdown(id) => {
                         if id == "liquidity_pool" {
                             liquidity_state.input_focus =
-<<<<<<< HEAD
                                 crate::tui::screens::liquidity::LiquidityInputFocus::Pool
-=======
-                                crate::tui::screens::liquidity::LiquidityInputFocus::PoolSelection
->>>>>>> main
                         }
                     }
                     FocusableComponent::Button(id) => match id.as_str() {
@@ -1659,7 +1428,6 @@ impl App {
                 // Ensure internal state knows which widget is focused so that render_* helpers style correctly
                 liquidity_state.apply_focus();
             }
-<<<<<<< HEAD
             Screen::Admin => {
                 let admin_state = crate::tui::screens::admin::get_admin_screen_state();
                 // Clear previous internal focus first
@@ -1736,8 +1504,6 @@ impl App {
                 // Ensure internal state knows which widget is focused so that render_* helpers style correctly
                 admin_state.apply_focus();
             }
-=======
->>>>>>> main
             _ => {}
         }
     }
@@ -1764,10 +1530,7 @@ impl App {
                     liquidity_pool_dropdown(),
                     liquidity_amount1_input(),
                     liquidity_amount2_input(),
-<<<<<<< HEAD
                     liquidity_slippage_input(),
-=======
->>>>>>> main
                     liquidity_provide_button(),
                     liquidity_withdraw_button(),
                 ]
@@ -1778,7 +1541,6 @@ impl App {
                 rewards_history_table(),
             ],
             Screen::Admin => vec![
-<<<<<<< HEAD
                 // Pool Management tab components
                 crate::tui::events::FocusableComponent::Dropdown(
                     "admin_pool_selection".to_string(),
@@ -1832,17 +1594,6 @@ impl App {
                 crate::tui::events::FocusableComponent::Button("settings_auto_refresh".to_string()),
                 
                 // Action buttons
-=======
-                admin_asset1_input(),
-                admin_asset2_input(),
-                admin_fee_input(),
-                admin_create_pool_button(),
-            ],
-            Screen::Settings => vec![
-                settings_network_dropdown(),
-                settings_rpc_input(),
-                settings_wallet_input(),
->>>>>>> main
                 settings_save_button(),
                 settings_reset_button(),
             ],
@@ -1906,7 +1657,6 @@ impl App {
                         error: None,
                     });
                 }
-<<<<<<< HEAD
                 // Update liquidity screen pool dropdown with cached pools
                 self.update_liquidity_screen_pools();
             }
@@ -1924,8 +1674,6 @@ impl App {
                 }
                 // Update admin screen pool dropdown with cached pools
                 self.update_admin_screen_pools();
-=======
->>>>>>> main
             }
             _ => {}
         }
@@ -2040,7 +1788,6 @@ impl App {
         // The hardcoded test balances have been removed to show actual wallet balances
     }
 
-<<<<<<< HEAD
     /// Update admin screen pools dropdown with available pools
     fn update_admin_screen_pools(&mut self) {
         // Extract all available pools from cache for admin operations
@@ -2175,8 +1922,6 @@ impl App {
         crate::tui::screens::liquidity::update_liquidity_pools(available_pools);
     }
 
-=======
->>>>>>> main
     /// Handle enter key based on current focus
     async fn handle_enter_key(&mut self) -> Result<(), Error> {
         let focused = self.state.focus_manager.current_focus().cloned();
@@ -2239,11 +1984,7 @@ impl App {
                     if let Ok(pool_id) = pool_id_str.parse::<u64>() {
                         if let Some(sender) = &self.event_sender {
                             let _ = sender.send(Event::ProvideLiquidity {
-<<<<<<< HEAD
                                 pool_id: pool_id.to_string(),
-=======
-                                pool_id,
->>>>>>> main
                                 asset_1_amount: liquidity_state.first_asset_amount,
                                 asset_2_amount: liquidity_state.second_asset_amount,
                                 slippage_tolerance: Some(liquidity_state.slippage_amount),
@@ -2312,10 +2053,7 @@ impl App {
             Screen::WalletSelection => self.handle_wallet_selection_event(event).await,
             Screen::Swap => self.handle_swap_screen_event(event).await,
             Screen::Liquidity => self.handle_liquidity_screen_event(event).await,
-<<<<<<< HEAD
             Screen::Admin => self.handle_admin_screen_event(event).await,
-=======
->>>>>>> main
             Screen::Settings => self.handle_settings_screen_event(event).await,
             _ => Ok(false),
         }
@@ -2326,22 +2064,14 @@ impl App {
         use crate::tui::screens::wallet_selection::{WalletSelectionAction, WalletSelectionState};
 
         match event {
-<<<<<<< HEAD
             Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
-=======
-            Event::Up | Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
->>>>>>> main
                 if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet
                 {
                     self.state.wallet_selection_state.move_selection_up();
                     return Ok(true);
                 }
             }
-<<<<<<< HEAD
             Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
-=======
-            Event::Down | Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
->>>>>>> main
                 if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet
                 {
                     self.state.wallet_selection_state.move_selection_down();
@@ -2514,7 +2244,6 @@ impl App {
     async fn handle_swap_screen_event(&mut self, event: Event) -> Result<bool, Error> {
         let swap_state = crate::tui::screens::swap::get_swap_screen_state();
 
-<<<<<<< HEAD
         // Handle MoveFocus events directly for better arrow key navigation
         match &event {
             Event::MoveFocus(direction) => {
@@ -2569,54 +2298,11 @@ impl App {
                 return Ok(false);
             }
             _ => {}
-=======
-        // Convert Event to KeyEvent for the new list system
-        let key_event = match &event {
-            Event::MoveFocus(direction) => {
-                // Convert focus events to direct key events for list navigation
-                match direction {
-                    crate::tui::events::FocusDirection::Up => {
-                        Some(crossterm::event::KeyEvent::new(
-                            crossterm::event::KeyCode::Up,
-                            crossterm::event::KeyModifiers::NONE,
-                        ))
-                    }
-                    crate::tui::events::FocusDirection::Down => {
-                        Some(crossterm::event::KeyEvent::new(
-                            crossterm::event::KeyCode::Down,
-                            crossterm::event::KeyModifiers::NONE,
-                        ))
-                    }
-                    _ => None,
-                }
-            }
-            _ => None,
-        };
-
-        if let Some(key) = key_event {
-            // Use the new key event handler
-            if swap_state.handle_key_event(key, self.state.navigation_mode) {
-                // Update app state with changes from swap screen
-                if let Some(selected_value) = swap_state.pool_dropdown.get_selected_value() {
-                    if let Ok(pool_id) = selected_value.parse::<u64>() {
-                        self.state.swap_state.selected_pool_id = Some(pool_id.to_string());
-                    }
-                }
-                if let Some(selected_token) = swap_state.from_token_dropdown.get_selected_value() {
-                    self.state.swap_state.from_asset = Some(selected_token.to_string());
-                }
-                self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
-                self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
-
-                return Ok(true);
-            }
->>>>>>> main
         }
 
         // Handle other swap-specific events
         match event {
             Event::Tab => {
-<<<<<<< HEAD
                 // Only handle Tab navigation between form fields when in WithinScreen mode
                 if self.state.navigation_mode == NavigationMode::WithinScreen {
                     swap_state.next_focus();
@@ -2637,16 +2323,6 @@ impl App {
                     // In ScreenLevel mode, let global navigation handle BackTab for screen switching
                     return Ok(false);
                 }
-=======
-                // Handle Tab navigation between form fields
-                swap_state.next_focus();
-                return Ok(true);
-            }
-            Event::BackTab => {
-                // Handle Shift+Tab (reverse navigation) between form fields
-                swap_state.previous_focus();
-                return Ok(true);
->>>>>>> main
             }
             Event::Enter => {
                 // Handle selection for currently focused list or execute button
@@ -2655,10 +2331,7 @@ impl App {
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
-<<<<<<< HEAD
                     self.sync_swap_state_to_app(swap_state);
-=======
->>>>>>> main
                     // Check if execute button was pressed by examining the current focus
                     if matches!(
                         swap_state.input_focus,
@@ -2691,10 +2364,7 @@ impl App {
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
-<<<<<<< HEAD
                     self.sync_swap_state_to_app(swap_state);
-=======
->>>>>>> main
                     return Ok(true);
                 }
             }
@@ -2705,30 +2375,7 @@ impl App {
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
-<<<<<<< HEAD
                     self.sync_swap_state_to_app(swap_state);
-=======
-                    return Ok(true);
-                }
-            }
-            Event::Up => {
-                // Handle up arrow for lists
-                let key_event = crossterm::event::KeyEvent::new(
-                    crossterm::event::KeyCode::Up,
-                    crossterm::event::KeyModifiers::NONE,
-                );
-                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
-                    return Ok(true);
-                }
-            }
-            Event::Down => {
-                // Handle down arrow for lists
-                let key_event = crossterm::event::KeyEvent::new(
-                    crossterm::event::KeyCode::Down,
-                    crossterm::event::KeyModifiers::NONE,
-                );
-                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
->>>>>>> main
                     return Ok(true);
                 }
             }
@@ -2768,7 +2415,6 @@ impl App {
         Ok(false)
     }
 
-<<<<<<< HEAD
     /// Sync swap screen state back to app state
     fn sync_swap_state_to_app(&mut self, swap_state: &crate::tui::screens::swap::SwapScreenState) {
         // Update app state with changes from swap screen
@@ -2784,8 +2430,6 @@ impl App {
         self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
     }
 
-=======
->>>>>>> main
     /// Handle liquidity screen specific events. Returns `true` if the event was handled.
     async fn handle_liquidity_screen_event(&mut self, event: Event) -> Result<bool, Error> {
         let liquidity_state = liquidity::get_liquidity_screen_state();
@@ -2854,7 +2498,6 @@ impl App {
         };
 
         // Handle the event using the new key event system (similar to swap screen)
-<<<<<<< HEAD
         let mut key_handled = false;
         let mut pool_changed = false;
         if let Some(key_event) = key_event {
@@ -2897,17 +2540,6 @@ impl App {
         // Handle specific events that don't need key conversion
         match event {
             Event::MoveFocus(crate::tui::events::FocusDirection::Right) => {
-=======
-        if let Some(key_event) = key_event {
-            if liquidity_state.handle_key_event(key_event, self.state.navigation_mode) {
-                return Ok(true);
-            }
-        }
-
-        // Handle specific events that don't need key conversion
-        match event {
-            Event::Right => {
->>>>>>> main
                 // Handle direct right arrow for tab switching
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Right,
@@ -2917,11 +2549,7 @@ impl App {
                     return Ok(true);
                 }
             }
-<<<<<<< HEAD
             Event::MoveFocus(crate::tui::events::FocusDirection::Left) => {
-=======
-            Event::Left => {
->>>>>>> main
                 // Handle direct left arrow for tab switching
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Left,
@@ -2931,11 +2559,7 @@ impl App {
                     return Ok(true);
                 }
             }
-<<<<<<< HEAD
             Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
-=======
-            Event::Up => {
->>>>>>> main
                 // Handle up arrow for lists
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Up,
@@ -2945,11 +2569,7 @@ impl App {
                     return Ok(true);
                 }
             }
-<<<<<<< HEAD
             Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
-=======
-            Event::Down => {
->>>>>>> main
                 // Handle down arrow for lists
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Down,
@@ -2965,7 +2585,6 @@ impl App {
         Ok(false)
     }
 
-<<<<<<< HEAD
     /// Handle admin screen specific events. Returns `true` if the event was handled.
     async fn handle_admin_screen_event(&mut self, event: Event) -> Result<bool, Error> {
         let admin_state = crate::tui::screens::admin::get_admin_screen_state();
@@ -3061,37 +2680,11 @@ impl App {
                         if let Err(e) = self.handle_pool_management_execute_confirmation() {
                             self.set_error(format!("Pool management preparation failed: {}", e));
                         }
-=======
-    /// Handle settings screen specific events. Returns `true` if the event was handled.
-    async fn handle_settings_screen_event(&mut self, event: Event) -> Result<bool, Error> {
-        match event {
-            Event::Char(c) => {
-                self.handle_settings_input(c).await?;
-                return Ok(true);
-            }
-            Event::MoveFocus(direction) => {
-                // Handle focus movement within settings screen
-                match direction {
-                    crate::tui::events::FocusDirection::Next => {
-                        self.state.focus_manager.focus_next();
-                    }
-                    crate::tui::events::FocusDirection::Previous => {
-                        self.state.focus_manager.focus_previous();
-                    }
-                    crate::tui::events::FocusDirection::Up => {
-                        // Navigate to previous section
-                        self.state.settings_state.previous_section();
-                    }
-                    crate::tui::events::FocusDirection::Down => {
-                        // Navigate to next section
-                        self.state.settings_state.next_section();
->>>>>>> main
                     }
                     _ => {}
                 }
                 return Ok(true);
             }
-<<<<<<< HEAD
         }
 
         // Handle other key events
@@ -3438,24 +3031,10 @@ impl App {
                                 }
                                 "settings_balance_refresh" | "settings_pool_refresh" | "settings_decimal_precision" => {
                                     let _ = self.state.settings_state.handle_backspace();
-=======
-            Event::Enter => {
-                // Handle enter key in settings
-                if let Some(focused) = self.state.focus_manager.current_focus() {
-                    match focused {
-                        crate::tui::events::FocusableComponent::Button(button_id) => {
-                            match button_id.as_str() {
-                                "settings_save" => {
-                                    self.handle_settings_action().await?;
-                                }
-                                "settings_reset" => {
-                                    self.state.settings_state.reset_to_defaults();
->>>>>>> main
                                 }
                                 _ => {}
                             }
                         }
-<<<<<<< HEAD
                     }
                     return Ok(true);
                 }
@@ -3479,65 +3058,6 @@ impl App {
         }
         
         // If not handled in content mode, return false to allow global handling
-=======
-                        crate::tui::events::FocusableComponent::Dropdown(dropdown_id) => {
-                            // Toggle dropdown or handle selection
-                            match dropdown_id.as_str() {
-                                "settings_network" => {
-                                    self.state.settings_state.toggle_network_environment();
-                                }
-                                _ => {}
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                return Ok(true);
-            }
-            Event::Escape => {
-                // Handle escape key - close confirmation modal or go back
-                if self.state.settings_state.show_confirmation {
-                    self.state.settings_state.show_confirmation = false;
-                } else if self.state.settings_state.message.is_some() {
-                    self.state.settings_state.clear_message();
-                }
-                return Ok(true);
-            }
-            Event::Backspace => {
-                // Handle backspace for text input fields
-                if let Some(focused) = self.state.focus_manager.current_focus() {
-                    if let crate::tui::events::FocusableComponent::TextInput(field_id) = focused {
-                        match field_id.as_str() {
-                            "settings_rpc" => {
-                                let _ = self.state.settings_state.handle_backspace();
-                            }
-                            "settings_wallet" => {
-                                let _ = self.state.settings_state.handle_backspace();
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                return Ok(true);
-            }
-            Event::ContextAction => {
-                // Handle space bar context actions
-                match self.state.settings_state.current_section {
-                    crate::tui::screens::settings::SettingsSection::Network => {
-                        self.state.settings_state.toggle_network_environment();
-                    }
-                    crate::tui::screens::settings::SettingsSection::Display => {
-                        self.state.settings_state.toggle_theme();
-                    }
-                    crate::tui::screens::settings::SettingsSection::Wallet => {
-                        self.state.settings_state.toggle_import_mode();
-                    }
-                }
-                return Ok(true);
-            }
-            _ => {}
-        }
->>>>>>> main
         Ok(false)
     }
 
@@ -3622,7 +3142,6 @@ impl App {
             operation_id: None,
         };
 
-<<<<<<< HEAD
         // Always show loading modal for user feedback
         self.state.modal_state = Some(ModalState::loading(
             "Processing".to_string(),
@@ -3630,17 +3149,6 @@ impl App {
             progress,
             can_cancel,
         ));
-=======
-        // Show loading modal for long operations
-        if can_cancel || progress.is_some() {
-            self.state.modal_state = Some(ModalState::loading(
-                "Processing".to_string(),
-                message,
-                progress,
-                can_cancel,
-            ));
-        }
->>>>>>> main
     }
 
     /// Update loading progress
@@ -3724,7 +3232,6 @@ impl App {
     pub fn handle_modal_event(&mut self, event: &Event) -> bool {
         if let Some(ref mut modal) = self.state.modal_state {
             match event {
-<<<<<<< HEAD
                 Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
                     modal.scroll_up();
                     return true;
@@ -3738,26 +3245,10 @@ impl App {
                     return true;
                 }
                 Event::MoveFocus(crate::tui::events::FocusDirection::Right) => {
-=======
-                Event::Up => {
-                    modal.scroll_up();
-                    return true;
-                }
-                Event::Down => {
-                    modal.scroll_down();
-                    return true;
-                }
-                Event::Left => {
-                    modal.select_previous();
-                    return true;
-                }
-                Event::Right => {
->>>>>>> main
                     modal.select_next();
                     return true;
                 }
                 Event::Enter => {
-<<<<<<< HEAD
                     // For confirmation modals, Enter should execute the currently selected option
                     match &modal.modal_type {
                         crate::tui::components::modals::ModalType::Confirmation { .. } => {
@@ -3799,21 +3290,6 @@ impl App {
                             // For other modal types, just close the modal
                             self.state.modal_state = None;
                         }
-=======
-                    // Handle confirmation or retry
-                    let should_retry = modal.is_retry_selected();
-                    let is_confirmed = modal.is_confirmed();
-
-                    // Clear modal first
-                    self.state.modal_state = None;
-
-                    if should_retry {
-                        // Implement retry logic based on the last failed operation
-                        self.retry_last_operation();
-                    } else if is_confirmed {
-                        // Handle confirmation actions
-                        self.handle_confirmation();
->>>>>>> main
                     }
                     return true;
                 }
@@ -3855,16 +3331,11 @@ impl App {
 
     /// Handle confirmation actions
     fn handle_confirmation(&mut self) {
-<<<<<<< HEAD
         // Clone the modal state to check its contents before clearing it
         let modal_state_clone = self.state.modal_state.clone();
 
         if let Some(ref modal_state) = modal_state_clone {
             // Check if this is a quit confirmation by examining the modal title
-=======
-        // Check if this is a quit confirmation by examining the modal title
-        if let Some(ref modal_state) = self.state.modal_state {
->>>>>>> main
             if let crate::tui::components::modals::ModalType::Confirmation { title, .. } =
                 &modal_state.modal_type
             {
@@ -3875,7 +3346,6 @@ impl App {
                     return;
                 }
             }
-<<<<<<< HEAD
 
             // Check if this is a swap confirmation modal
             if self.state.current_screen == Screen::Swap {
@@ -4025,37 +3495,6 @@ impl App {
             self.state.modal_state = None;
             self.set_status("Action cancelled".to_string());
         }
-=======
-        }
-
-        // Handle confirmation dialog result based on current screen
-        if let Some(ref modal_state) = self.state.modal_state.clone() {
-            if modal_state.is_confirmed() {
-                // Check if this is a swap confirmation modal
-                if self.state.current_screen == Screen::Swap {
-                    // Handle swap confirmation
-                    if let Some(swap_event) =
-                        crate::tui::screens::swap::handle_confirmation_response(true)
-                    {
-                        // Process the swap event immediately
-                        if let Some(sender) = self.event_sender.as_ref() {
-                            let _ = sender.send(swap_event);
-                        }
-                    }
-                } else {
-                    // Handle other confirmation types
-                    self.set_status("Action confirmed".to_string());
-                }
-            } else {
-                // Handle cancellation
-                if self.state.current_screen == Screen::Swap {
-                    let _ = crate::tui::screens::swap::handle_confirmation_response(false);
-                }
-                self.set_status("Action cancelled".to_string());
-            }
-        }
-        self.state.modal_state = None;
->>>>>>> main
     }
 
     /// Navigate to a specific screen
@@ -4082,7 +3521,6 @@ impl App {
             Screen::Liquidity => {
                 // Initialize liquidity screen focus state
                 crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
-<<<<<<< HEAD
                 // Update liquidity screen pools when entering screen
                 self.update_liquidity_screen_pools();
             }
@@ -4091,8 +3529,6 @@ impl App {
                 crate::tui::screens::admin::initialize_admin_screen_focus();
                 // Update admin screen pools when entering screen
                 self.update_admin_screen_pools();
-=======
->>>>>>> main
             }
             _ => {}
         }
@@ -4119,7 +3555,6 @@ impl App {
             Screen::Liquidity => {
                 // Initialize liquidity screen focus state
                 crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
-<<<<<<< HEAD
                 // Update liquidity screen pools when entering screen
                 self.update_liquidity_screen_pools();
             }
@@ -4128,8 +3563,6 @@ impl App {
                 crate::tui::screens::admin::initialize_admin_screen_focus();
                 // Update admin screen pools when entering screen
                 self.update_admin_screen_pools();
-=======
->>>>>>> main
             }
             _ => {}
         }
@@ -4160,7 +3593,6 @@ impl App {
             Screen::Liquidity => {
                 // Initialize liquidity screen focus state
                 crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
-<<<<<<< HEAD
                 // Update liquidity screen pools when entering screen
                 self.update_liquidity_screen_pools();
             }
@@ -4169,8 +3601,6 @@ impl App {
                 crate::tui::screens::admin::initialize_admin_screen_focus();
                 // Update admin screen pools when entering screen
                 self.update_admin_screen_pools();
-=======
->>>>>>> main
             }
             _ => {}
         }
@@ -4223,7 +3653,6 @@ impl App {
                     if self.state.current_screen == Screen::Swap {
                         self.update_swap_screen_pools();
                     }
-<<<<<<< HEAD
                     // Update liquidity screen pools if currently on liquidity screen
                     if self.state.current_screen == Screen::Liquidity {
                         self.update_liquidity_screen_pools();
@@ -4232,8 +3661,6 @@ impl App {
                     if self.state.current_screen == Screen::Admin {
                         self.update_admin_screen_pools();
                     }
-=======
->>>>>>> main
                 }
             }
             "transactions" => {
@@ -4416,15 +3843,11 @@ impl App {
         // Only refresh data if we have a connected wallet, otherwise just refresh network info
         if self.state.wallet_address.is_none() {
             // No wallet connected - only refresh basic network info
-<<<<<<< HEAD
             self.set_loading_with_progress(
                 "Refreshing network data...".to_string(),
                 Some(10.0),
                 false,
             );
-=======
-            self.set_loading("Refreshing network data...".to_string());
->>>>>>> main
 
             let mut errors = Vec::new();
 
@@ -4440,12 +3863,9 @@ impl App {
                 }
             }
 
-<<<<<<< HEAD
             // Update progress - fetching pool data
             self.update_loading_progress(80.0, Some("Fetching pool information...".to_string()));
 
-=======
->>>>>>> main
             // Refresh pool data (limited to avoid overwhelming)
             match self.client.get_pools(Some(20)).await {
                 Ok(pools) => {
@@ -4481,7 +3901,6 @@ impl App {
         }
 
         // Refresh balances, network info, and other dashboard data (wallet connected)
-<<<<<<< HEAD
         self.set_loading_with_progress(
             "Refreshing dashboard data...".to_string(),
             Some(10.0),
@@ -4507,12 +3926,6 @@ impl App {
         // Update progress - fetching balances
         self.update_loading_progress(40.0, Some("Fetching wallet balances...".to_string()));
 
-=======
-        self.set_loading("Refreshing dashboard data...".to_string());
-
-        let mut errors = Vec::new();
-
->>>>>>> main
         // Refresh balances if wallet is connected
         if let Some(address) = &self.state.wallet_address.clone() {
             match self.client.get_balances().await {
@@ -4532,12 +3945,9 @@ impl App {
             }
         }
 
-<<<<<<< HEAD
         // Update progress - fetching network info
         self.update_loading_progress(70.0, Some("Fetching network information...".to_string()));
 
-=======
->>>>>>> main
         // Refresh network info
         match self.client.get_last_block_height().await {
             Ok(height) => {
@@ -4754,7 +4164,6 @@ impl App {
                     }
                 }
             }
-<<<<<<< HEAD
             // Add MoveFocus event handling for wizard navigation
             Event::MoveFocus(direction) => {
                 match self.state.wizard_state.current_step {
@@ -4785,8 +4194,6 @@ impl App {
                     _ => {} // Other steps don't need MoveFocus handling
                 }
             }
-=======
->>>>>>> main
             Event::Tab => {
                 // Navigate between options in current step
                 match self.state.wizard_state.current_step {
@@ -5132,7 +4539,6 @@ impl App {
     /// Get token decimals for a given denomination
     /// Most Mantra tokens use 6 decimals
     pub fn get_token_decimals(&self, denom: &str) -> u8 {
-<<<<<<< HEAD
         // Check cache first
         if let Some(&decimals) = self.state.asset_decimals_cache.get(denom) {
             return decimals;
@@ -5144,17 +4550,10 @@ impl App {
             d if d.starts_with("factory/") => 6, // Most factory tokens use 6 decimals
             d if d.starts_with("ibc/") => 6,     // Most IBC tokens use 6 decimals
             d if d.starts_with("pool/") || d.contains("/lp/") => 6, // LP tokens
-=======
-        // Most tokens on Mantra use 6 decimals
-        match denom {
-            "uom" => 6,
-            d if d.starts_with("factory/") => 6, // Most factory tokens use 6 decimals
->>>>>>> main
             _ => 6,                              // Default to 6 decimals
         }
     }
 
-<<<<<<< HEAD
     /// Refresh asset decimals cache from blockchain data
     pub async fn refresh_asset_decimals_cache(&mut self) -> Result<(), Error> {
         match self.client.get_asset_decimals_from_pools().await {
@@ -5195,8 +4594,6 @@ impl App {
         formatted_balances
     }
 
-=======
->>>>>>> main
     /// Convert micro amount to actual token amount
     /// Divides by 10^decimals to get the real amount
     pub fn micro_to_token_amount(&self, amount: &str, denom: &str) -> String {
@@ -5246,12 +4643,6 @@ impl App {
             slippage_tolerance
         ));
 
-<<<<<<< HEAD
-=======
-        // Show loading state
-        self.set_loading("Executing swap transaction...".to_string());
-
->>>>>>> main
         // Validate that we have a valid pool ID
         let pool_id_str = match pool_id {
             Some(id) => {
@@ -5436,7 +4827,6 @@ impl App {
                     crate::tui::utils::logger::log_info("Transaction executed successfully!");
                 }
 
-<<<<<<< HEAD
                 // Final progress update
                 self.update_loading_progress(
                     100.0,
@@ -5454,45 +4844,11 @@ impl App {
                     &to_asset,
                     &amount,
                     &execution_time,
-=======
-                // Swap succeeded - show success modal
-                let tx_hash = tx_response.txhash;
-                let success_details = vec![
-                    format!("Swapped: {} {} → {} {}", amount, from_asset, "~", to_asset),
-                    format!("Pool ID: {}", pool_id_str),
-                    format!("Transaction Hash: {}", tx_hash),
-                    format!("Gas Used: {}", tx_response.gas_used),
-                    format!("Gas Wanted: {}", tx_response.gas_wanted),
-                ];
-
-                // Show success modal with transaction details
-                self.state.modal_state = Some(
-                    crate::tui::components::modals::ModalState::transaction_details(
-                        tx_hash.clone(),
-                        "Success".to_string(),
-                        vec![
-                            ("Operation".to_string(), "Token Swap".to_string()),
-                            ("From".to_string(), format!("{} {}", amount, from_asset)),
-                            (
-                                "To".to_string(),
-                                format!("~{} {}", amount_f64 * 0.95, to_asset),
-                            ), // Estimated
-                            ("Pool ID".to_string(), pool_id_str),
-                            ("Gas Used".to_string(), tx_response.gas_used.to_string()),
-                            ("Gas Wanted".to_string(), tx_response.gas_wanted.to_string()),
-                            ("Status".to_string(), "Completed".to_string()),
-                        ],
-                    ),
->>>>>>> main
                 );
 
                 // Add to transaction history
                 let tx_info = TransactionInfo {
-<<<<<<< HEAD
                     hash: tx_response.txhash.clone(),
-=======
-                    hash: tx_hash.clone(),
->>>>>>> main
                     status: TransactionStatus::Success,
                     operation_type: "Swap".to_string(),
                     timestamp: chrono::Utc::now(),
@@ -5501,15 +4857,6 @@ impl App {
                 };
                 self.add_transaction(tx_info);
 
-<<<<<<< HEAD
-=======
-                // Update loading state to success
-                self.state.loading_state = LoadingState::success_with_details(
-                    "Swap completed successfully!".to_string(),
-                    success_details,
-                );
-
->>>>>>> main
                 // Reset swap form
                 crate::tui::screens::swap::reset_swap_form();
 
@@ -5523,22 +4870,14 @@ impl App {
                 );
                 crate::tui::utils::logger::log_info(&format!(
                     "Final transaction hash: {}",
-<<<<<<< HEAD
                     tx_response.txhash
-=======
-                    tx_hash
->>>>>>> main
                 ));
                 crate::tui::utils::logger::log_info(
                     "Transaction should be visible on Mantra testnet explorer",
                 );
                 crate::tui::utils::logger::log_info(&format!(
                     "Explorer URL: https://explorer.mantrachain.io/Mantra-Dukong/tx/{}",
-<<<<<<< HEAD
                     tx_response.txhash
-=======
-                    tx_hash
->>>>>>> main
                 ));
 
                 Ok(())
@@ -5998,7 +5337,6 @@ impl App {
 
         Ok(())
     }
-<<<<<<< HEAD
 
     /// Show swap success modal with comprehensive transaction details
     pub fn show_swap_success_modal(
@@ -6353,7 +5691,11 @@ impl App {
         let mut details = vec![("Result".to_string(), result.to_string())];
 
         if let Some(tx_hash) = transaction_hash {
-            details.push(("Transaction".to_string(), tx_hash.clone()));
+            details.push(("Transaction Hash".to_string(), tx_hash.clone()));
+            
+            // Add Mantra explorer link
+            let explorer_url = format!("https://explorer.mantrachain.io/Mantra-Dukong/tx/{}", tx_hash);
+            details.push(("Explorer Link".to_string(), explorer_url));
         }
 
         // Parse enhanced data if available
@@ -6548,6 +5890,4 @@ impl App {
             format!("{:.6}", amount_f64)
         }
     }
-=======
->>>>>>> main
 }

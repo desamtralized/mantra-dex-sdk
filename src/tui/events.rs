@@ -60,11 +60,6 @@ pub enum Event {
     Enter,
     /// Escape/cancel action
     Escape,
-    /// Arrow key navigation
-    Up,
-    Down,
-    Left,
-    Right,
     /// Character input
     Char(char),
     /// Backspace key
@@ -127,7 +122,6 @@ pub enum Event {
         pool_id: Option<String>,
         slippage_tolerance: Option<String>,
     },
-<<<<<<< HEAD
     /// Execute a swap operation asynchronously
     ExecuteSwapAsync {
         from_asset: String,
@@ -156,9 +150,7 @@ pub enum Event {
         claim_all: bool,
     },
     /// Execute multi-hop swap
-    ExecuteMultiHopSwap {
-        operations: Vec<SwapOperation>,
-    },
+    ExecuteMultiHopSwap { operations: Vec<SwapOperation> },
     /// Create a new pool (admin)
     CreatePool {
         asset_1: String,
@@ -196,10 +188,7 @@ pub enum Event {
         enhanced_data: Option<String>,
     },
     /// Blockchain operation failed
-    BlockchainError {
-        operation: String,
-        error: String,
-    },
+    BlockchainError { operation: String, error: String },
     /// Blockchain operation is in progress
     BlockchainProgress {
         operation: String,
@@ -243,6 +232,7 @@ pub struct ProvideResultWrapper {
     pub user_lp_balance_after: Option<cosmwasm_std::Uint128>,
     pub pool_total_supply: Option<cosmwasm_std::Uint128>,
 }
+
 /// Event handler for processing terminal events
 pub struct EventHandler {
     /// Receiver for events
@@ -1155,6 +1145,7 @@ impl AsyncBlockchainProcessor {
             })
         }
     }
+
     /// Refresh data from blockchain
     pub async fn refresh_data(&self, data_type: String) {
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -1601,7 +1592,7 @@ mod tests {
         assert!(EventHandler::is_blockchain_action(&swap_event));
 
         let liquidity_event = Event::ProvideLiquidity {
-            pool_id: "1".to_string(),
+            pool_id: 1,
             asset_1_amount: "100".to_string(),
             asset_2_amount: "50".to_string(),
             slippage_tolerance: Some("0.01".to_string()),
@@ -1649,13 +1640,13 @@ mod tests {
         let swap_op = SwapOperation {
             from_asset: "USDC".to_string(),
             to_asset: "OM".to_string(),
-            pool_id: "1".to_string(),
+            pool_id: 1,
             amount: "100".to_string(),
         };
 
         assert_eq!(swap_op.from_asset, "USDC");
         assert_eq!(swap_op.to_asset, "OM");
-        assert_eq!(swap_op.pool_id, "1");
+        assert_eq!(swap_op.pool_id, 1);
         assert_eq!(swap_op.amount, "100");
     }
 

@@ -237,13 +237,9 @@ impl WizardState {
         }
 
         // Validate password strength
-<<<<<<< HEAD
         if let Err(validation_error) =
             crate::wallet::WalletStorage::default().validate_password(&self.save_password)
         {
-=======
-        if let Err(validation_error) = crate::wallet::WalletStorage::default().validate_password(&self.save_password) {
->>>>>>> main
             errors.push(format!("Password error: {}", validation_error));
         }
 
@@ -467,7 +463,6 @@ fn render_welcome_step(frame: &mut Frame, area: Rect) {
         Line::from(""),
         Line::from("The setup process takes about 2-3 minutes."),
         Line::from(""),
-<<<<<<< HEAD
         Line::from(""),
         Line::from(vec![
             Span::styled("▶️  READY TO CONTINUE?", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
@@ -477,12 +472,6 @@ fn render_welcome_step(frame: &mut Frame, area: Rect) {
             Span::styled("Press ", Style::default()),
             Span::styled(
                 "Enter ↵",
-=======
-        Line::from(vec![
-            Span::styled("Press ", Style::default()),
-            Span::styled(
-                "Enter",
->>>>>>> main
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
@@ -492,16 +481,12 @@ fn render_welcome_step(frame: &mut Frame, area: Rect) {
                 "Esc",
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
-<<<<<<< HEAD
             Span::styled(" to exit", Style::default()),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled("💡 Hint: ", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
             Span::styled("If nothing happens when you press Enter, try pressing it again or check your terminal settings.", Style::default().fg(Color::Gray)),
-=======
-            Span::styled(" to skip (not recommended)", Style::default()),
->>>>>>> main
         ]),
     ];
 
@@ -537,10 +522,7 @@ fn render_network_step(frame: &mut Frame, area: Rect, wizard_state: &WizardState
         Line::from("Choose the network you want to connect to:"),
         Line::from(""),
         Line::from("⚠️  Mainnet uses real assets - Testnet is safer for learning"),
-<<<<<<< HEAD
         Line::from("Use ↑/↓ arrows or Tab to change selection"),
-=======
->>>>>>> main
     ];
 
     let explanation_widget = Paragraph::new(Text::from(explanation));
@@ -555,12 +537,8 @@ fn render_network_step(frame: &mut Frame, area: Rect, wizard_state: &WizardState
     let network_items: Vec<ListItem> = networks
         .iter()
         .map(|(network, description)| {
-<<<<<<< HEAD
             let is_selected = *network == wizard_state.selected_network;
             let style = if is_selected {
-=======
-            let style = if *network == wizard_state.selected_network {
->>>>>>> main
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD)
@@ -568,32 +546,21 @@ fn render_network_step(frame: &mut Frame, area: Rect, wizard_state: &WizardState
                 Style::default()
             };
 
-<<<<<<< HEAD
             let selected_indicator = if is_selected { "► " } else { "  " };
 
             // Add visual selection indicator
             let selection_status = if is_selected { " ✓ SELECTED" } else { "" };
-=======
-            let selected_indicator = if *network == wizard_state.selected_network {
-                "► "
-            } else {
-                "  "
-            };
->>>>>>> main
 
             ListItem::new(vec![
                 Line::from(vec![
                     Span::styled(selected_indicator, style),
                     Span::styled(network.display_name(), style),
-<<<<<<< HEAD
                     Span::styled(
                         selection_status,
                         Style::default()
                             .fg(Color::Green)
                             .add_modifier(Modifier::BOLD),
                     ),
-=======
->>>>>>> main
                 ]),
                 Line::from(vec![
                     Span::raw("    "),
@@ -616,19 +583,11 @@ fn render_network_step(frame: &mut Frame, area: Rect, wizard_state: &WizardState
 
     frame.render_widget(network_list, chunks[1]);
 
-<<<<<<< HEAD
     // Controls - Updated to reflect all available navigation methods
     let controls = vec![Line::from(vec![
         Span::styled("Press ", Style::default()),
         Span::styled(
             "↑/↓ or Tab",
-=======
-    // Controls
-    let controls = vec![Line::from(vec![
-        Span::styled("Press ", Style::default()),
-        Span::styled(
-            "↑/↓",
->>>>>>> main
             Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
@@ -1091,11 +1050,7 @@ fn render_confirmation_step(frame: &mut Frame, area: Rect, wizard_state: &Wizard
 impl Drop for WizardState {
     fn drop(&mut self) {
         self.clear_wallet_save_data();
-<<<<<<< HEAD
 
-=======
-        
->>>>>>> main
         // Also clear mnemonic input for security
         unsafe {
             let mnemonic_bytes = self.mnemonic_input.as_bytes_mut();
@@ -1104,11 +1059,7 @@ impl Drop for WizardState {
             }
         }
         self.mnemonic_input.clear();
-<<<<<<< HEAD
 
-=======
-        
->>>>>>> main
         // Clear generated mnemonic if present
         if let Some(ref mut generated) = self.generated_mnemonic {
             unsafe {
@@ -1162,7 +1113,6 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
     // --------------------------------------------------
     let save_toggle_focused = wizard_state.wallet_save_focus == WalletSaveField::SaveToggle;
     let save_option_lines = vec![Line::from(vec![
-<<<<<<< HEAD
         Span::styled(
             "Save wallet: ",
             Style::default().add_modifier(Modifier::BOLD),
@@ -1187,23 +1137,12 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
             )
-=======
-        Span::styled("Save wallet: ", Style::default().add_modifier(Modifier::BOLD)),
-        if wizard_state.save_wallet {
-            Span::styled("✅ Yes", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-        } else {
-            Span::styled("❌ No (Skip)", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
-        },
-        if save_toggle_focused {
-            Span::styled(" ← FOCUSED", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
->>>>>>> main
         } else {
             Span::styled("", Style::default())
         },
     ])];
 
     let save_option_widget = Paragraph::new(Text::from(save_option_lines))
-<<<<<<< HEAD
         .block(
             Block::default()
                 .borders(Borders::ALL)
@@ -1213,15 +1152,6 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
                     Style::default().fg(Color::Gray)
                 }),
         )
-=======
-        .block(Block::default()
-            .borders(Borders::ALL)
-            .border_style(if save_toggle_focused {
-                Style::default().fg(Color::Yellow)
-            } else {
-                Style::default().fg(Color::Gray)
-            }))
->>>>>>> main
         .alignment(Alignment::Center);
     frame.render_widget(save_option_widget, chunks[1]);
 
@@ -1250,15 +1180,11 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
         .block(
             Block::default()
                 .borders(Borders::ALL)
-<<<<<<< HEAD
                 .title(if name_focused {
                     " Wallet Name [FOCUSED] "
                 } else {
                     " Wallet Name "
                 })
-=======
-                .title(if name_focused { " Wallet Name [FOCUSED] " } else { " Wallet Name " })
->>>>>>> main
                 .border_style(if name_focused {
                     Style::default().fg(Color::Yellow)
                 } else if wizard_state.wallet_name.is_empty() {
@@ -1285,15 +1211,11 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
         .block(
             Block::default()
                 .borders(Borders::ALL)
-<<<<<<< HEAD
                 .title(if password_focused {
                     " Password [FOCUSED] "
                 } else {
                     " Password "
                 })
-=======
-                .title(if password_focused { " Password [FOCUSED] " } else { " Password " })
->>>>>>> main
                 .border_style(if password_focused {
                     Style::default().fg(Color::Yellow)
                 } else if wizard_state.save_password.len() < 12 {
@@ -1320,7 +1242,6 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
         .block(
             Block::default()
                 .borders(Borders::ALL)
-<<<<<<< HEAD
                 .title(if confirm_focused {
                     " Confirm Password [FOCUSED] "
                 } else {
@@ -1335,18 +1256,6 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
                 } else {
                     Style::default().fg(Color::Green)
                 }),
-=======
-                .title(if confirm_focused { " Confirm Password [FOCUSED] " } else { " Confirm Password " })
-                .border_style(if confirm_focused {
-                    Style::default().fg(Color::Yellow)
-                } else if wizard_state.save_password_confirm.is_empty() || 
-                       wizard_state.save_password != wizard_state.save_password_confirm {
-                        Style::default().fg(Color::Red)
-                    } else {
-                        Style::default().fg(Color::Green)
-                    }
-                ),
->>>>>>> main
         )
         .style(if wizard_state.save_password_confirm.is_empty() {
             Style::default().fg(Color::DarkGray)
@@ -1377,7 +1286,6 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
                 )
                 .wrap(Wrap { trim: true });
             frame.render_widget(error_widget, form_chunks[3]);
-<<<<<<< HEAD
         } else if !wizard_state.wallet_name.is_empty()
             && !wizard_state.save_password.is_empty()
             && !wizard_state.save_password_confirm.is_empty()
@@ -1391,15 +1299,6 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
                 ),
-=======
-        } else if !wizard_state.wallet_name.is_empty() 
-            && !wizard_state.save_password.is_empty() 
-            && !wizard_state.save_password_confirm.is_empty() {
-            // Show success message
-            let success_lines = vec![Line::from(vec![
-                Span::styled("✅ ", Style::default().fg(Color::Green)),
-                Span::styled("Ready to save wallet!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
->>>>>>> main
             ])];
 
             let success_widget = Paragraph::new(Text::from(success_lines))
@@ -1419,13 +1318,9 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
                 Span::styled("⏭️  ", Style::default().fg(Color::Yellow)),
                 Span::styled(
                     "Skipping wallet save",
-<<<<<<< HEAD
                     Style::default()
                         .fg(Color::Yellow)
                         .add_modifier(Modifier::BOLD),
-=======
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
->>>>>>> main
                 ),
             ]),
             Line::from(""),
@@ -1433,14 +1328,10 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
             Line::from(""),
             Line::from(vec![
                 Span::styled("💡 ", Style::default().fg(Color::Blue)),
-<<<<<<< HEAD
                 Span::styled(
                     "You can save your wallet later in Settings if you change your mind.",
                     Style::default().fg(Color::Gray),
                 ),
-=======
-                Span::styled("You can save your wallet later in Settings if you change your mind.", Style::default().fg(Color::Gray)),
->>>>>>> main
             ]),
         ];
 
@@ -1462,35 +1353,23 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
         vec![Line::from(vec![
             Span::styled(
                 "Tab",
-<<<<<<< HEAD
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
-=======
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
->>>>>>> main
             ),
             Span::raw(": Navigate Fields • "),
             Span::styled(
                 "Space/Y/N",
-<<<<<<< HEAD
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
-=======
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
->>>>>>> main
             ),
             Span::raw(": Toggle Save • "),
             Span::styled(
                 "Enter",
-<<<<<<< HEAD
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
-=======
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
->>>>>>> main
             ),
             Span::raw(": Continue • "),
             Span::styled(
@@ -1503,35 +1382,23 @@ fn render_wallet_save_step(frame: &mut Frame, area: Rect, wizard_state: &WizardS
         vec![Line::from(vec![
             Span::styled(
                 "Tab",
-<<<<<<< HEAD
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD),
-=======
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
->>>>>>> main
             ),
             Span::raw(": Focus Toggle • "),
             Span::styled(
                 "Space/Y",
-<<<<<<< HEAD
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
-=======
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
->>>>>>> main
             ),
             Span::raw(": Enable Save • "),
             Span::styled(
                 "Enter",
-<<<<<<< HEAD
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
-=======
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
->>>>>>> main
             ),
             Span::raw(": Skip & Continue • "),
             Span::styled(

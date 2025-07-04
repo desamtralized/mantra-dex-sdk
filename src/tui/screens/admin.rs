@@ -6,7 +6,6 @@
 use crate::tui::{
     app::{App, LoadingState},
     components::{
-<<<<<<< HEAD
         forms::{InputType, TextInput},
         header::render_header,
         navigation::render_navigation,
@@ -16,27 +15,14 @@ use crate::tui::{
 };
 // use cosmwasm_std::{Decimal, Uint128};
 // use mantra_dex_std::{fee::PoolFee, pool_manager::PoolType};
-=======
-        header::render_header, navigation::render_navigation, status_bar::render_status_bar,
-    },
-};
-use cosmwasm_std::{Decimal, Uint128};
-use mantra_dex_std::{fee::PoolFee, pool_manager::PoolType};
->>>>>>> main
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-<<<<<<< HEAD
     widgets::{Block, Borders, Clear, Gauge, Padding, Paragraph, Tabs, Wrap},
     Frame,
 };
 use tui_input::InputRequest;
-=======
-    widgets::{Block, Borders, Cell, Clear, Gauge, Padding, Paragraph, Row, Table, Wrap},
-    Frame,
-};
->>>>>>> main
 
 /// Admin screen operational modes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,7 +32,6 @@ pub enum AdminMode {
     FeatureControls,
 }
 
-<<<<<<< HEAD
 /// Input focus states for the admin screen
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AdminInputFocus {
@@ -125,53 +110,11 @@ impl Default for PoolCreationState {
             protocol_fee_input,
             burn_fee_input,
             pool_type_dropdown,
-=======
-/// Pool creation wizard state
-#[derive(Debug, Clone)]
-pub struct PoolCreationState {
-    pub step: PoolCreationStep,
-    pub asset_denoms: Vec<String>,
-    pub asset_decimals: Vec<u8>,
-    pub protocol_fee: String,
-    pub swap_fee: String,
-    pub burn_fee: String,
-    pub pool_type: PoolType,
-    pub pool_identifier: String,
-    pub current_input: String,
-    pub current_asset_index: usize,
-    pub validation_errors: Vec<String>,
-}
-
-/// Pool creation wizard steps
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PoolCreationStep {
-    AssetSelection,
-    DecimalsConfiguration,
-    FeeStructure,
-    PoolTypeSelection,
-    Confirmation,
-}
-
-impl Default for PoolCreationState {
-    fn default() -> Self {
-        Self {
-            step: PoolCreationStep::AssetSelection,
-            asset_denoms: Vec::new(),
-            asset_decimals: Vec::new(),
-            protocol_fee: "0.001".to_string(),
-            swap_fee: "0.003".to_string(),
-            burn_fee: "0.0".to_string(),
-            pool_type: PoolType::ConstantProduct,
-            pool_identifier: String::new(),
-            current_input: String::new(),
-            current_asset_index: 0,
->>>>>>> main
             validation_errors: Vec::new(),
         }
     }
 }
 
-<<<<<<< HEAD
 /// Pool feature control state (simplified like swap/liquidity screens)
 #[derive(Debug, Clone)]
 pub struct PoolFeatureState {
@@ -179,28 +122,10 @@ pub struct PoolFeatureState {
     pub withdrawals_enabled: bool,
     pub deposits_enabled: bool,
     pub swaps_enabled: bool,
-=======
-/// Pool feature control state
-#[derive(Debug, Clone)]
-pub struct PoolFeatureState {
-    pub selected_pool_id: String,
-    pub withdrawals_enabled: bool,
-    pub deposits_enabled: bool,
-    pub swaps_enabled: bool,
-    pub input_mode: FeatureInputMode,
-}
-
-/// Feature control input modes
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FeatureInputMode {
-    PoolSelection,
-    FeatureToggles,
->>>>>>> main
 }
 
 impl Default for PoolFeatureState {
     fn default() -> Self {
-<<<<<<< HEAD
         let pool_selection_dropdown = SimpleList::new("Select Pool to Manage");
 
         Self {
@@ -208,19 +133,10 @@ impl Default for PoolFeatureState {
             withdrawals_enabled: true,
             deposits_enabled: true,
             swaps_enabled: true,
-=======
-        Self {
-            selected_pool_id: String::new(),
-            withdrawals_enabled: true,
-            deposits_enabled: true,
-            swaps_enabled: true,
-            input_mode: FeatureInputMode::PoolSelection,
->>>>>>> main
         }
     }
 }
 
-<<<<<<< HEAD
 /// Pool management state
 #[derive(Debug, Clone)]
 pub struct PoolManagementState {
@@ -983,29 +899,6 @@ pub(crate) fn get_admin_screen_state() -> &'static mut AdminScreenState {
 }
 
 /// Render the complete admin screen (consistent with swap/liquidity screens)
-=======
-/// Admin screen state management
-#[derive(Debug, Clone)]
-pub struct AdminState {
-    pub mode: AdminMode,
-    pub pool_creation: PoolCreationState,
-    pub feature_control: PoolFeatureState,
-    pub selected_tab: usize,
-}
-
-impl Default for AdminState {
-    fn default() -> Self {
-        Self {
-            mode: AdminMode::PoolManagement,
-            pool_creation: PoolCreationState::default(),
-            feature_control: PoolFeatureState::default(),
-            selected_tab: 0,
-        }
-    }
-}
-
-/// Render the complete admin screen
->>>>>>> main
 pub fn render_admin(f: &mut Frame, app: &App) {
     let size = f.area();
 
@@ -1029,7 +922,6 @@ pub fn render_admin(f: &mut Frame, app: &App) {
 
     // Render status bar
     render_status_bar(f, &app.state, chunks[3]);
-<<<<<<< HEAD
 
     // Render validation overlay if needed
     if app.state.current_screen == crate::tui::app::Screen::Admin {
@@ -1041,19 +933,12 @@ pub fn render_admin(f: &mut Frame, app: &App) {
 fn render_admin_content(f: &mut Frame, area: Rect, app: &App) {
     let admin_state = get_admin_screen_state();
 
-=======
-}
-
-/// Render the main admin content area
-fn render_admin_content(f: &mut Frame, area: Rect, app: &App) {
->>>>>>> main
     // Create vertical layout: tabs + content
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
 
-<<<<<<< HEAD
     // Render admin tabs using Tabs widget (like liquidity screen)
     let tabs = vec!["Pool Management", "Pool Creation", "Feature Controls"];
     let tab_index = match admin_state.mode {
@@ -1266,57 +1151,11 @@ fn render_creation_execute_button(f: &mut Frame, area: Rect, app: &App) {
 
 /// Render pool management panel (consistent with swap/liquidity patterns)
 fn render_pool_management_panel(f: &mut Frame, area: Rect, app: &App) {
-=======
-    // Render admin tabs
-    render_admin_tabs(f, main_chunks[0]);
-
-    // Render content based on current mode
-    match AdminMode::PoolManagement {
-        AdminMode::PoolManagement => render_pool_management(f, main_chunks[1], app),
-        AdminMode::PoolCreation => render_pool_creation_wizard(f, main_chunks[1]),
-        AdminMode::FeatureControls => render_feature_controls(f, main_chunks[1], app),
-    }
-}
-
-/// Render admin mode tabs
-fn render_admin_tabs(f: &mut Frame, area: Rect) {
-    let tabs = vec!["Pool Management", "Create Pool", "Feature Controls"];
-    let selected_tab = 0; // This would come from app state in a full implementation
-
-    let tab_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
-        ])
-        .split(area);
-
-    for (i, (tab_name, chunk)) in tabs.iter().zip(tab_chunks.iter()).enumerate() {
-        let style = if i == selected_tab {
-            Style::default().bg(Color::Cyan).fg(Color::Black)
-        } else {
-            Style::default().fg(Color::White)
-        };
-
-        let tab = Paragraph::new(*tab_name)
-            .style(style)
-            .alignment(Alignment::Center)
-            .block(Block::default().borders(Borders::ALL));
-
-        f.render_widget(tab, *chunk);
-    }
-}
-
-/// Render pool management interface
-fn render_pool_management(f: &mut Frame, area: Rect, app: &App) {
->>>>>>> main
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(area);
 
-<<<<<<< HEAD
     // Left: Pool list and selection
     render_pool_management_form(f, chunks[0], app);
 
@@ -1399,159 +1238,6 @@ fn render_pool_feature_toggles(f: &mut Frame, area: Rect, app: &App) {
                 if features.2 { "ENABLED" } else { "DISABLED" },
                 if features.2 { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Red) }
             ),
-=======
-    // Left: Pool list with admin actions
-    render_admin_pool_list(f, chunks[0], app);
-
-    // Right: Pool admin actions
-    render_pool_admin_actions(f, chunks[1], app);
-}
-
-/// Render pool list with admin controls
-fn render_admin_pool_list(f: &mut Frame, area: Rect, app: &App) {
-    let pool_data: Vec<Vec<String>> = app
-        .state
-        .pool_cache
-        .values()
-        .map(|entry| {
-            let pool = &entry.pool_info;
-            vec![
-                pool.pool_info.pool_identifier.to_string(),
-                format!("{} assets", pool.pool_info.assets.len()),
-                format!(
-                    "W:{} D:{} S:{}",
-                    if pool.pool_info.status.withdrawals_enabled {
-                        "✓"
-                    } else {
-                        "✗"
-                    },
-                    if pool.pool_info.status.deposits_enabled {
-                        "✓"
-                    } else {
-                        "✗"
-                    },
-                    if pool.pool_info.status.swaps_enabled {
-                        "✓"
-                    } else {
-                        "✗"
-                    }
-                ),
-            ]
-        })
-        .collect();
-
-    let header = Row::new(vec![
-        Cell::from("Pool ID").style(Style::default().add_modifier(Modifier::BOLD)),
-        Cell::from("Assets").style(Style::default().add_modifier(Modifier::BOLD)),
-        Cell::from("Features").style(Style::default().add_modifier(Modifier::BOLD)),
-    ])
-    .style(Style::default().bg(Color::DarkGray));
-
-    let rows: Vec<Row> = pool_data
-        .iter()
-        .map(|pool| {
-            Row::new(
-                pool.iter()
-                    .map(|cell| Cell::from(cell.as_str()))
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .collect();
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(15),
-            Constraint::Length(10),
-            Constraint::Length(15),
-        ],
-    )
-    .header(header)
-    .block(
-        Block::default()
-            .title("Pools - Admin View")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Blue)),
-    )
-    .row_highlight_style(Style::default().bg(Color::DarkGray));
-
-    f.render_widget(table, area);
-}
-
-/// Render pool admin actions panel
-fn render_pool_admin_actions(f: &mut Frame, area: Rect, _app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(8),  // Pool selection
-            Constraint::Length(10), // Feature toggles
-            Constraint::Min(0),     // Actions
-        ])
-        .split(area);
-
-    // Pool selection
-    render_pool_selection_input(f, chunks[0]);
-
-    // Feature toggles
-    render_feature_toggles(f, chunks[1]);
-
-    // Admin actions
-    render_admin_actions(f, chunks[2]);
-}
-
-/// Render pool selection input
-fn render_pool_selection_input(f: &mut Frame, area: Rect) {
-    let block = Block::default()
-        .title("Pool Selection")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Green))
-        .padding(Padding::uniform(1));
-
-    let content = vec![
-        Line::from(vec![
-            Span::styled("Pool ID: ", Style::default().fg(Color::Yellow)),
-            Span::styled("[Enter pool ID]", Style::default().fg(Color::Gray)),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::styled(
-            "Instructions:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )]),
-        Line::from("• Enter pool ID to manage"),
-        Line::from("• Press Tab to navigate"),
-    ];
-
-    let paragraph = Paragraph::new(Text::from(content))
-        .block(block)
-        .wrap(Wrap { trim: true });
-
-    f.render_widget(paragraph, area);
-}
-
-/// Render feature toggle controls
-fn render_feature_toggles(f: &mut Frame, area: Rect) {
-    let block = Block::default()
-        .title("Feature Controls")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .padding(Padding::uniform(1));
-
-    let content = vec![
-        Line::from(vec![
-            Span::styled("• Withdrawals: ", Style::default().fg(Color::White)),
-            Span::styled("ENABLED", Style::default().fg(Color::Green)),
-            Span::styled(" [W]", Style::default().fg(Color::Gray)),
-        ]),
-        Line::from(vec![
-            Span::styled("• Deposits: ", Style::default().fg(Color::White)),
-            Span::styled("ENABLED", Style::default().fg(Color::Green)),
-            Span::styled(" [D]", Style::default().fg(Color::Gray)),
-        ]),
-        Line::from(vec![
-            Span::styled("• Swaps: ", Style::default().fg(Color::White)),
-            Span::styled("ENABLED", Style::default().fg(Color::Green)),
-            Span::styled(" [S]", Style::default().fg(Color::Gray)),
->>>>>>> main
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
@@ -1561,7 +1247,6 @@ fn render_feature_toggles(f: &mut Frame, area: Rect) {
     ];
 
     let paragraph = Paragraph::new(Text::from(content))
-<<<<<<< HEAD
         .wrap(Wrap { trim: true });
 
     f.render_widget(paragraph, inner);
@@ -1721,30 +1406,10 @@ fn render_bulk_feature_controls(f: &mut Frame, area: Rect, app: &App) {
     let content = vec![
         Line::from(vec![Span::styled(
             "Bulk Feature Operations:",
-=======
-        .block(block)
-        .wrap(Wrap { trim: true });
-
-    f.render_widget(paragraph, area);
-}
-
-/// Render admin action buttons
-fn render_admin_actions(f: &mut Frame, area: Rect) {
-    let block = Block::default()
-        .title("Admin Actions")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red))
-        .padding(Padding::uniform(1));
-
-    let content = vec![
-        Line::from(vec![Span::styled(
-            "Available Actions:",
->>>>>>> main
             Style::default().add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
         Line::from(vec![
-<<<<<<< HEAD
             Span::styled("• [1] ", Style::default().fg(Color::Green)),
             Span::styled("Enable All Features", Style::default().fg(Color::White)),
         ]),
@@ -1845,53 +1510,6 @@ fn render_feature_controls_details(f: &mut Frame, area: Rect, app: &App) {
 
 
 
-=======
-            Span::styled("• [Enter] ", Style::default().fg(Color::Green)),
-            Span::styled("Apply Changes", Style::default().fg(Color::White)),
-        ]),
-        Line::from(vec![
-            Span::styled("• [R] ", Style::default().fg(Color::Blue)),
-            Span::styled("Reset Features", Style::default().fg(Color::White)),
-        ]),
-        Line::from(vec![
-            Span::styled("• [A] ", Style::default().fg(Color::Cyan)),
-            Span::styled("Enable All", Style::default().fg(Color::White)),
-        ]),
-        Line::from(vec![
-            Span::styled("• [X] ", Style::default().fg(Color::Red)),
-            Span::styled("Disable All", Style::default().fg(Color::White)),
-        ]),
-    ];
-
-    let paragraph = Paragraph::new(Text::from(content))
-        .block(block)
-        .wrap(Wrap { trim: true });
-
-    f.render_widget(paragraph, area);
-}
-
-/// Render pool creation wizard
-fn render_pool_creation_wizard(f: &mut Frame, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5), // Progress indicator
-            Constraint::Min(0),    // Current step content
-            Constraint::Length(5), // Navigation help
-        ])
-        .split(area);
-
-    // Progress indicator
-    render_creation_progress(f, chunks[0]);
-
-    // Current step content
-    render_creation_step_content(f, chunks[1]);
-
-    // Navigation help
-    render_creation_navigation_help(f, chunks[2]);
-}
-
->>>>>>> main
 /// Render pool creation progress indicator
 fn render_creation_progress(f: &mut Frame, area: Rect) {
     let current_step = 1; // This would come from state
@@ -2183,7 +1801,6 @@ fn render_bulk_operations(f: &mut Frame, area: Rect, _app: &App) {
     f.render_widget(paragraph, area);
 }
 
-<<<<<<< HEAD
 /// Render validation error overlay (like swap/liquidity screens)
 fn render_validation_overlay(f: &mut Frame, area: Rect, _app: &App) {
     let admin_state = get_admin_screen_state();
@@ -2461,14 +2078,11 @@ pub fn reset_admin_forms() {
     crate::tui::utils::logger::log_info("Admin forms reset completed");
 }
 
-=======
->>>>>>> main
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-<<<<<<< HEAD
     fn test_admin_screen_state_navigation() {
         let mut state = AdminScreenState::default();
         assert_eq!(state.input_focus, AdminInputFocus::PoolSelection);
@@ -2500,30 +2114,5 @@ mod tests {
         // Pool creation should fail with empty inputs
         state.set_mode(AdminMode::PoolCreation);
         assert!(!state.validate());
-=======
-    fn test_admin_state_default() {
-        let state = AdminState::default();
-        assert_eq!(state.mode, AdminMode::PoolManagement);
-        assert_eq!(state.selected_tab, 0);
-    }
-
-    #[test]
-    fn test_pool_creation_state_default() {
-        let state = PoolCreationState::default();
-        assert_eq!(state.step, PoolCreationStep::AssetSelection);
-        assert!(state.asset_denoms.is_empty());
-        assert_eq!(state.protocol_fee, "0.001");
-        assert_eq!(state.swap_fee, "0.003");
-        assert_eq!(state.burn_fee, "0.0");
-    }
-
-    #[test]
-    fn test_pool_feature_state_default() {
-        let state = PoolFeatureState::default();
-        assert!(state.withdrawals_enabled);
-        assert!(state.deposits_enabled);
-        assert!(state.swaps_enabled);
-        assert_eq!(state.input_mode, FeatureInputMode::PoolSelection);
->>>>>>> main
     }
 }

@@ -476,11 +476,7 @@ impl SettingsState {
             NetworkEnvironment::Mainnet => {
                 new_config.network = MantraNetworkConfig {
                     network_name: "mantra-mainnet".to_string(),
-<<<<<<< HEAD
-                    network_id: "mantra-mainnet-1".to_string(),
-=======
-                    chain_id: "mantra-mainnet".to_string(),
->>>>>>> main
+                    chain_id: "mantra-mainnet-1".to_string(),
                     rpc_url: "https://rpc.mantrachain.io/".to_string(),
                     gas_price: 0.025,
                     gas_adjustment: 1.3,
@@ -491,11 +487,7 @@ impl SettingsState {
             NetworkEnvironment::Testnet => {
                 new_config.network = MantraNetworkConfig {
                     network_name: "mantra-dukong".to_string(),
-<<<<<<< HEAD
-                    network_id: "mantra-dukong-1".to_string(),
-=======
-                    chain_id: "mantra-dukong".to_string(),
->>>>>>> main
+                    chain_id: "mantra-dukong-1".to_string(),
                     rpc_url: "https://rpc.dukong.mantrachain.io/".to_string(),
                     gas_price: 0.025,
                     gas_adjustment: 1.3,
@@ -542,7 +534,6 @@ impl SettingsState {
         self.message = Some(("Settings reset to defaults".to_string(), false));
     }
 
-<<<<<<< HEAD
     /// Clear messages
     pub fn clear_message(&mut self) {
         self.message = None;
@@ -632,12 +623,6 @@ impl SettingsState {
             }
         }
     }
-=======
-    /// Clear any messages
-    pub fn clear_message(&mut self) {
-        self.message = None;
-    }
->>>>>>> main
 }
 
 /// Render the settings screen with standard layout
@@ -1414,7 +1399,6 @@ impl SettingsScreen {
         Self
     }
 }
-<<<<<<< HEAD
 
 /// Initialize settings screen focus management
 pub fn initialize_settings_screen_focus() {
@@ -1446,5 +1430,3 @@ pub fn get_focusable_components_for_section(section: SettingsSection) -> Vec<Str
         ],
     }
 }
-=======
->>>>>>> main
