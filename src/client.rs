@@ -121,7 +121,7 @@ impl MantraDexClient {
     /// Get balance for a specific denom for a wallet address
     pub async fn get_balance(
         &self,
-        address: &str,
+        _address: &str,
         denom: &str,
     ) -> Result<cosmwasm_std::Coin, Error> {
         // Get all balances and find the specific denom
@@ -405,57 +405,6 @@ impl MantraDexClient {
         Ok(tx_response)
     }
 
-    /// Get pool manager configuration including pool creation fee
-    pub async fn get_pool_manager_config(&self) -> Result<serde_json::Value, Error> {
-        let query = pool_manager::QueryMsg::Config {};
-        let pool_manager_address = self.config.contracts.pool_manager.clone();
-        self.query(&pool_manager_address, &query).await
-    }
-
-    /// Get pool creation fee from pool manager config
-    pub async fn get_pool_creation_fee(&self) -> Result<cosmwasm_std::Coin, Error> {
-        // Try to get the fee from config, but fall back to known working value if needed
-        match self.get_pool_manager_config().await {
-            Ok(config) => {
-                // Try different possible structures for the pool_creation_fee
-                let fee_value = config.get("pool_creation_fee").or_else(|| {
-                    config
-                        .get("config")
-                        .and_then(|c| c.get("pool_creation_fee"))
-                });
-
-                if let Some(fee_value) = fee_value {
-                    // Parse the coin structure
-                    if let (Some(denom), Some(amount_str)) = (
-                        fee_value.get("denom").and_then(|v| v.as_str()),
-                        fee_value.get("amount").and_then(|v| v.as_str()),
-                    ) {
-                        if let Ok(amount) = cosmwasm_std::Uint128::from_str(amount_str) {
-                            // Check if amount is positive
-                            if !amount.is_zero() {
-                                return Ok(cosmwasm_std::Coin {
-                                    denom: denom.to_string(),
-                                    amount,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!(
-                    "Failed to query pool manager config: {}, using fallback fee",
-                    e
-                );
-            }
-        }
-
-        // Fallback to known working fee (88 OM = 88,000,000 uom)
-        Ok(cosmwasm_std::Coin {
-            denom: "uom".to_string(),
-            amount: cosmwasm_std::Uint128::new(88_000_000),
-        })
-    }
 
     /// Query asset decimals for a specific asset in a pool
     ///
