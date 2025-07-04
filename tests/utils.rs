@@ -158,9 +158,9 @@ pub mod test_utils {
         MantraWallet::from_mnemonic(mnemonic, 0).expect("Failed to create wallet from mnemonic")
     }
 
-    /// Get or create the OM/USDC pool for testing
+    /// Get or create the OM/USDY pool for testing
     #[allow(dead_code)]
-    pub async fn get_or_create_om_usdc_pool_id(client: &MantraDexClient) -> Option<String> {
+    pub async fn get_or_create_test_pool_id(client: &MantraDexClient) -> Option<String> {
         // Try to create or find the test pool
         match create_test_pool_if_needed(client).await {
             Ok(pool_id) => Some(pool_id),
@@ -171,7 +171,7 @@ pub mod test_utils {
         }
     }
 
-    /// Create a test pool with OM and USDC if one doesn't exist
+    /// Create a test pool with OM and USDY if one doesn't exist
     #[allow(dead_code)]
     pub async fn create_test_pool_if_needed(
         client: &MantraDexClient,
@@ -184,9 +184,9 @@ pub mod test_utils {
             .denom
             .clone()
             .unwrap();
-        let uusdc_denom = test_config
+        let uusdy_denom = test_config
             .tokens
-            .get("uusdc")
+            .get("uusdy")
             .unwrap()
             .denom
             .clone()
@@ -194,14 +194,14 @@ pub mod test_utils {
 
         println!(
             "Looking for pool with assets: {} and {}",
-            uom_denom, uusdc_denom
+            uom_denom, uusdy_denom
         );
 
         // First, try to find an existing pool
         let pools = client.get_pools(Some(100)).await?;
         for pool in pools {
             if pool.pool_info.assets.iter().any(|a| a.denom == uom_denom)
-                && pool.pool_info.assets.iter().any(|a| a.denom == uusdc_denom)
+                && pool.pool_info.assets.iter().any(|a| a.denom == uusdy_denom)
             {
                 println!("Found existing pool: {}", pool.pool_info.pool_identifier);
                 return Ok(pool.pool_info.pool_identifier);
@@ -213,7 +213,7 @@ pub mod test_utils {
 
         // Create a unique pool identifier
         // Generate a simple, valid pool ID (only alphanumeric, dots, and slashes allowed)
-        let pool_id = "uom.usdc.pool".to_string();
+        let pool_id = "uom.usdy.pool".to_string();
         println!("Creating pool with ID: {}", pool_id);
 
         // First create the pool
@@ -236,7 +236,7 @@ pub mod test_utils {
 
         let create_result = client
             .create_pool(
-                vec![uom_denom.clone(), uusdc_denom.clone()],
+                vec![uom_denom.clone(), uusdy_denom.clone()],
                 vec![6, 6], // Both tokens have 6 decimals
                 pool_fees,
                 pool_type,
@@ -254,11 +254,11 @@ pub mod test_utils {
         let initial_assets = vec![
             Coin {
                 denom: uom_denom.clone(),
-                amount: Uint128::new(100_000_000), // 100 OM (6 decimals)
+                amount: Uint128::new(1_000_000), // 1 OM (6 decimals)
             },
             Coin {
-                denom: uusdc_denom.clone(),
-                amount: Uint128::new(100_000_000), // 100 USDC (6 decimals)
+                denom: uusdy_denom.clone(),
+                amount: Uint128::new(4_000_000), // 4 USDY (6 decimals)
             },
         ];
 

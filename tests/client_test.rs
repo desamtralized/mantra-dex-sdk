@@ -2,7 +2,7 @@ mod utils;
 
 use mantra_dex_sdk::{MantraDexClient, MantraWallet};
 use utils::test_utils::{
-    create_test_client, create_test_network_config, get_or_create_om_usdc_pool_id, load_test_config,
+    create_test_client, create_test_network_config, get_or_create_test_pool_id, load_test_config,
 };
 
 #[tokio::test]
@@ -78,7 +78,7 @@ async fn test_client_query_pool() {
     let client = create_test_client().await;
 
     // Get or create pool ID
-    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_test_pool_id(&client).await;
 
     if let Some(pool_id) = pool_id {
         // Query pool info
@@ -96,7 +96,7 @@ async fn test_client_query_pool() {
             println!("Warning: Pool query failed: {:?}", pool_result.err());
         }
     } else {
-        println!("Warning: Could not get or create OM/USDC pool");
+        println!("Warning: Could not get or create OM/USDY pool");
     }
 }
 
@@ -122,7 +122,7 @@ async fn test_client_query_pools() {
                 == "true";
 
             if should_create {
-                match get_or_create_om_usdc_pool_id(&client).await {
+                match get_or_create_test_pool_id(&client).await {
                     Some(pool_id) => {
                         println!("Successfully created/found pool: {}", pool_id);
 
@@ -159,7 +159,7 @@ async fn test_client_simulate_swap() {
     let test_config = load_test_config();
 
     // Get or create pool ID
-    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_test_pool_id(&client).await;
 
     if let Some(pool_id) = pool_id {
         // Simulate a swap
@@ -170,9 +170,9 @@ async fn test_client_simulate_swap() {
             .denom
             .clone()
             .unwrap();
-        let uusdc_denom = test_config
+        let uusdy_denom = test_config
             .tokens
-            .get("uusdc")
+            .get("uusdy")
             .unwrap()
             .denom
             .clone()
@@ -185,7 +185,7 @@ async fn test_client_simulate_swap() {
                     denom: uom_denom,
                     amount: cosmwasm_std::Uint128::from(1000000u128),
                 },
-                &uusdc_denom,
+                &uusdy_denom,
             )
             .await;
 
@@ -220,7 +220,7 @@ async fn test_client_simulate_swap() {
             }
         }
     } else {
-        println!("Warning: Could not get or create OM/USDC pool for simulation");
+        println!("Warning: Could not get or create OM/USDY pool for simulation");
     }
 }
 
@@ -270,7 +270,7 @@ async fn test_pool_creation_if_needed() {
     let client = create_test_client().await;
 
     // Test that we can get or create a pool
-    match get_or_create_om_usdc_pool_id(&client).await {
+    match get_or_create_test_pool_id(&client).await {
         Some(pool_id) => {
             println!("Successfully found/created pool: {}", pool_id);
 

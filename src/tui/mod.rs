@@ -224,10 +224,10 @@ async fn run_app_loop(
             .await
         {
             Ok(Ok(event)) => match app.handle_event(event).await {
-                Ok(should_quit) => {
-                    if should_quit {
-                        break;
-                    }
+                Ok(_event_was_handled) => {
+                    // Event was processed successfully
+                    // Don't use the return value to determine quit status
+                    // The quit status is managed by app.state.should_quit
                 }
                 Err(e) => {
                     app.set_error(format!("Event handling error: {}", e));

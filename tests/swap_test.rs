@@ -1,7 +1,7 @@
 mod utils;
 
 use cosmwasm_std::{Coin, Decimal, Uint128};
-use utils::test_utils::{create_test_client, get_or_create_om_usdc_pool_id, load_test_config};
+use utils::test_utils::{create_test_client, get_or_create_test_pool_id, load_test_config};
 
 #[tokio::test]
 async fn test_list_all_pools() {
@@ -45,7 +45,7 @@ async fn test_swap_operation() {
     let test_config = load_test_config();
 
     // Get or create pool ID
-    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_test_pool_id(&client).await;
 
     if let Some(pool_id) = pool_id {
         println!("Testing swap operation with pool: {}", pool_id);
@@ -142,7 +142,7 @@ async fn test_provide_liquidity() {
     let client = create_test_client().await;
 
     // Get or create pool ID
-    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_test_pool_id(&client).await;
 
     if let Some(pool_id) = pool_id {
         println!("Testing liquidity provision with pool: {}", pool_id);
@@ -157,23 +157,11 @@ async fn test_provide_liquidity() {
             .unwrap();
         let uusdc_denom = test_config
             .tokens
-            .get("uusdc")
+            .get("uusdy")
             .unwrap()
             .denom
             .clone()
             .unwrap();
-
-        // Skip actual liquidity provision unless EXECUTE_WRITES is set
-        if !utils::test_utils::should_execute_writes() {
-            println!(
-                "Skipping actual liquidity provision test. Set EXECUTE_WRITES=true to enable."
-            );
-            println!(
-                "Would provide liquidity with denoms: {} and {}",
-                uom_denom, uusdc_denom
-            );
-            return;
-        }
 
         let assets = vec![
             Coin {
@@ -182,7 +170,7 @@ async fn test_provide_liquidity() {
             },
             Coin {
                 denom: uusdc_denom.clone(),
-                amount: Uint128::from(1000000u128),
+                amount: Uint128::from(4000000u128),
             },
         ];
 
@@ -226,7 +214,7 @@ async fn test_withdraw_liquidity() {
     let client = create_test_client().await;
 
     // Get or create pool ID
-    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_test_pool_id(&client).await;
 
     if let Some(pool_id) = pool_id {
         println!("Testing liquidity withdrawal with pool: {}", pool_id);
@@ -241,7 +229,7 @@ async fn test_get_pool() {
     let client = create_test_client().await;
 
     // Get or create pool ID
-    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_test_pool_id(&client).await;
 
     if let Some(pool_id) = pool_id {
         match client.get_pool(&pool_id).await {
@@ -264,7 +252,7 @@ async fn test_simulate_swap() {
     let test_config = load_test_config();
 
     // Get or create pool ID
-    let pool_id = get_or_create_om_usdc_pool_id(&client).await;
+    let pool_id = get_or_create_test_pool_id(&client).await;
 
     if let Some(pool_id) = pool_id {
         let uom_denom = test_config

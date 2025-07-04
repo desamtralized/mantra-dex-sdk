@@ -52,10 +52,14 @@ pub fn render_dashboard(f: &mut Frame, app: &App) {
 
 /// Render the main dashboard content area
 fn render_dashboard_content(f: &mut Frame, area: Rect, app: &App) {
-    // Create a 2x2 grid layout for the dashboard
+    // Create a 3-row layout for the dashboard
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .constraints([
+            Constraint::Percentage(30), // Top row: Overview + Quick Stats
+            Constraint::Percentage(35), // Middle row: Token Balances + Network Health
+            Constraint::Percentage(35), // Bottom row: Recent Transactions
+        ])
         .split(area);
 
     let top_chunks = Layout::default()
@@ -63,16 +67,17 @@ fn render_dashboard_content(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(main_chunks[0]);
 
-    let bottom_chunks = Layout::default()
+    let middle_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(main_chunks[1]);
 
     // Render components with focus awareness
     render_overview_panel(f, top_chunks[0], app);
     render_quick_stats(f, top_chunks[1], app);
-    render_recent_transactions(f, bottom_chunks[0], app);
-    render_network_health(f, bottom_chunks[1], app);
+    render_token_balances(f, middle_chunks[0], app);
+    render_network_health(f, middle_chunks[1], app);
+    render_recent_transactions(f, main_chunks[2], app);
 
     // Render focus indicators for dashboard elements
     if app.state.navigation_mode == crate::tui::app::NavigationMode::WithinScreen {
@@ -286,6 +291,111 @@ fn render_quick_stats(f: &mut Frame, area: Rect, app: &App) {
         .wrap(Wrap { trim: true });
 
     f.render_widget(paragraph, area);
+}
+
+/// Render token balances panel
+fn render_token_balances(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default()
+        .title("Token Balances")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Blue))
+        .padding(Padding::uniform(1));
+
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+
+    if app.state.wallet_address.is_none() {
+        let no_wallet_msg = Paragraph::new("No wallet connected")
+            .style(Style::default().fg(Color::Gray))
+            .alignment(Alignment::Center);
+        f.render_widget(no_wallet_msg, inner_area);
+        return;
+    }
+
+    if matches!(app.state.loading_state, LoadingState::Loading { .. }) {
+        let loading_msg = Paragraph::new("Loading balances...")
+            .style(Style::default().fg(Color::Yellow))
+            .alignment(Alignment::Center);
+        f.render_widget(loading_msg, inner_area);
+        return;
+    }
+
+    // Get formatted balances using proper decimals
+    let formatted_balances = app.get_formatted_balances();
+
+    if formatted_balances.is_empty() {
+        let empty_msg = Paragraph::new("No token balances found")
+            .style(Style::default().fg(Color::Gray))
+            .alignment(Alignment::Center);
+        f.render_widget(empty_msg, inner_area);
+        return;
+    }
+
+    // Create content lines for balances
+    let mut content_lines = Vec::new();
+
+    // Show up to the available lines (leave room for spacing)
+    let max_tokens = (inner_area.height as usize).saturating_sub(1);
+    let displayed_balances = if formatted_balances.len() > max_tokens {
+        &formatted_balances[..max_tokens.saturating_sub(1)] // Leave room for "..." indicator
+    } else {
+        &formatted_balances[..]
+    };
+
+    for (symbol, amount, denom) in displayed_balances {
+        // Create a formatted line with symbol and amount
+        let line = if symbol == denom {
+            // Raw denomination, show truncated version
+            let display_denom = if denom.len() > 20 {
+                format!("{}...", &denom[..17])
+            } else {
+                denom.clone()
+            };
+            Line::from(vec![
+                Span::styled(
+                    format!("{:<12} ", display_denom),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(
+                    amount,
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])
+        } else {
+            // Has a symbol, show symbol and amount
+            Line::from(vec![
+                Span::styled(format!("{:<12} ", symbol), Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    amount,
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ])
+        };
+        content_lines.push(line);
+    }
+
+    // Add "..." indicator if there are more tokens
+    if formatted_balances.len() > max_tokens {
+        content_lines.push(Line::from(vec![Span::styled(
+            format!(
+                "... and {} more",
+                formatted_balances.len() - displayed_balances.len()
+            ),
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC),
+        )]));
+    }
+
+    let paragraph = Paragraph::new(Text::from(content_lines))
+        .wrap(Wrap { trim: true })
+        .alignment(Alignment::Left);
+
+    f.render_widget(paragraph, inner_area);
 }
 
 /// Render recent transactions with enhanced progress visualization for pending ones
