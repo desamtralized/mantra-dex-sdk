@@ -5,6 +5,7 @@ alwaysApply: false
 ---
 # Testing Guidelines
 
+<<<<<<< HEAD
 ## Never Run TUI Applications
 
 **CRITICAL: AI agents must never attempt to run the TUI application or any interactive terminal applications.**
@@ -54,6 +55,8 @@ cargo check --features tui
 - [Performance or usability improvements]
 ```
 
+=======
+>>>>>>> main
 ## Core Testing Policy
 
 **IMPORTANT: Do not implement automated tests for TUI components, screens, or user interface elements.**

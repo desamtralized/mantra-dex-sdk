@@ -52,6 +52,7 @@ pub fn render_dashboard(f: &mut Frame, app: &App) {
 
 /// Render the main dashboard content area
 fn render_dashboard_content(f: &mut Frame, area: Rect, app: &App) {
+<<<<<<< HEAD
     // Create a 3-row layout for the dashboard
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -60,6 +61,12 @@ fn render_dashboard_content(f: &mut Frame, area: Rect, app: &App) {
             Constraint::Percentage(35), // Middle row: Token Balances + Network Health
             Constraint::Percentage(35), // Bottom row: Recent Transactions
         ])
+=======
+    // Create a 2x2 grid layout for the dashboard
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+>>>>>>> main
         .split(area);
 
     let top_chunks = Layout::default()
@@ -67,17 +74,28 @@ fn render_dashboard_content(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(main_chunks[0]);
 
+<<<<<<< HEAD
     let middle_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+=======
+    let bottom_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+>>>>>>> main
         .split(main_chunks[1]);
 
     // Render components with focus awareness
     render_overview_panel(f, top_chunks[0], app);
     render_quick_stats(f, top_chunks[1], app);
+<<<<<<< HEAD
     render_token_balances(f, middle_chunks[0], app);
     render_network_health(f, middle_chunks[1], app);
     render_recent_transactions(f, main_chunks[2], app);
+=======
+    render_recent_transactions(f, bottom_chunks[0], app);
+    render_network_health(f, bottom_chunks[1], app);
+>>>>>>> main
 
     // Render focus indicators for dashboard elements
     if app.state.navigation_mode == crate::tui::app::NavigationMode::WithinScreen {
@@ -293,6 +311,7 @@ fn render_quick_stats(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
+<<<<<<< HEAD
 /// Render token balances panel
 fn render_token_balances(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()
@@ -398,6 +417,8 @@ fn render_token_balances(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, inner_area);
 }
 
+=======
+>>>>>>> main
 /// Render recent transactions with enhanced progress visualization for pending ones
 fn render_recent_transactions(f: &mut Frame, area: Rect, app: &App) {
     let block = Block::default()

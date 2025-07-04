@@ -42,6 +42,10 @@ use ratatui::{
     Frame,
 };
 use tui_input::{Input, InputRequest, InputResponse};
+<<<<<<< HEAD
+=======
+use cosmrs::AccountId;
+>>>>>>> main
 
 /// Text input component with validation for addresses, amounts, and pool IDs
 #[derive(Debug, Clone)]
@@ -192,12 +196,30 @@ impl TextInput {
     }
 
     fn validate_address(&mut self, value: &str) -> bool {
+<<<<<<< HEAD
         // Basic address validation (mantra addresses start with "mantra")
         if value.starts_with("mantra") && value.len() >= 40 {
             true
         } else {
             self.error = Some("Invalid address format (should start with 'mantra')".to_string());
             false
+=======
+        // Proper bech32 validation for Cosmos-based addresses
+        match value.parse::<cosmrs::AccountId>() {
+            Ok(account_id) => {
+                // Verify it has the correct "mantra" prefix
+                if account_id.prefix() == "mantra" {
+                    true
+                } else {
+                    self.error = Some("Invalid address prefix (should be 'mantra')".to_string());
+                    false
+                }
+            }
+            Err(_) => {
+                self.error = Some("Invalid bech32 address format or checksum".to_string());
+                false
+            }
+>>>>>>> main
         }
     }
 
@@ -254,6 +276,7 @@ impl TextInput {
             ])
             .split(area);
 
+<<<<<<< HEAD
         // Render label with better visibility
         let label_style = if self.required {
             Style::default()
@@ -261,6 +284,15 @@ impl TextInput {
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::LightBlue)
+=======
+        // Render label
+        let label_style = if self.required {
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+>>>>>>> main
         };
 
         let label_text = if self.required {
@@ -271,6 +303,7 @@ impl TextInput {
 
         frame.render_widget(Paragraph::new(label_text).style(label_style), chunks[0]);
 
+<<<<<<< HEAD
         // Render input box with improved styling
         let border_style = if self.focused {
             Style::default()
@@ -283,6 +316,18 @@ impl TextInput {
         };
 
         let block = Block::default().borders(Borders::ALL).style(border_style);
+=======
+        // Render input box
+        let input_style = if self.focused {
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else if self.error.is_some() {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+
+        let block = Block::default().borders(Borders::ALL).style(input_style);
+>>>>>>> main
 
         let display_value = if self.input_type == InputType::Password {
             "*".repeat(self.input.value().len())
@@ -292,6 +337,7 @@ impl TextInput {
             self.input.value().to_string()
         };
 
+<<<<<<< HEAD
         // Improved text styling for better readability
         let text_style = if self.input.value().is_empty() && !self.focused {
             // Placeholder text - more visible
@@ -305,6 +351,13 @@ impl TextInput {
                 .add_modifier(Modifier::BOLD)
         } else {
             // Normal text - bright white for good contrast
+=======
+        let text_style = if self.input.value().is_empty() && !self.focused {
+            Style::default().fg(Color::DarkGray)
+        } else if self.focused {
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+        } else {
+>>>>>>> main
             Style::default().fg(Color::White)
         };
 
@@ -319,11 +372,18 @@ impl TextInput {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
 
+<<<<<<< HEAD
         // Render error message with better visibility
         if let Some(error) = &self.error {
             frame.render_widget(
                 Paragraph::new(format!("⚠ {}", error))
                     .style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+=======
+        // Render error message
+        if let Some(error) = &self.error {
+            frame.render_widget(
+                Paragraph::new(format!("⚠ {}", error)).style(Style::default().fg(Color::Red)),
+>>>>>>> main
                 chunks[2],
             );
         }
@@ -607,13 +667,21 @@ impl<T: Clone> Dropdown<T> {
                     } else {
                         Style::default().fg(Color::White)
                     };
+<<<<<<< HEAD
 
+=======
+                    
+>>>>>>> main
                     let text = if Some(idx) == self.selected {
                         format!("✓ {}", opt.text)
                     } else {
                         format!("  {}", opt.text)
                     };
+<<<<<<< HEAD
 
+=======
+                    
+>>>>>>> main
                     ListItem::new(text).style(style)
                 })
                 .collect();
@@ -623,7 +691,11 @@ impl<T: Clone> Dropdown<T> {
                     Block::default()
                         .borders(Borders::ALL)
                         .title("Select Option")
+<<<<<<< HEAD
                         .border_style(Style::default().fg(Color::Yellow)),
+=======
+                        .border_style(Style::default().fg(Color::Yellow))
+>>>>>>> main
                 )
                 .highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
 

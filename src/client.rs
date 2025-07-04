@@ -18,6 +18,7 @@ use cosmrs::{
     Any,
 };
 use cosmwasm_std::{Coin, Decimal, Uint128};
+use hex;
 use mantra_dex_std::pool_manager::{
     self, PoolInfoResponse, PoolsResponse, SimulationResponse, SwapOperation,
 };
@@ -53,6 +54,7 @@ impl PoolStatus {
 ///
 /// This client provides methods to interact with the Mantra DEX v3.0.0,
 /// including pool operations, swapping, liquidity provision, and rewards management.
+#[derive(Debug)]
 pub struct MantraDexClient {
     /// RPC client for the Mantra network
     rpc_client: Arc<Mutex<HttpClient>>,
@@ -153,11 +155,16 @@ impl MantraDexClient {
     pub async fn get_balances(&self) -> Result<Vec<Coin>, Error> {
         let wallet = self.wallet()?;
         let address = wallet.address().unwrap().to_string();
+        self.get_balances_for_address(&address).await
+    }
+
+    /// Get balances for a specific address
+    pub async fn get_balances_for_address(&self, address: &str) -> Result<Vec<Coin>, Error> {
         let rpc_client = self.rpc_client.lock().await;
 
         // Create a request to get all balances
         let request = QueryAllBalancesRequest {
-            address,
+            address: address.to_string(),
             pagination: None,
             resolve_denom: false,
         };
@@ -200,6 +207,20 @@ impl MantraDexClient {
     /// Get the network configuration
     pub fn config(&self) -> &MantraNetworkConfig {
         &self.config
+    }
+
+    /// Query a transaction by hash
+    /// TODO: Implement proper transaction querying with correct field mapping
+    pub async fn query_transaction(&self, tx_hash: &str) -> Result<serde_json::Value, Error> {
+        // Placeholder implementation - return basic transaction info
+        // This needs to be implemented properly with correct field mappings
+        // from the cosmrs transaction response types
+
+        Ok(serde_json::json!({
+            "hash": tx_hash,
+            "status": "pending",
+            "message": "Transaction query implementation pending - requires proper field mapping from cosmrs types"
+        }))
     }
 
     /// Query a smart contract
@@ -326,7 +347,7 @@ impl MantraDexClient {
         // Create auth info with fee
         let auth_info = signer_info.auth_info(fee);
 
-        let chain_id = Id::try_from(self.config.network_id.as_str())
+        let chain_id = Id::try_from(self.config.chain_id.as_str())
             .map_err(|e| Error::Tx(format!("Invalid chain ID: {}", e)))?;
 
         let sign_doc = SignDoc::new(&tx_body, &auth_info, &chain_id, account_number)
@@ -860,6 +881,22 @@ impl MantraDexClient {
         self.execute(&pool_manager_address, &msg, funds).await
     }
 
+    /// Query the pool manager configuration
+    pub async fn get_pool_manager_config(&self) -> Result<mantra_dex_std::pool_manager::Config, Error> {
+        let query = pool_manager::QueryMsg::Config {};
+        let pool_manager_address = self.config.contracts.pool_manager.clone();
+        // The contract returns Config directly, not wrapped in ConfigResponse
+        let config: mantra_dex_std::pool_manager::Config = 
+            self.query(&pool_manager_address, &query).await?;
+        Ok(config)
+    }
+
+    /// Get the pool creation fee from the pool manager configuration
+    pub async fn get_pool_creation_fee(&self) -> Result<Coin, Error> {
+        let config = self.get_pool_manager_config().await?;
+        Ok(config.pool_creation_fee)
+    }
+
     /// Create a new pool with the specified assets and configuration
     ///
     /// **v3.0.0 New Feature**: Enhanced fee validation ensures total fees ≤ 20%
@@ -884,7 +921,7 @@ impl MantraDexClient {
     ///
     /// # Notes
     ///
-    /// Pool creation requires a fee of 98 OM (98,000,000 uom)
+    /// Pool creation requires a fee that is determined by querying the pool manager configuration
     pub async fn create_pool(
         &self,
         asset_denoms: Vec<String>,
@@ -906,12 +943,19 @@ impl MantraDexClient {
 
         let pool_manager_address = self.config.contracts.pool_manager.clone();
 
-        // Get pool creation fee dynamically from pool manager config
-        let pool_creation_fee_coin = self.get_pool_creation_fee().await?;
-        let pool_creation_fee = vec![Coin {
-            denom: pool_creation_fee_coin.denom,
-            amount: pool_creation_fee_coin.amount,
-        }];
+        // Query the actual pool creation fee from the contract configuration
+        let creation_fee = self.get_pool_creation_fee().await?;
+        
+        // Handle case where contract config shows 0 but contract actually expects 88 OM
+        let pool_creation_fee = if creation_fee.amount.is_zero() {
+            // Fallback to known testnet pool creation fee of 88 OM
+            vec![Coin {
+                denom: "uom".to_string(),
+                amount: Uint128::new(88_000_000), // 88 OM
+            }]
+        } else {
+            vec![creation_fee]
+        };
 
         self.execute(&pool_manager_address, &msg, pool_creation_fee)
             .await
@@ -1140,7 +1184,7 @@ impl MantraDexClient {
     ///
     /// * `pool_identifier` - The identifier of the pool to update features for
     /// * `withdrawals_enabled` - Optional flag to enable/disable withdrawals for this pool
-    /// * `deposits_enabled` - Optional flag to enable/disable deposits for this pool  
+    /// * `deposits_enabled` - Optional flag to enable/disable deposits for this pool
     /// * `swaps_enabled` - Optional flag to enable/disable swaps for this pool
     ///
     /// # Returns
@@ -1294,7 +1338,7 @@ impl MantraDexClient {
     ///
     /// The v3.0.0 fee structure includes:
     /// - `protocol_fee`: Fee for the protocol
-    /// - `swap_fee`: Fee for swaps  
+    /// - `swap_fee`: Fee for swaps
     /// - `burn_fee`: Optional fee that gets burned
     /// - `extra_fees`: Optional array of additional fees
     pub fn validate_pool_fees(
@@ -1361,7 +1405,7 @@ impl MantraDexClient {
     /// # Arguments
     ///
     /// * `protocol_fee` - Protocol fee percentage
-    /// * `swap_fee` - Swap fee percentage  
+    /// * `swap_fee` - Swap fee percentage
     /// * `burn_fee` - Optional burn fee percentage
     /// * `extra_fees` - Optional vector of additional fee percentages
     ///

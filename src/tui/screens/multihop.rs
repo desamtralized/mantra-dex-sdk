@@ -534,7 +534,11 @@ impl MultiHopScreenState {
             .map(|hop| SwapOperation {
                 from_asset: hop.from_asset.clone(),
                 to_asset: hop.to_asset.clone(),
+<<<<<<< HEAD
                 pool_id: hop.pool_id.clone(),
+=======
+                pool_id: hop.pool_id.parse().unwrap_or(0),
+>>>>>>> main
                 amount: hop.amount_in.clone(),
             })
             .collect()

@@ -12,8 +12,8 @@ use crate::error::Error;
 pub struct NetworkConstants {
     /// Network name
     pub network_name: String,
-    /// Network ID
-    pub network_id: String,
+    /// Chain ID (for transaction signing)
+    pub chain_id: String,
     /// Default RPC endpoint
     pub default_rpc: String,
     /// Default gas price (in uaum)
@@ -28,14 +28,38 @@ impl NetworkConstants {
     /// Load network constants from the configuration file
     pub fn load(network: &str) -> Result<Self, ConfigError> {
         let config_dir = env::var("MANTRA_CONFIG_DIR").unwrap_or_else(|_| "config".to_string());
-
-        let settings = ConfigLoader::builder()
-            // Add the config file
-            .add_source(File::with_name(&format!("{}/network", config_dir)))
-            .build()?;
-
-        // Extract the network section
-        settings.get::<NetworkConstants>(network)
+        
+        // Try multiple paths for the config file
+        let config_paths = vec![
+            format!("{}/network", config_dir),
+            "config/network".to_string(),
+            "../config/network".to_string(),
+            "../../config/network".to_string(),
+        ];
+        
+        for config_path in &config_paths {
+            if let Ok(settings) = ConfigLoader::builder()
+                .add_source(File::with_name(config_path))
+                .build()
+            {
+                if let Ok(constants) = settings.get::<NetworkConstants>(network) {
+                    return Ok(constants);
+                }
+            }
+        }
+        
+        // If we can't load from config files, return hardcoded constants
+        match network {
+            "mantra-dukong" => Ok(NetworkConstants {
+                network_name: "mantra-dukong".to_string(),
+                chain_id: "mantra-dukong-1".to_string(),
+                default_rpc: "https://rpc.dukong.mantrachain.io:443".to_string(),
+                default_gas_price: 0.01,
+                default_gas_adjustment: 1.5,
+                native_denom: "uom".to_string(),
+            }),
+            _ => Err(ConfigError::NotFound(format!("Network configuration for '{}' not found", network))),
+        }
     }
 
     /// Get the default Mantra Dukong network constants
@@ -73,8 +97,8 @@ impl Default for ContractAddresses {
 pub struct MantraNetworkConfig {
     /// Network name (e.g., mantra-dukong)
     pub network_name: String,
-    /// Network ID (e.g., mantra-dukong-1)
-    pub network_id: String,
+    /// Chain ID (e.g., mantra-dukong)
+    pub chain_id: String,
     /// RPC endpoint URL
     pub rpc_url: String,
     /// Gas price in native token
@@ -95,7 +119,7 @@ impl MantraNetworkConfig {
 
         Self {
             network_name: constants.network_name.clone(),
-            network_id: constants.network_id.clone(),
+            chain_id: constants.chain_id.clone(),
             rpc_url: constants.default_rpc.clone(),
             gas_price: constants.default_gas_price,
             gas_adjustment: constants.default_gas_adjustment,
@@ -111,28 +135,44 @@ impl MantraNetworkConfig {
         // Determine configuration directory – fall back to local `config` directory inside the project
         let config_dir = env::var("MANTRA_CONFIG_DIR").unwrap_or_else(|_| "config".to_string());
 
-        // Build configuration loader for `contracts.toml`
-        let settings = ConfigLoader::builder()
-            .add_source(File::with_name(&format!("{}/contracts", config_dir)))
-            .build();
+        // Try multiple paths for the config file
+        let config_paths = vec![
+            format!("{}/contracts", config_dir),
+            "config/contracts".to_string(),
+            "../config/contracts".to_string(),
+            "../../config/contracts".to_string(),
+        ];
 
-        match settings {
-            Ok(settings) => {
+        for config_path in &config_paths {
+            if let Ok(settings) = ConfigLoader::builder()
+                .add_source(File::with_name(config_path))
+                .build()
+            {
                 let pool_manager_key = format!("{}.pool_manager.address", network);
                 let farm_manager_key = format!("{}.farm_manager.address", network);
                 let fee_collector_key = format!("{}.fee_collector.address", network);
                 let epoch_manager_key = format!("{}.epoch_manager.address", network);
 
-                ContractAddresses {
-                    pool_manager: settings
-                        .get::<String>(&pool_manager_key)
-                        .unwrap_or_default(),
-                    farm_manager: settings.get::<String>(&farm_manager_key).ok(),
-                    fee_collector: settings.get::<String>(&fee_collector_key).ok(),
-                    epoch_manager: settings.get::<String>(&epoch_manager_key).ok(),
+                if let Ok(pool_manager) = settings.get::<String>(&pool_manager_key) {
+                    return ContractAddresses {
+                        pool_manager,
+                        farm_manager: settings.get::<String>(&farm_manager_key).ok(),
+                        fee_collector: settings.get::<String>(&fee_collector_key).ok(),
+                        epoch_manager: settings.get::<String>(&epoch_manager_key).ok(),
+                    };
                 }
             }
-            Err(_) => ContractAddresses::default(),
+        }
+
+        // If we can't load from config, return hardcoded testnet addresses as fallback
+        match network {
+            "mantra-dukong" => ContractAddresses {
+                pool_manager: "mantra1vwj600jud78djej7ttq44dktu4wr3t2yrrsjgmld8v3jq8mud68q5w7455".to_string(),
+                farm_manager: Some("mantra1h3ypj6fhpn4tegj0flhx42j5c4jejq45dypyjy7wdpr268amh5ssa4nnzf".to_string()),
+                fee_collector: Some("mantra1ze9rccntuvd37gs5fv8ddtjtay4944zn3mksdnne8zyntjmgsg9syav".to_string()),
+                epoch_manager: Some("mantra1kz0gcs8n0qa9rje5zdrlwqccxlwu8zttzmdtxhdq0jpk3efjs37qr4s2sv".to_string()),
+            },
+            _ => ContractAddresses::default(),
         }
     }
 }
@@ -143,10 +183,10 @@ impl Default for MantraNetworkConfig {
             Ok(constants) => Self::from_constants(&constants),
             Err(_) => Self {
                 network_name: "mantra-dukong".to_string(),
-                network_id: "mantra-dukong-1".to_string(),
-                rpc_url: "https://rpc.dukong.mantrachain.io/".to_string(),
-                gas_price: 0.025,
-                gas_adjustment: 1.3,
+                chain_id: "mantra-dukong-1".to_string(),
+                rpc_url: "https://rpc.dukong.mantrachain.io:443".to_string(),
+                gas_price: 0.01,
+                gas_adjustment: 1.5,
                 native_denom: "uom".to_string(),
                 contracts: ContractAddresses::default(),
             },

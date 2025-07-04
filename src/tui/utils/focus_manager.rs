@@ -393,10 +393,13 @@ pub mod component_ids {
         FocusableComponent::TextInput("liquidity_amount2".to_string())
     }
 
+<<<<<<< HEAD
     pub fn liquidity_slippage_input() -> FocusableComponent {
         FocusableComponent::TextInput("liquidity_slippage_amount".to_string())
     }
 
+=======
+>>>>>>> main
     pub fn liquidity_provide_button() -> FocusableComponent {
         FocusableComponent::Button("liquidity_provide".to_string())
     }

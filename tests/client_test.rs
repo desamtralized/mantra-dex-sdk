@@ -25,7 +25,7 @@ async fn test_client_creation() {
         "Client network name should match config"
     );
     assert_eq!(
-        client_config.network_id, network_config.network_id,
+        client_config.chain_id, network_config.chain_id,
         "Client network ID should match config"
     );
     assert_eq!(

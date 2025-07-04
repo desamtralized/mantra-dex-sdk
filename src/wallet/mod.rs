@@ -26,6 +26,21 @@ pub struct MantraWallet {
     account_prefix: String,
 }
 
+// Note: MantraWallet intentionally does not implement Clone for security reasons
+// The signing key should not be easily duplicated
+
+impl std::fmt::Debug for MantraWallet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MantraWallet")
+            .field("account_prefix", &self.account_prefix)
+            .field(
+                "public_key",
+                &hex::encode(self.signing_account.public_key().to_bytes()),
+            )
+            .finish()
+    }
+}
+
 /// Wallet info that can be serialized safely
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WalletInfo {
