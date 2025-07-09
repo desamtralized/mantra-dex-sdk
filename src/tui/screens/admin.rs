@@ -53,6 +53,13 @@ pub enum AdminInputFocus {
     ControlsExecute,
 }
 
+/// Validation result containing both boolean status and error messages
+#[derive(Debug, Clone)]
+struct ValidationResult {
+    is_valid: bool,
+    errors: Vec<String>,
+}
+
 /// Pool creation form state (simplified like swap/liquidity screens)
 #[derive(Debug, Clone)]
 pub struct PoolCreationState {
@@ -423,14 +430,25 @@ impl AdminScreenState {
             || self.feature_control.pool_selection_dropdown.is_editing
     }
 
-    /// Validate current form inputs
-    pub fn validate(&mut self) -> bool {
+    /// Perform validation checks and return detailed results
+    fn validate_internal(&mut self) -> ValidationResult {
         match self.mode {
-            AdminMode::PoolManagement => self
-                .pool_management
-                .pool_selection_dropdown
-                .get_selected_value()
-                .is_some(),
+            AdminMode::PoolManagement => {
+                let pool_selected = self
+                    .pool_management
+                    .pool_selection_dropdown
+                    .get_selected_value()
+                    .is_some();
+                
+                ValidationResult {
+                    is_valid: pool_selected,
+                    errors: if pool_selected { 
+                        Vec::new() 
+                    } else { 
+                        vec!["Please select a pool to manage".to_string()] 
+                    },
+                }
+            }
             AdminMode::PoolCreation => {
                 let first_valid = self.pool_creation.first_asset_input.validate();
                 let second_valid = self.pool_creation.second_asset_input.validate();
@@ -443,74 +461,58 @@ impl AdminScreenState {
                     .get_selected_value()
                     .is_some();
 
-                first_valid
-                    && second_valid
-                    && swap_fee_valid
-                    && protocol_fee_valid
-                    && burn_fee_valid
-                    && pool_type_valid
+                let mut errors = Vec::new();
+                if !first_valid {
+                    errors.push("Please enter a valid first asset denomination".to_string());
+                }
+                if !second_valid {
+                    errors.push("Please enter a valid second asset denomination".to_string());
+                }
+                if !swap_fee_valid {
+                    errors.push("Please enter a valid swap fee (0-20%)".to_string());
+                }
+                if !protocol_fee_valid {
+                    errors.push("Please enter a valid protocol fee (0-20%)".to_string());
+                }
+                if !burn_fee_valid {
+                    errors.push("Please enter a valid burn fee (0-20%)".to_string());
+                }
+                if !pool_type_valid {
+                    errors.push("Please select a pool type".to_string());
+                }
+
+                ValidationResult {
+                    is_valid: first_valid && second_valid && swap_fee_valid && protocol_fee_valid && burn_fee_valid && pool_type_valid,
+                    errors,
+                }
             }
-            AdminMode::FeatureControls => self
-                .feature_control
-                .pool_selection_dropdown
-                .get_selected_value()
-                .is_some(),
+            AdminMode::FeatureControls => {
+                let pool_selected = self
+                    .feature_control
+                    .pool_selection_dropdown
+                    .get_selected_value()
+                    .is_some();
+                
+                ValidationResult {
+                    is_valid: pool_selected,
+                    errors: if pool_selected { 
+                        Vec::new() 
+                    } else { 
+                        vec!["Please select a pool to control".to_string()] 
+                    },
+                }
+            }
         }
+    }
+
+    /// Validate current form inputs
+    pub fn validate(&mut self) -> bool {
+        self.validate_internal().is_valid
     }
 
     /// Get detailed validation errors
     pub fn get_validation_errors(&mut self) -> Vec<String> {
-        let mut errors = Vec::new();
-
-        match self.mode {
-            AdminMode::PoolManagement => {
-                if self
-                    .pool_management
-                    .pool_selection_dropdown
-                    .get_selected_value()
-                    .is_none()
-                {
-                    errors.push("Please select a pool to manage".to_string());
-                }
-            }
-            AdminMode::PoolCreation => {
-                if !self.pool_creation.first_asset_input.validate() {
-                    errors.push("Please enter a valid first asset denomination".to_string());
-                }
-                if !self.pool_creation.second_asset_input.validate() {
-                    errors.push("Please enter a valid second asset denomination".to_string());
-                }
-                if !self.pool_creation.swap_fee_input.validate() {
-                    errors.push("Please enter a valid swap fee (0-20%)".to_string());
-                }
-                if !self.pool_creation.protocol_fee_input.validate() {
-                    errors.push("Please enter a valid protocol fee (0-20%)".to_string());
-                }
-                if !self.pool_creation.burn_fee_input.validate() {
-                    errors.push("Please enter a valid burn fee (0-20%)".to_string());
-                }
-                if self
-                    .pool_creation
-                    .pool_type_dropdown
-                    .get_selected_value()
-                    .is_none()
-                {
-                    errors.push("Please select a pool type".to_string());
-                }
-            }
-            AdminMode::FeatureControls => {
-                if self
-                    .feature_control
-                    .pool_selection_dropdown
-                    .get_selected_value()
-                    .is_none()
-                {
-                    errors.push("Please select a pool to control".to_string());
-                }
-            }
-        }
-
-        errors
+        self.validate_internal().errors
     }
 
     /// Handle keyboard input using direct key events (like swap/liquidity screens)
