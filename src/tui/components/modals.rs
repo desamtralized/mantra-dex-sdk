@@ -497,6 +497,7 @@ pub fn render_modal(f: &mut Frame, modal_state: &ModalState, area: Rect) {
             }
         }
         ModalType::Loading { .. } => centered_rect(50, 30, area),
+        ModalType::TransactionDetails { .. } => centered_rect(80, 60, area),
         _ => centered_rect(60, 40, area),
     };
 
@@ -978,10 +979,18 @@ fn render_transaction_modal(
 
     f.render_widget(header_paragraph, chunks[0]);
 
-    // Details
+    // Details with text wrapping for long URLs
     let items: Vec<ListItem> = details
         .iter()
-        .map(|(key, value)| ListItem::new(format!("{}: {}", key, value)))
+        .map(|(key, value)| {
+            // For long values (like explorer URLs), wrap them
+            if value.len() > 60 {
+                let wrapped_value = format!("{}\n  {}", key, value);
+                ListItem::new(wrapped_value)
+            } else {
+                ListItem::new(format!("{}: {}", key, value))
+            }
+        })
         .collect();
 
     let list = List::new(items)
@@ -1101,14 +1110,12 @@ fn render_wallet_save_modal(
         Style::default().fg(Color::White)
     };
 
-    let name_input = Paragraph::new(wallet_name)
-        .style(name_style)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Wallet Name")
-                .padding(Padding::uniform(1)),
-        );
+    let name_input = Paragraph::new(wallet_name).style(name_style).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Wallet Name")
+            .padding(Padding::uniform(1)),
+    );
 
     f.render_widget(name_input, chunks[1]);
 
@@ -1149,14 +1156,12 @@ fn render_wallet_save_modal(
         "*".repeat(confirm_password.len())
     };
 
-    let confirm_input = Paragraph::new(confirm_display)
-        .style(confirm_style)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Confirm Password")
-                .padding(Padding::uniform(1)),
-        );
+    let confirm_input = Paragraph::new(confirm_display).style(confirm_style).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Confirm Password")
+            .padding(Padding::uniform(1)),
+    );
 
     f.render_widget(confirm_input, chunks[3]);
 

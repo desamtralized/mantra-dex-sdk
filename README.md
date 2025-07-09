@@ -1,6 +1,6 @@
-# Mantra DEX SDK Model Context Protocol (MCP) Server
+# MANTRA DEX SDK Model Context Protocol (MCP) Server
 
-A comprehensive Model Context Protocol (MCP) server that exposes the complete functionality of the Mantra DEX SDK, enabling AI agents and other MCP clients to interact with the Mantra blockchain DEX through a standardized protocol.
+A comprehensive Model Context Protocol (MCP) server that exposes the complete functionality of the MANTRA DEX SDK, enabling AI agents and other MCP clients to interact with the MANTRA blockchain DEX through a standardized protocol.
 
 ## 🌟 Features
 
@@ -606,4 +606,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Built with ❤️ for the Mantra ecosystem** 
+**Built with ❤️ for the MANTRA ecosystem** 

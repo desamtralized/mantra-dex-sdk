@@ -185,13 +185,13 @@ impl PasswordInput {
     fn validate_password(password: &str) -> PasswordValidation {
         let mut issues = Vec::new();
         let mut suggestions = Vec::new();
-        
+
         let len = password.len();
         let has_upper = password.chars().any(|c| c.is_uppercase());
         let has_lower = password.chars().any(|c| c.is_lowercase());
         let has_digit = password.chars().any(|c| c.is_ascii_digit());
         let has_symbol = password.chars().any(|c| !c.is_alphanumeric());
-        
+
         // Check length requirement
         if len < 12 {
             issues.push(format!("Too short ({} chars)", len));
@@ -217,7 +217,8 @@ impl PasswordInput {
         }
 
         // Calculate strength
-        let strength = Self::calculate_strength(password, has_upper, has_lower, has_digit, has_symbol);
+        let strength =
+            Self::calculate_strength(password, has_upper, has_lower, has_digit, has_symbol);
         let is_valid = issues.is_empty() && len >= 12;
 
         PasswordValidation {
@@ -262,7 +263,11 @@ impl PasswordInput {
             Layout::default()
                 .direction(Direction::Vertical)
                 .margin(0)
-                .constraints([Constraint::Length(3), Constraint::Length(1), Constraint::Min(2)])
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                    Constraint::Min(2),
+                ])
                 .split(area)
         } else {
             Layout::default()

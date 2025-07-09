@@ -5,7 +5,7 @@
 
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Padding, Paragraph},
+    widgets::{Block, Borders, Paragraph},
 };
 
 /// Minimum terminal dimensions for the application

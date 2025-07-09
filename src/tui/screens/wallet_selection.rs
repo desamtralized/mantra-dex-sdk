@@ -8,8 +8,8 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use crate::wallet::{WalletMetadata, WalletStorage};
 use crate::tui::components::password_input::PasswordInput;
+use crate::wallet::{WalletMetadata, WalletStorage};
 use crate::Error;
 
 /// Current state of the wallet selection screen
@@ -81,14 +81,14 @@ impl WalletSelectionScreen {
     pub fn initialize(&mut self) -> Result<(), Error> {
         let storage = WalletStorage::new()?;
         self.available_wallets = storage.list_wallets()?;
-        
+
         if self.available_wallets.is_empty() {
             self.state = WalletSelectionState::CreatingWallet;
         } else {
             self.state = WalletSelectionState::SelectingWallet;
             self.selected_index = 0;
         }
-        
+
         Ok(())
     }
 
@@ -118,7 +118,8 @@ impl WalletSelectionScreen {
             WalletSelectionState::SelectingWallet => {
                 if self.selected_index < self.available_wallets.len() {
                     // Selected an existing wallet - prompt for password
-                    self.selected_wallet = Some(self.available_wallets[self.selected_index].clone());
+                    self.selected_wallet =
+                        Some(self.available_wallets[self.selected_index].clone());
                     self.state = WalletSelectionState::EnteringPassword;
                     self.password_input.set_focused(true);
                     WalletSelectionAction::None
@@ -136,7 +137,10 @@ impl WalletSelectionScreen {
                 // Attempt to authenticate with entered password
                 if let Some(wallet) = &self.selected_wallet {
                     if !self.password_input.value().is_empty() {
-                        self.attempt_authentication(wallet.name.clone(), self.password_input.value().to_string())
+                        self.attempt_authentication(
+                            wallet.name.clone(),
+                            self.password_input.value().to_string(),
+                        )
                     } else {
                         WalletSelectionAction::None
                     }
@@ -149,33 +153,50 @@ impl WalletSelectionScreen {
     }
 
     /// Attempt to authenticate with the given password
-    fn attempt_authentication(&mut self, wallet_name: String, password: String) -> WalletSelectionAction {
+    fn attempt_authentication(
+        &mut self,
+        wallet_name: String,
+        password: String,
+    ) -> WalletSelectionAction {
         if self.is_locked_out {
-            self.error_message = Some(format!("Authentication locked. Try again in {} seconds.", self.lockout_time_remaining));
+            self.error_message = Some(format!(
+                "Authentication locked. Try again in {} seconds.",
+                self.lockout_time_remaining
+            ));
             return WalletSelectionAction::None;
         }
 
         self.state = WalletSelectionState::Loading;
-        
+
         // Clear password from input immediately for security
         self.password_input.clear();
-        
-        WalletSelectionAction::AuthenticateWallet { wallet_name, password }
+
+        WalletSelectionAction::AuthenticateWallet {
+            wallet_name,
+            password,
+        }
     }
 
     /// Handle authentication success
-    pub fn handle_authentication_success(&mut self, wallet_name: String, mnemonic: String) -> WalletSelectionAction {
+    pub fn handle_authentication_success(
+        &mut self,
+        wallet_name: String,
+        mnemonic: String,
+    ) -> WalletSelectionAction {
         self.failed_attempts = 0;
         self.error_message = None;
         self.is_locked_out = false;
-        WalletSelectionAction::WalletLoaded { wallet_name, mnemonic }
+        WalletSelectionAction::WalletLoaded {
+            wallet_name,
+            mnemonic,
+        }
     }
 
     /// Handle authentication failure
     pub fn handle_authentication_failure(&mut self, error: String) {
         self.failed_attempts += 1;
         self.error_message = Some(error);
-        
+
         if self.failed_attempts >= self.max_attempts {
             self.is_locked_out = true;
             self.lockout_time_remaining = 300; // 5 minutes
@@ -289,17 +310,16 @@ impl WalletSelectionScreen {
                 Style::default().fg(Color::White)
             };
 
-            let last_accessed = wallet.last_accessed
-                .as_deref()
-                .unwrap_or("Never");
+            let last_accessed = wallet.last_accessed.as_deref().unwrap_or("Never");
 
             let item = ListItem::new(format!(
                 "📱 {} ({}...{}) - Last: {}",
                 wallet.name,
                 &wallet.address[..8],
-                &wallet.address[wallet.address.len()-8..],
+                &wallet.address[wallet.address.len() - 8..],
                 last_accessed
-            )).style(style);
+            ))
+            .style(style);
             items.push(item);
         }
 
@@ -319,8 +339,11 @@ impl WalletSelectionScreen {
         };
         items.push(ListItem::new("🔄 Recover Existing Wallet").style(recover_style));
 
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title("Available Wallets"));
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Available Wallets"),
+        );
         Widget::render(list, chunks[1], buf);
 
         // Help text
@@ -380,12 +403,15 @@ impl WalletSelectionScreen {
 
         // Help text
         let help_text = if self.failed_attempts > 0 {
-            format!("Enter password (Attempt {}/{}) • Ctrl+H to toggle visibility • Esc to cancel", 
-                   self.failed_attempts + 1, self.max_attempts)
+            format!(
+                "Enter password (Attempt {}/{}) • Ctrl+H to toggle visibility • Esc to cancel",
+                self.failed_attempts + 1,
+                self.max_attempts
+            )
         } else {
             "Enter password • Ctrl+H to toggle visibility • Esc to cancel".to_string()
         };
-        
+
         let help = Paragraph::new(help_text)
             .style(Style::default().fg(Color::Gray))
             .wrap(ratatui::widgets::Wrap { trim: true });
@@ -461,9 +487,15 @@ pub enum WalletSelectionAction {
     /// User wants to recover a wallet
     RecoverWallet,
     /// Attempt to authenticate with the given wallet
-    AuthenticateWallet { wallet_name: String, password: String },
+    AuthenticateWallet {
+        wallet_name: String,
+        password: String,
+    },
     /// Wallet was successfully loaded
-    WalletLoaded { wallet_name: String, mnemonic: String },
+    WalletLoaded {
+        wallet_name: String,
+        mnemonic: String,
+    },
     /// User wants to quit the application
     Quit,
 }
@@ -472,8 +504,8 @@ pub enum WalletSelectionAction {
 pub fn render_wallet_selection(frame: &mut ratatui::Frame, app: &crate::tui::app::App) {
     let area = frame.area();
     let mut buf = frame.buffer_mut();
-    
+
     // Access the wallet selection state and call its render method
     let mut wallet_selection_state = app.state.wallet_selection_state.clone();
     wallet_selection_state.render(area, buf);
-} 
+}

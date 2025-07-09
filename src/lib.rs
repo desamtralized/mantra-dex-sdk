@@ -10,7 +10,6 @@ pub mod tui;
 // MCP module - optional via "mcp" feature
 #[cfg(feature = "mcp")]
 pub mod mcp;
-
 // Re-export mantra-dex-std for user convenience
 pub use mantra_dex_std;
 
@@ -30,7 +29,6 @@ pub use mcp::{
     MantraDexMcpServer, McpResult, McpSdkAdapter, McpServerConfig, McpServerError, MCP_SERVER_NAME,
     MCP_SERVER_VERSION,
 };
-
 // Re-export common types from mantra-dex-std
 pub use cosmwasm_std::{Coin, Decimal, Uint128};
 pub use mantra_dex_std::{

@@ -198,13 +198,13 @@ pub fn render_password_prompt(frame: &mut Frame, prompt: &PasswordPrompt) {
     }
 
     let size = frame.area();
-    
+
     // Create centered modal area
     let modal_area = centered_rect(60, 40, size);
-    
+
     // Clear the background
     frame.render_widget(Clear, modal_area);
-    
+
     // Create main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -221,30 +221,37 @@ pub fn render_password_prompt(frame: &mut Frame, prompt: &PasswordPrompt) {
     let border_style = Style::default()
         .fg(prompt.get_status_color())
         .add_modifier(Modifier::BOLD);
-    
+
     let modal_block = Block::default()
         .borders(Borders::ALL)
         .title(" Wallet Authentication ")
         .title_alignment(Alignment::Center)
         .style(border_style);
-    
+
     frame.render_widget(modal_block, modal_area);
 
     // Title
     let title_text = if prompt.is_locked_out() {
         Text::from(Line::from(vec![
             Span::styled("🔒 ", Style::default().fg(Color::Red)),
-            Span::styled("Account Locked", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Account Locked",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
         ]))
     } else {
         Text::from(Line::from(vec![
             Span::styled("🔑 ", Style::default().fg(Color::Blue)),
-            Span::styled("Enter Password", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Enter Password",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ]))
     };
-    
-    let title = Paragraph::new(title_text)
-        .alignment(Alignment::Center);
+
+    let title = Paragraph::new(title_text).alignment(Alignment::Center);
     frame.render_widget(title, chunks[0]);
 
     // Wallet info
@@ -286,36 +293,38 @@ pub fn render_password_prompt(frame: &mut Frame, prompt: &PasswordPrompt) {
 
     // Error message or status
     let mut status_lines = Vec::new();
-    
+
     if prompt.is_locked_out() {
-        status_lines.push(Line::from(vec![
-            Span::styled("❌ Too many failed attempts!", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-        ]));
-        status_lines.push(Line::from(vec![
-            Span::styled("Please restart the application to try again.", Style::default().fg(Color::Red)),
-        ]));
+        status_lines.push(Line::from(vec![Span::styled(
+            "❌ Too many failed attempts!",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )]));
+        status_lines.push(Line::from(vec![Span::styled(
+            "Please restart the application to try again.",
+            Style::default().fg(Color::Red),
+        )]));
     } else if let Some(ref error) = prompt.error_message {
         status_lines.push(Line::from(vec![
             Span::styled("❌ ", Style::default().fg(Color::Red)),
             Span::styled(error, Style::default().fg(Color::Red)),
         ]));
-        
+
         let remaining_attempts = prompt.max_attempts - prompt.failed_attempts;
         if remaining_attempts > 0 {
-            status_lines.push(Line::from(vec![
-                Span::styled(
-                    format!("⚠️  {} attempt{} remaining", 
-                        remaining_attempts,
-                        if remaining_attempts == 1 { "" } else { "s" }
-                    ), 
-                    Style::default().fg(Color::Yellow)
+            status_lines.push(Line::from(vec![Span::styled(
+                format!(
+                    "⚠️  {} attempt{} remaining",
+                    remaining_attempts,
+                    if remaining_attempts == 1 { "" } else { "s" }
                 ),
-            ]));
+                Style::default().fg(Color::Yellow),
+            )]));
         }
     } else {
-        status_lines.push(Line::from(vec![
-            Span::styled("Enter your wallet password to continue", Style::default().fg(Color::Gray)),
-        ]));
+        status_lines.push(Line::from(vec![Span::styled(
+            "Enter your wallet password to continue",
+            Style::default().fg(Color::Gray),
+        )]));
     }
 
     let status = Paragraph::new(Text::from(status_lines))
@@ -330,7 +339,7 @@ pub fn render_password_prompt(frame: &mut Frame, prompt: &PasswordPrompt) {
         } else {
             "Enter: Submit • Esc: Cancel • F1: Show Password"
         };
-        
+
         let help = Paragraph::new(help_text)
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);

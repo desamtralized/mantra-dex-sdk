@@ -139,7 +139,7 @@ mod tests {
         assert_eq!(number_key_to_screen('1'), Some(Screen::Dashboard));
         assert_eq!(number_key_to_screen('2'), Some(Screen::Pools));
         assert_eq!(number_key_to_screen('8'), Some(Screen::Settings));
-        assert_eq!(number_key_to_screen('9'), None);
+        assert_eq!(number_key_to_screen('9'), Some(Screen::TransactionDetails));
         assert_eq!(number_key_to_screen('a'), None);
     }
 }

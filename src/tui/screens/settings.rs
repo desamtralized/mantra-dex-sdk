@@ -476,7 +476,7 @@ impl SettingsState {
             NetworkEnvironment::Mainnet => {
                 new_config.network = MantraNetworkConfig {
                     network_name: "mantra-mainnet".to_string(),
-                    chain_id: "mantra-mainnet".to_string(),
+                    chain_id: "mantra-mainnet-1".to_string(),
                     rpc_url: "https://rpc.mantrachain.io/".to_string(),
                     gas_price: 0.025,
                     gas_adjustment: 1.3,
@@ -487,7 +487,7 @@ impl SettingsState {
             NetworkEnvironment::Testnet => {
                 new_config.network = MantraNetworkConfig {
                     network_name: "mantra-dukong".to_string(),
-                    chain_id: "mantra-dukong".to_string(),
+                    chain_id: "mantra-dukong-1".to_string(),
                     rpc_url: "https://rpc.dukong.mantrachain.io/".to_string(),
                     gas_price: 0.025,
                     gas_adjustment: 1.3,
@@ -534,9 +534,88 @@ impl SettingsState {
         self.message = Some(("Settings reset to defaults".to_string(), false));
     }
 
-    /// Clear any messages
+    /// Clear messages
     pub fn clear_message(&mut self) {
         self.message = None;
+    }
+
+    /// Move focus to next field in current section
+    pub fn next_field(&mut self) {
+        match self.current_section {
+            SettingsSection::Network => {
+                self.network_form.form_state.current_field =
+                    (self.network_form.form_state.current_field + 1) % 4; // 4 fields in network section
+            }
+            SettingsSection::Wallet => {
+                self.wallet_form.form_state.current_field =
+                    (self.wallet_form.form_state.current_field + 1) % 1; // 1 field in wallet section
+            }
+            SettingsSection::Display => {
+                self.display_form.form_state.current_field =
+                    (self.display_form.form_state.current_field + 1) % 3; // 3 fields in display section
+            }
+        }
+    }
+
+    /// Move focus to previous field in current section
+    pub fn previous_field(&mut self) {
+        match self.current_section {
+            SettingsSection::Network => {
+                if self.network_form.form_state.current_field == 0 {
+                    self.network_form.form_state.current_field = 3; // wrap to last field
+                } else {
+                    self.network_form.form_state.current_field -= 1;
+                }
+            }
+            SettingsSection::Wallet => {
+                // Only one field, no change needed
+            }
+            SettingsSection::Display => {
+                if self.display_form.form_state.current_field == 0 {
+                    self.display_form.form_state.current_field = 2; // wrap to last field
+                } else {
+                    self.display_form.form_state.current_field -= 1;
+                }
+            }
+        }
+    }
+
+    /// Check if currently focused field is editable
+    pub fn is_current_field_editable(&self) -> bool {
+        match self.current_section {
+            SettingsSection::Network => {
+                // Network fields are editable when custom environment is selected
+                matches!(self.network_form.environment, NetworkEnvironment::Custom)
+            }
+            SettingsSection::Wallet => {
+                // Wallet field is editable when in import mode
+                self.wallet_form.import_mode
+            }
+            SettingsSection::Display => {
+                // Display fields are always editable
+                true
+            }
+        }
+    }
+
+    /// Get the current field name for focus identification
+    pub fn get_current_field_id(&self) -> Option<String> {
+        match self.current_section {
+            SettingsSection::Network => match self.network_form.form_state.current_field {
+                0 => Some("settings_network_name".to_string()),
+                1 => Some("settings_network_rpc".to_string()),
+                2 => Some("settings_gas_price".to_string()),
+                3 => Some("settings_gas_adjustment".to_string()),
+                _ => None,
+            },
+            SettingsSection::Wallet => Some("settings_wallet_mnemonic".to_string()),
+            SettingsSection::Display => match self.display_form.form_state.current_field {
+                0 => Some("settings_balance_refresh".to_string()),
+                1 => Some("settings_pool_refresh".to_string()),
+                2 => Some("settings_decimal_precision".to_string()),
+                _ => None,
+            },
+        }
     }
 }
 
@@ -1312,5 +1391,36 @@ pub struct SettingsScreen;
 impl SettingsScreen {
     pub fn new() -> Self {
         Self
+    }
+}
+
+/// Initialize settings screen focus management
+pub fn initialize_settings_screen_focus() {
+    // This function can be called when entering the settings screen
+    // to ensure proper focus initialization
+}
+
+/// Settings screen focus management helper
+pub fn get_focusable_components_for_section(section: SettingsSection) -> Vec<String> {
+    match section {
+        SettingsSection::Network => vec![
+            "settings_network_environment".to_string(),
+            "settings_network_name".to_string(),
+            "settings_network_rpc".to_string(),
+            "settings_gas_price".to_string(),
+            "settings_gas_adjustment".to_string(),
+        ],
+        SettingsSection::Wallet => vec![
+            "settings_wallet_import_mode".to_string(),
+            "settings_wallet_mnemonic".to_string(),
+            "settings_wallet_show_mnemonic".to_string(),
+        ],
+        SettingsSection::Display => vec![
+            "settings_theme".to_string(),
+            "settings_balance_refresh".to_string(),
+            "settings_pool_refresh".to_string(),
+            "settings_decimal_precision".to_string(),
+            "settings_auto_refresh".to_string(),
+        ],
     }
 }

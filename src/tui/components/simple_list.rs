@@ -1,13 +1,12 @@
+use crossterm::event::{KeyCode, KeyEvent};
 /// Simple list component that is always visible
 /// Based on Ratatui's List widget for reliable functionality
-
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState},
     Frame,
 };
-use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListEvent {
@@ -187,13 +186,12 @@ impl SimpleList {
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
         if self.options.is_empty() {
             // Render empty state
-            let empty_list = List::new(vec![ListItem::new("No options available")])
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title(self.label.as_str())
-                        .border_style(Style::default().fg(Color::DarkGray))
-                );
+            let empty_list = List::new(vec![ListItem::new("No options available")]).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(self.label.as_str())
+                    .border_style(Style::default().fg(Color::DarkGray)),
+            );
             f.render_widget(empty_list, area);
             return;
         }
@@ -215,11 +213,11 @@ impl SimpleList {
 
         // Create and render the list
         let border_color = if self.is_editing {
-            Color::Green  // Green when in editing/selection mode
+            Color::Green // Green when in editing/selection mode
         } else if self.is_active {
             Color::Yellow // Yellow when focused but not editing
         } else {
-            Color::Gray   // Gray when not focused
+            Color::Gray // Gray when not focused
         };
 
         let title = if self.is_editing {
@@ -235,15 +233,15 @@ impl SimpleList {
                 Block::default()
                     .borders(Borders::ALL)
                     .title(title.as_str())
-                    .border_style(Style::default().fg(border_color))
+                    .border_style(Style::default().fg(border_color)),
             )
             .highlight_style(
                 Style::default()
                     .bg(Color::Yellow)
                     .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             );
 
         f.render_stateful_widget(list, area, &mut self.list_state);
     }
-} 
+}

@@ -355,9 +355,7 @@ impl SwapScreenState {
                     self.next_focus();
                 }
 
-                // Always return true to prevent event from bubbling up to main app
-                // This fixes the issue where Down arrow after token selection was causing app exit
-                true
+                list_event != ListEvent::Ignored
             }
             SwapInputFocus::FromToken => {
                 let old_selection = self.from_token_dropdown.selected_index;
@@ -373,29 +371,9 @@ impl SwapScreenState {
                     self.next_focus();
                 }
 
-                // Always return true to prevent event from bubbling up to main app
-                // This fixes the issue where Down arrow after token selection was causing app exit
-                true
+                list_event != ListEvent::Ignored
             }
             SwapInputFocus::FromAmount => {
-                // Handle navigation keys first
-                match key.code {
-                    KeyCode::Down | KeyCode::Tab => {
-                        self.next_focus();
-                        return true;
-                    }
-                    KeyCode::Up => {
-                        self.previous_focus();
-                        return true;
-                    }
-                    KeyCode::Enter => {
-                        self.next_focus();
-                        return true;
-                    }
-                    _ => {}
-                }
-
-                // Handle text input
                 let input_request = match key.code {
                     KeyCode::Char(c) => Some(InputRequest::InsertChar(c)),
                     KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
@@ -413,30 +391,9 @@ impl SwapScreenState {
                         return true;
                     }
                 }
-
-                // Always return true to prevent event bubbling for any unhandled keys
-                // This prevents Down arrow from causing app exit
-                true
+                false
             }
             SwapInputFocus::Slippage => {
-                // Handle navigation keys first
-                match key.code {
-                    KeyCode::Down | KeyCode::Tab => {
-                        self.next_focus();
-                        return true;
-                    }
-                    KeyCode::Up => {
-                        self.previous_focus();
-                        return true;
-                    }
-                    KeyCode::Enter => {
-                        self.next_focus();
-                        return true;
-                    }
-                    _ => {}
-                }
-
-                // Handle text input
                 let input_request = match key.code {
                     KeyCode::Char(c) => Some(InputRequest::InsertChar(c)),
                     KeyCode::Backspace => Some(InputRequest::DeletePrevChar),
@@ -454,10 +411,7 @@ impl SwapScreenState {
                         return true;
                     }
                 }
-
-                // Always return true to prevent event bubbling for any unhandled keys
-                // This prevents navigation keys from causing app exit
-                true
+                false
             }
             SwapInputFocus::Execute => {
                 // Handle execute button activation
@@ -881,31 +835,22 @@ fn render_execute_button(f: &mut Frame, area: Rect, app: &App) {
         )
     };
 
-    // Add loading progress indicator if available
+    // Add loading indicator if available
     let button_content = if is_loading {
-        if let LoadingState::Loading {
-            progress: Some(p), ..
-        } = &app.state.loading_state
+        // Show animated dots for loading
+        let dots = match (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            / 500)
+            % 4
         {
-            let progress_bar = "█".repeat(((*p / 10.0) as usize).min(10));
-            let empty_bar = "░".repeat(10 - progress_bar.len());
-            format!("{}\n[{}{}]", button_text, progress_bar, empty_bar)
-        } else {
-            // Show animated dots for indeterminate progress
-            let dots = match (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-                / 500)
-                % 4
-            {
-                0 => "",
-                1 => ".",
-                2 => "..",
-                _ => "...",
-            };
-            format!("{}{}", button_text, dots)
-        }
+            0 => "",
+            1 => ".",
+            2 => "..",
+            _ => "...",
+        };
+        format!("{}{}", button_text, dots)
     } else {
         button_text.to_string()
     };
@@ -1052,11 +997,8 @@ fn render_simulation_results(f: &mut Frame, area: Rect, app: &App) {
         render_simulation_details(simulation)
     } else if matches!(app.state.loading_state, LoadingState::Loading { .. }) {
         // Show detailed loading information
-        if let LoadingState::Loading {
-            message, progress, ..
-        } = &app.state.loading_state
-        {
-            let mut loading_lines = vec![
+        if let LoadingState::Loading { message, .. } = &app.state.loading_state {
+            let loading_lines = vec![
                 Line::from(vec![Span::styled(
                     "🔄 Processing Transaction",
                     Style::default()
@@ -1068,33 +1010,12 @@ fn render_simulation_results(f: &mut Frame, area: Rect, app: &App) {
                     message,
                     Style::default().fg(Color::Cyan),
                 )]),
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    "Please wait...",
+                    Style::default().fg(Color::Gray),
+                )]),
             ];
-
-            // Add progress bar if available
-            if let Some(p) = progress {
-                let progress_percent = *p as u16;
-                let bar_width = 20;
-                let filled = ((progress_percent as f32 / 100.0) * bar_width as f32) as usize;
-                let empty = bar_width - filled;
-
-                loading_lines.push(Line::from(""));
-                loading_lines.push(Line::from(vec![
-                    Span::styled("[", Style::default().fg(Color::White)),
-                    Span::styled("█".repeat(filled), Style::default().fg(Color::Green)),
-                    Span::styled("░".repeat(empty), Style::default().fg(Color::DarkGray)),
-                    Span::styled("]", Style::default().fg(Color::White)),
-                    Span::styled(
-                        format!(" {}%", progress_percent),
-                        Style::default().fg(Color::Yellow),
-                    ),
-                ]));
-            }
-
-            loading_lines.push(Line::from(""));
-            loading_lines.push(Line::from(vec![Span::styled(
-                "Please wait while your transaction is processed...",
-                Style::default().fg(Color::Gray),
-            )]));
 
             loading_lines
         } else {
@@ -1550,7 +1471,7 @@ mod tests {
     fn test_calculate_estimated_output() {
         let swap_state = SwapState::default();
         let result = _calculate_estimated_output("100.0", &swap_state);
-        assert_eq!(result, "99.9700");
+        assert_eq!(result, "99.7000");
     }
 
     #[test]

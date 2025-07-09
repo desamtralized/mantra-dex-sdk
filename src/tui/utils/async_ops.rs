@@ -8,7 +8,7 @@ use crate::{Error, MantraDexClient};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tokio::time::{interval, Interval};
+use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
 
 /// Background sync configuration
@@ -632,6 +632,7 @@ impl AsyncDataRefresher {
                         operation: operation_name.to_string(),
                         result: format!("Operation completed in {:?}", start_time.elapsed()),
                         transaction_hash: None,
+                        enhanced_data: None, // No enhanced data for general operations
                     });
                     return Ok(result);
                 }

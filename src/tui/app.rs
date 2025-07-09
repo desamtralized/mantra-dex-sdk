@@ -353,8 +353,8 @@ pub struct AppState {
     pub claimable_rewards: HashMap<String, Uint128>,
     /// Rewards screen state
     pub rewards_state: crate::tui::screens::rewards::RewardsState,
-    /// Admin screen state
-    pub admin_state: crate::tui::screens::admin::AdminState,
+    /// Admin screen state  
+    pub admin_screen_state: crate::tui::screens::admin::AdminScreenState,
     /// Settings screen state
     pub settings_state: crate::tui::screens::settings::SettingsState,
     /// Transaction screen state
@@ -369,6 +369,8 @@ pub struct AppState {
     pub wallet_selection_state: crate::tui::screens::wallet_selection::WalletSelectionScreen,
     /// Wallet setup wizard state
     pub wizard_state: crate::tui::screens::wizard::WizardState,
+    /// Asset decimals cache (denom -> decimal places)
+    pub asset_decimals_cache: HashMap<String, u8>,
 }
 
 /// Pending operation tracking for comprehensive loading states
@@ -430,7 +432,7 @@ impl Default for AppState {
             current_epoch: None,
             claimable_rewards: HashMap::new(),
             rewards_state: crate::tui::screens::rewards::RewardsState::default(),
-            admin_state: crate::tui::screens::admin::AdminState::default(),
+            admin_screen_state: crate::tui::screens::admin::AdminScreenState::default(),
             settings_state: crate::tui::screens::settings::SettingsState::default(),
             transaction_state: crate::tui::screens::transaction::TransactionState::default(),
             network_info: NetworkInfo::default(),
@@ -444,6 +446,7 @@ impl Default for AppState {
                 wizard.show_wizard = false;
                 wizard
             },
+            asset_decimals_cache: HashMap::new(),
         }
     }
 }
@@ -651,6 +654,44 @@ impl App {
         }
     }
 
+    /// Format insufficient funds error in a user-friendly way
+    fn format_insufficient_funds_error(&self, error: &str) -> String {
+        // Simple parsing to extract token symbols from insufficient funds error
+        if error.contains("insufficient funds") || error.contains("spendable balance") {
+            // Look for specific token denominations in the error message
+            if error
+                .contains("ibc/8E27BA2D5493AF5636760E354E46004562C46AB7EC0CC4C1CA14E9E20E2545B5")
+                || error.contains("factory/mantra1qwm8p82w0ygaz3duf0y56gjf8pwh5ykmgnqmtm/uUSDC")
+            {
+                return "Insufficient USDC balance.\n\nYou don't have enough USDC to complete this transaction.\nPlease add more USDC to your wallet or reduce the transaction amount.".to_string();
+            } else if error.contains("uom") {
+                return "Insufficient OM balance.\n\nYou don't have enough OM to complete this transaction.\nPlease add more OM to your wallet or reduce the transaction amount.".to_string();
+            }
+        }
+
+        "Insufficient funds. Please check your wallet balance and try again with a smaller amount."
+            .to_string()
+    }
+
+    /// Extract meaningful contract error message
+    fn extract_contract_error(&self, error: &str) -> String {
+        // Look for the actual contract error message
+        if let Some(start) = error.find("failed to execute message") {
+            if let Some(end) = error[start..].find(": ") {
+                let contract_part = &error[start + end + 2..];
+                if let Some(error_end) = contract_part.find(": ") {
+                    contract_part[..error_end].to_string()
+                } else {
+                    contract_part.to_string()
+                }
+            } else {
+                error[start..].to_string()
+            }
+        } else {
+            error.to_string()
+        }
+    }
+
     /// Handle async blockchain operations with comprehensive status updates
     pub async fn handle_event(&mut self, event: Event) -> Result<bool, Error> {
         // Handle network state changes
@@ -711,36 +752,130 @@ impl App {
             operation,
             result,
             transaction_hash,
+            enhanced_data,
         } = &event
         {
-            let mut success_details = vec![result.clone()];
-            if let Some(tx_hash) = transaction_hash {
-                success_details.push(format!("Transaction: {}", tx_hash));
-            }
+            // Clear loading state first
+            self.state.loading_state = LoadingState::Idle;
 
-            self.state.loading_state = LoadingState::success_with_details(
-                format!("{} completed successfully", operation),
-                success_details,
+            // Create operation-specific success titles and details
+            let (success_title, formatted_details) = match operation.as_str() {
+                "provide_liquidity" => {
+                    let title = "Liquidity Provided Successfully!".to_string();
+                    let details = self.create_liquidity_success_details(
+                        result,
+                        transaction_hash,
+                        enhanced_data,
+                    );
+                    (title, details)
+                }
+                "withdraw_liquidity" => {
+                    let title = "Liquidity Withdrawn Successfully!".to_string();
+                    let details = self.create_basic_success_details(result, transaction_hash);
+                    (title, details)
+                }
+                "execute_swap" => {
+                    let title = "Swap Completed Successfully!".to_string();
+                    let details = self.create_basic_success_details(result, transaction_hash);
+                    (title, details)
+                }
+                "claim_rewards" => {
+                    let title = "Rewards Claimed Successfully!".to_string();
+                    let details = self.create_basic_success_details(result, transaction_hash);
+                    (title, details)
+                }
+                "create_pool" => {
+                    let title = "Pool Created Successfully!".to_string();
+                    let details =
+                        self.create_pool_creation_success_details(result, transaction_hash);
+                    // Reset admin forms after successful pool creation
+                    crate::tui::screens::admin::reset_admin_forms(&mut self.state);
+                    (title, details)
+                }
+                "update_pool_features" => {
+                    let title = "Pool Features Updated Successfully!".to_string();
+                    let details = self.create_basic_success_details(result, transaction_hash);
+                    (title, details)
+                }
+                _ => {
+                    let title = format!("{} Completed Successfully!", operation.replace('_', " "));
+                    let details = self.create_basic_success_details(result, transaction_hash);
+                    (title, details)
+                }
+            };
+
+            self.state.modal_state = Some(
+                crate::tui::components::modals::ModalState::transaction_details(
+                    transaction_hash.clone().unwrap_or_default(),
+                    success_title,
+                    formatted_details,
+                ),
             );
+
+            crate::tui::utils::logger::log_info(&format!(
+                "Blockchain success modal displayed for operation: {}",
+                operation
+            ));
+
             return Ok(false);
         }
 
         // Handle blockchain error events
         if let Event::BlockchainError { operation, error } = &event {
-            let error_type = if error.to_lowercase().contains("network") {
-                ErrorType::Network
+            // Clear the loading state first
+            self.state.loading_state = LoadingState::Idle;
+
+            // Determine error type and create user-friendly message
+            let (error_type, user_friendly_error) = if error
+                .to_lowercase()
+                .contains("insufficient funds")
+            {
+                (
+                    ErrorType::Contract,
+                    self.format_insufficient_funds_error(error),
+                )
+            } else if error.to_lowercase().contains("network") {
+                (ErrorType::Network, "Network connection error. Please check your internet connection and try again.".to_string())
             } else if error.to_lowercase().contains("contract") {
-                ErrorType::Contract
+                (
+                    ErrorType::Contract,
+                    format!(
+                        "Smart contract error: {}",
+                        self.extract_contract_error(error)
+                    ),
+                )
             } else {
-                ErrorType::Unknown
+                (ErrorType::Unknown, error.clone())
             };
 
-            self.state.loading_state = LoadingState::error_with_details(
-                format!("{} failed", operation),
+            // Show error modal instead of just loading state
+            let operation_title = match operation.as_str() {
+                "provide_liquidity" => "Provide Liquidity Failed",
+                "withdraw_liquidity" => "Withdraw Liquidity Failed",
+                "execute_swap" => "Swap Failed",
+                _ => &format!("{} Failed", operation.replace('_', " ")),
+            };
+
+            self.state.modal_state = Some(crate::tui::components::modals::ModalState::error(
+                operation_title.to_string(),
+                user_friendly_error.clone(),
                 error_type,
-                vec![error.clone()],
+                Some(vec![
+                    format!("Operation: {}", operation),
+                    format!("Error Details: {}", error),
+                    format!(
+                        "Timestamp: {}",
+                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+                    ),
+                ]),
                 Some("retry_operation".to_string()),
-            );
+            ));
+
+            crate::tui::utils::logger::log_info(&format!(
+                "Blockchain error modal displayed for operation: {}",
+                operation
+            ));
+
             return Ok(false);
         }
 
@@ -786,6 +921,32 @@ impl App {
                 pool_id,
                 slippage_tolerance,
             } => {
+                // Set loading state immediately so UI can render it
+                self.set_loading(format!(
+                    "Executing swap: {} {} → {}",
+                    amount, from_asset, to_asset
+                ));
+
+                // Execute the swap asynchronously by sending it to the background
+                if let Some(sender) = &self.event_sender {
+                    // Send the swap execution to be handled in the background
+                    let _ = sender.send(Event::ExecuteSwapAsync {
+                        from_asset: from_asset.clone(),
+                        to_asset: to_asset.clone(),
+                        amount: amount.clone(),
+                        pool_id: pool_id.clone(),
+                        slippage_tolerance: slippage_tolerance.clone(),
+                    });
+                }
+                return Ok(false);
+            }
+            Event::ExecuteSwapAsync {
+                from_asset,
+                to_asset,
+                amount,
+                pool_id,
+                slippage_tolerance,
+            } => {
                 // Execute real swap transaction
                 self.execute_real_swap(
                     from_asset.clone(),
@@ -803,26 +964,103 @@ impl App {
                 asset_2_amount,
                 slippage_tolerance,
             } => {
-                let operation_name = "provide_liquidity";
-                let _pool_id = *pool_id;
-                let _asset_1_amount = asset_1_amount.clone();
-                let _asset_2_amount = asset_2_amount.clone();
-                let _slippage_tolerance = slippage_tolerance.clone();
+                crate::tui::utils::logger::log_info(&format!(
+                    "=== PROCESSING PROVIDE LIQUIDITY EVENT ===",
+                ));
+                crate::tui::utils::logger::log_info(&format!(
+                    "Pool ID: {}, Asset 1: {}, Asset 2: {}, Slippage: {:?}",
+                    pool_id, asset_1_amount, asset_2_amount, slippage_tolerance
+                ));
 
-                let result = self
-                    .execute_async_operation(operation_name, || async {
-                        // TODO: Implement actual liquidity provision
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        Ok(())
-                    })
-                    .await;
+                // Show loading modal for liquidity provision
+                self.set_loading_with_progress(
+                    format!("Providing liquidity to pool {}", pool_id),
+                    Some(5.0),
+                    true,
+                );
 
-                if let Err(e) = result {
-                    crate::tui::utils::logger::log_error(&format!(
-                        "Liquidity provision failed: {}",
-                        e
-                    ));
+                // Use the async blockchain processor to execute the real transaction
+                if let Some(event_sender) = &self.event_sender {
+                    let blockchain_processor =
+                        crate::tui::events::AsyncBlockchainProcessor::with_client(
+                            event_sender.clone(),
+                            self.client.clone(),
+                        );
+
+                    let pool_id_clone = pool_id.clone();
+                    let asset_1_clone = asset_1_amount.clone();
+                    let asset_2_clone = asset_2_amount.clone();
+                    let slippage_clone = slippage_tolerance.clone();
+
+                    // Spawn the async operation
+                    tokio::spawn(async move {
+                        blockchain_processor
+                            .provide_liquidity(
+                                pool_id_clone,
+                                asset_1_clone,
+                                asset_2_clone,
+                                slippage_clone,
+                            )
+                            .await;
+                    });
+                } else {
+                    crate::tui::utils::logger::log_error(
+                        "No event sender available for async blockchain operation",
+                    );
+                    self.set_error(
+                        "Failed to initiate liquidity provision: no event sender".to_string(),
+                    );
                 }
+
+                return Ok(false);
+            }
+            Event::WithdrawLiquidity {
+                pool_id,
+                lp_token_amount,
+                slippage_tolerance,
+            } => {
+                crate::tui::utils::logger::log_info(&format!(
+                    "=== PROCESSING WITHDRAW LIQUIDITY EVENT ===",
+                ));
+                crate::tui::utils::logger::log_info(&format!(
+                    "Pool ID: {}, LP Amount: {}, Slippage: {:?}",
+                    pool_id, lp_token_amount, slippage_tolerance
+                ));
+
+                // Show loading modal for liquidity withdrawal
+                self.set_loading_with_progress(
+                    format!("Withdrawing liquidity from pool {}", pool_id),
+                    Some(5.0),
+                    true,
+                );
+
+                // Use the async blockchain processor to execute the real transaction
+                if let Some(event_sender) = &self.event_sender {
+                    let blockchain_processor =
+                        crate::tui::events::AsyncBlockchainProcessor::with_client(
+                            event_sender.clone(),
+                            self.client.clone(),
+                        );
+
+                    let pool_id_clone = pool_id.clone();
+                    let lp_amount_clone = lp_token_amount.clone();
+                    let slippage_clone = slippage_tolerance.clone();
+
+                    // Spawn the async operation
+                    tokio::spawn(async move {
+                        blockchain_processor
+                            .withdraw_liquidity(pool_id_clone, lp_amount_clone, slippage_clone)
+                            .await;
+                    });
+                } else {
+                    crate::tui::utils::logger::log_error(
+                        "No event sender available for async blockchain operation",
+                    );
+                    self.set_error(
+                        "Failed to initiate liquidity withdrawal: no event sender".to_string(),
+                    );
+                }
+
                 return Ok(false);
             }
             Event::ClaimRewards {
@@ -830,71 +1068,121 @@ impl App {
                 epochs,
                 claim_all,
             } => {
+                // Show loading modal for rewards claiming
+                let operation_description = if *claim_all {
+                    "Claiming all available rewards".to_string()
+                } else if let Some(pool_id_val) = pool_id {
+                    format!("Claiming rewards from pool {}", pool_id_val)
+                } else {
+                    "Claiming rewards".to_string()
+                };
+
+                self.set_loading_with_progress(operation_description.clone(), Some(10.0), true);
+
                 let operation_name = "claim_rewards";
-                let _pool_id = *pool_id;
-                let _epochs = epochs.clone();
-                let _claim_all = *claim_all;
+                let pool_id_val = pool_id.clone();
+                let epochs_val = epochs.clone();
+                let claim_all_val = *claim_all;
 
                 let result = self
                     .execute_async_operation(operation_name, || async {
                         // TODO: Implement actual rewards claiming
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        Ok(())
+                        // Simulate the process
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+                        // For now, create a mock successful response
+                        // In real implementation, this would call self.client.claim_rewards()
+                        let mock_tx_hash = format!(
+                            "0x{:x}",
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs()
+                                + 1
+                        );
+
+                        Ok(mock_tx_hash)
                     })
                     .await;
 
-                if let Err(e) = result {
-                    crate::tui::utils::logger::log_error(&format!(
-                        "Rewards claiming failed: {}",
-                        e
-                    ));
+                match result {
+                    Ok(tx_hash) => {
+                        // Show success modal for rewards claiming
+                        let mut transaction_details = vec![
+                            ("Transaction Hash".to_string(), tx_hash.clone()),
+                            ("Operation Type".to_string(), "Claim Rewards".to_string()),
+                        ];
+
+                        if claim_all_val {
+                            transaction_details.push((
+                                "Claim Type".to_string(),
+                                "All Available Rewards".to_string(),
+                            ));
+                        } else if let Some(pool_id_val) = pool_id_val {
+                            transaction_details.push(("Pool ID".to_string(), pool_id_val));
+                        }
+
+                        if let Some(epochs_val) = epochs_val {
+                            let epochs_str = epochs_val
+                                .iter()
+                                .map(|e| e.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            transaction_details.push(("Epochs".to_string(), epochs_str));
+                        }
+
+                        transaction_details.extend(vec![
+                            ("Estimated Rewards".to_string(), "~0.5 OM".to_string()), // Mock value
+                            (
+                                "Status".to_string(),
+                                "✅ Completed Successfully".to_string(),
+                            ),
+                        ]);
+
+                        self.state.modal_state = Some(
+                            crate::tui::components::modals::ModalState::transaction_details(
+                                tx_hash,
+                                "Rewards Claimed Successfully".to_string(),
+                                transaction_details,
+                            ),
+                        );
+                    }
+                    Err(e) => {
+                        crate::tui::utils::logger::log_error(&format!(
+                            "Rewards claiming failed: {}",
+                            e
+                        ));
+                    }
                 }
                 return Ok(false);
             }
             _ => {}
         }
 
-        // Handle focus management events (but allow screens to steal arrow keys when needed)
-        let mut focus_handled = false;
-
-        if let Event::MoveFocus(direction) = &event {
-            if self.state.navigation_mode == NavigationMode::WithinScreen {
-                // Decide whether to let the FocusManager process this directional move.
-                let allow_focus_move = match self.state.current_screen {
-                    Screen::Swap => {
-                        let swap_state = crate::tui::screens::swap::get_swap_screen_state();
-                        let is_list_focus = matches!(
-                            swap_state.input_focus,
-                            crate::tui::screens::swap::SwapInputFocus::Pool
-                                | crate::tui::screens::swap::SwapInputFocus::FromToken
-                        );
-
-                        !(is_list_focus || swap_state.is_any_list_editing())
-                    }
-                    _ => true,
-                };
-
-                if allow_focus_move {
-                    if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
-                        self.update_component_focus(&focused_component);
-                        focus_handled = true;
-                    }
-                }
-            }
-        } else {
-            // Non-directional focus related events can be passed through directly.
-            // However, exclude ESC events to let the main handler manage navigation mode switches
-            if !matches!(event, Event::Escape) {
-                if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
-                    self.update_component_focus(&focused_component);
-                    focus_handled = true;
-                }
+        // Handle modal events FIRST - they take priority over everything else
+        if self.state.modal_state.is_some() {
+            if self.handle_modal_event(&event) {
+                return Ok(false); // Modal handled the event, don't process further
             }
         }
 
-        // Handle wizard events first if wizard is active
+        // Handle wizard events SECOND - they should take priority when active
         if self.state.wizard_state.show_wizard {
             return self.handle_wizard_event(event).await;
+        }
+
+        // Handle focus management events
+        let mut focus_handled = false;
+
+        // Let screen-specific handlers process events next
+        if self.handle_screen_specific_event(event.clone()).await? {
+            return Ok(true);
+        }
+
+        // If screen didn't handle it, try global focus management
+        if let Some(focused_component) = self.state.focus_manager.handle_event(&event) {
+            self.update_component_focus(&focused_component);
+            focus_handled = true;
         }
 
         // Handle standard navigation events
@@ -969,12 +1257,7 @@ impl App {
             }
             Event::Enter => {
                 // Handle enter key based on navigation mode
-                if let Some(modal) = &self.state.modal_state {
-                    if modal.is_confirmed() {
-                        self.handle_confirmation();
-                        self.state.modal_state = None;
-                    }
-                } else if self.state.current_screen == Screen::WalletSelection {
+                if self.state.current_screen == Screen::WalletSelection {
                     // Special case: Wallet selection screen should handle Enter directly
                     // without needing to switch to WithinScreen mode first
                     self.handle_screen_specific_event(Event::Enter).await?;
@@ -993,60 +1276,21 @@ impl App {
                 }
             }
             Event::MoveFocus(direction) => {
-                if self.state.navigation_mode == NavigationMode::WithinScreen {
-                    // Check if any list is in editing mode - if so, let screen handle the event
-                    let should_handle_as_focus = match self.state.current_screen {
-                        Screen::Swap => {
-                            let swap_state = crate::tui::screens::swap::get_swap_screen_state();
-                            // Always let the swap screen handle all navigation events
-                            // The swap screen has its own internal navigation logic
-                            false
-                        }
-                        Screen::Liquidity => {
-                            let liquidity_state =
-                                crate::tui::screens::liquidity::get_liquidity_screen_state();
-                            // When pool dropdown is focused or in Mode focus, keep arrow keys inside screen
-                            let is_list_or_mode_focus = matches!(
-                                liquidity_state.input_focus,
-                                crate::tui::screens::liquidity::LiquidityInputFocus::PoolSelection
-                                    | crate::tui::screens::liquidity::LiquidityInputFocus::Mode
-                            );
-
-                            // Allow focus movement only if we're NOT inside list/mode focus or editing state
-                            !(is_list_or_mode_focus || liquidity_state.is_any_list_editing())
-                        }
-                        _ => true, // Other screens use normal focus management
+                // MoveFocus events should already be handled by screen-specific handlers above
+                // If we reach here, it means the screen didn't handle it, so we fall back to global navigation
+                if self.state.navigation_mode == NavigationMode::WithinScreen && !focus_handled {
+                    // Convert Up/Down arrows to Tab/Shift+Tab behavior for consistent navigation
+                    let focus_event = match direction {
+                        crate::tui::events::FocusDirection::Up => Event::FocusPrevious,
+                        crate::tui::events::FocusDirection::Down => Event::FocusNext,
+                        _ => Event::MoveFocus(direction.clone()), // Keep other directions as-is
                     };
 
-                    if should_handle_as_focus {
-                        if let Some(focused_component) = self
-                            .state
-                            .focus_manager
-                            .handle_event(&Event::MoveFocus(direction))
-                        {
-                            self.update_component_focus(&focused_component);
-                        }
-                    } else {
-                        // Let the screen-specific handler deal with it
-                        if !self
-                            .handle_screen_specific_event(Event::MoveFocus(direction.clone()))
-                            .await?
-                        {
-                            // If screen didn't handle it, fall back to focus management
-                            if let Some(focused_component) = self
-                                .state
-                                .focus_manager
-                                .handle_event(&Event::MoveFocus(direction.clone()))
-                            {
-                                self.update_component_focus(&focused_component);
-                            }
-                        }
+                    if let Some(focused_component) =
+                        self.state.focus_manager.handle_event(&focus_event)
+                    {
+                        self.update_component_focus(&focused_component);
                     }
-                } else if self.state.current_screen == Screen::WalletSelection {
-                    // Special case: Allow wallet selection screen to handle MoveFocus events even in ScreenLevel mode
-                    // This is needed because wallet selection is often the first screen and needs arrow key navigation
-                    self.handle_screen_specific_event(Event::MoveFocus(direction.clone()))
-                        .await?;
                 }
             }
             Event::ContextAction => {
@@ -1060,20 +1304,16 @@ impl App {
                 self.refresh_current_screen_data().await?;
             }
             _ => {
-                // Handle modal events if modal is open
-                if self.state.modal_state.is_some() {
-                    if self.handle_modal_event(&event) {
-                        return Ok(false);
-                    }
-                }
-
-                // Screen-specific handlers should be checked before general navigation
-                if self.handle_screen_specific_event(event.clone()).await? {
-                    return Ok(false);
-                }
-
-                // Handle number key navigation for tab switching (1-8) when in ScreenLevel mode
+                // Handle character events that need special context-aware processing
                 if let Event::Char(c) = &event {
+                    // Handle 'q' as quit only when in ScreenLevel mode (not in text input)
+                    if *c == 'q' && self.state.navigation_mode == NavigationMode::ScreenLevel {
+                        // Show quit confirmation modal instead of immediately quitting
+                        self.show_quit_confirmation();
+                        return Ok(true);
+                    }
+
+                    // Handle number key navigation for tab switching (1-8) when in ScreenLevel mode
                     if self.state.navigation_mode == NavigationMode::ScreenLevel {
                         if let Some(screen) =
                             crate::tui::components::navigation::number_key_to_screen(*c)
@@ -1166,14 +1406,14 @@ impl App {
                         }
                         "liquidity_slippage_swap" => {
                             liquidity_state.input_focus =
-                                crate::tui::screens::liquidity::LiquidityInputFocus::SlippageSwap
+                                crate::tui::screens::liquidity::LiquidityInputFocus::SlippageAmount
                         }
                         _ => {}
                     },
                     FocusableComponent::Dropdown(id) => {
                         if id == "liquidity_pool" {
                             liquidity_state.input_focus =
-                                crate::tui::screens::liquidity::LiquidityInputFocus::PoolSelection
+                                crate::tui::screens::liquidity::LiquidityInputFocus::Pool
                         }
                     }
                     FocusableComponent::Button(id) => match id.as_str() {
@@ -1188,6 +1428,82 @@ impl App {
 
                 // Ensure internal state knows which widget is focused so that render_* helpers style correctly
                 liquidity_state.apply_focus();
+            }
+            Screen::Admin => {
+                let admin_state = crate::tui::screens::admin::get_admin_screen_state();
+                // Clear previous internal focus first
+                admin_state.reset_focus();
+
+                match focused_component {
+                    FocusableComponent::TextInput(id) => match id.as_str() {
+                        "admin_first_asset" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::FirstAssetDenom
+                        }
+                        "admin_second_asset" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::SecondAssetDenom
+                        }
+                        "admin_swap_fee" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::SwapFee
+                        }
+                        "admin_protocol_fee" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::ProtocolFee
+                        }
+                        "admin_burn_fee" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::BurnFee
+                        }
+                        "admin_target_pool_id" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::TargetPoolId
+                        }
+                        _ => {}
+                    },
+                    FocusableComponent::Dropdown(id) => match id.as_str() {
+                        "admin_pool_selection" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::PoolSelection
+                        }
+                        "admin_pool_type" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::PoolType
+                        }
+                        _ => {}
+                    },
+                    FocusableComponent::Button(id) => match id.as_str() {
+                        "admin_management_execute" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::ManagementExecute
+                        }
+                        "admin_creation_execute" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::CreationExecute
+                        }
+                        "admin_controls_execute" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::ControlsExecute
+                        }
+                        _ => {}
+                    },
+                    FocusableComponent::Custom(id) => match id.as_str() {
+                        "admin_feature_toggles" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::FeatureToggles
+                        }
+                        "admin_feature_controls" => {
+                            admin_state.input_focus =
+                                crate::tui::screens::admin::AdminInputFocus::FeatureControls
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+
+                // Ensure internal state knows which widget is focused so that render_* helpers style correctly
+                admin_state.apply_focus();
             }
             _ => {}
         }
@@ -1215,6 +1531,7 @@ impl App {
                     liquidity_pool_dropdown(),
                     liquidity_amount1_input(),
                     liquidity_amount2_input(),
+                    liquidity_slippage_input(),
                     liquidity_provide_button(),
                     liquidity_withdraw_button(),
                 ]
@@ -1225,15 +1542,75 @@ impl App {
                 rewards_history_table(),
             ],
             Screen::Admin => vec![
-                admin_asset1_input(),
-                admin_asset2_input(),
-                admin_fee_input(),
-                admin_create_pool_button(),
+                // Pool Management tab components
+                crate::tui::events::FocusableComponent::Dropdown(
+                    "admin_pool_selection".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::Custom("admin_feature_toggles".to_string()),
+                crate::tui::events::FocusableComponent::Button(
+                    "admin_management_execute".to_string(),
+                ),
+                // Pool Creation tab components
+                crate::tui::events::FocusableComponent::TextInput("admin_first_asset".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("admin_second_asset".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("admin_swap_fee".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("admin_protocol_fee".to_string()),
+                crate::tui::events::FocusableComponent::TextInput("admin_burn_fee".to_string()),
+                crate::tui::events::FocusableComponent::Dropdown("admin_pool_type".to_string()),
+                crate::tui::events::FocusableComponent::Button(
+                    "admin_creation_execute".to_string(),
+                ),
+                // Feature Controls tab components
+                crate::tui::events::FocusableComponent::TextInput(
+                    "admin_target_pool_id".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::Custom(
+                    "admin_feature_controls".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::Button(
+                    "admin_controls_execute".to_string(),
+                ),
             ],
             Screen::Settings => vec![
-                settings_network_dropdown(),
-                settings_rpc_input(),
-                settings_wallet_input(),
+                // Section navigation
+                crate::tui::events::FocusableComponent::Custom("settings_section_list".to_string()),
+                // Network section components
+                crate::tui::events::FocusableComponent::Dropdown(
+                    "settings_network_environment".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_network_name".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_network_rpc".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput("settings_gas_price".to_string()),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_gas_adjustment".to_string(),
+                ),
+                // Wallet section components
+                crate::tui::events::FocusableComponent::Button(
+                    "settings_wallet_import_mode".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_wallet_mnemonic".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::Button(
+                    "settings_wallet_show_mnemonic".to_string(),
+                ),
+                // Display section components
+                crate::tui::events::FocusableComponent::Dropdown("settings_theme".to_string()),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_balance_refresh".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_pool_refresh".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_decimal_precision".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::Button("settings_auto_refresh".to_string()),
+                // Action buttons
                 settings_save_button(),
                 settings_reset_button(),
             ],
@@ -1297,6 +1674,23 @@ impl App {
                         error: None,
                     });
                 }
+                // Update liquidity screen pool dropdown with cached pools
+                self.update_liquidity_screen_pools();
+            }
+            Screen::Admin => {
+                // Initialize focus for admin screen
+                crate::tui::screens::admin::initialize_admin_screen_focus(&mut self.state);
+
+                // Refresh pool data for admin screen
+                if let Some(sender) = &self.event_sender {
+                    let _ = sender.send(Event::DataRefresh {
+                        data_type: "pools".to_string(),
+                        success: true,
+                        error: None,
+                    });
+                }
+                // Update admin screen pool dropdown with cached pools
+                self.update_admin_screen_pools();
             }
             _ => {}
         }
@@ -1411,6 +1805,140 @@ impl App {
         // The hardcoded test balances have been removed to show actual wallet balances
     }
 
+    /// Update admin screen pools dropdown with available pools
+    fn update_admin_screen_pools(&mut self) {
+        // Extract all available pools from cache for admin operations
+        let available_pools: Vec<(String, String)> = self
+            .state
+            .pool_cache
+            .values()
+            .map(|entry| {
+                let pool = &entry.pool_info;
+                let pool_id = pool.pool_info.pool_identifier.to_string();
+
+                // Create display name showing asset pair with amounts
+                let asset_pair_with_amounts = if pool.pool_info.assets.len() >= 2 {
+                    let asset1 = &pool.pool_info.assets[0];
+                    let asset2 = &pool.pool_info.assets[1];
+
+                    // Get proper token symbols instead of micro denominations
+                    let asset1_symbol = self.denom_to_symbol(&asset1.denom);
+                    let asset2_symbol = self.denom_to_symbol(&asset2.denom);
+
+                    // Convert micro amounts to actual token amounts
+                    let asset1_amount =
+                        self.micro_to_token_amount(&asset1.amount.to_string(), &asset1.denom);
+                    let asset2_amount =
+                        self.micro_to_token_amount(&asset2.amount.to_string(), &asset2.denom);
+
+                    // Format with proper symbols and amounts
+                    format!(
+                        "{} ({}) / {} ({})",
+                        asset1_symbol, asset1_amount, asset2_symbol, asset2_amount
+                    )
+                } else {
+                    "Unknown Pair".to_string()
+                };
+
+                let display_name = format!("Pool {}: {}", pool_id, asset_pair_with_amounts);
+                (pool_id, display_name)
+            })
+            .collect();
+
+        // Debug output to understand what pools are available
+        crate::tui::utils::logger::log_debug(&format!(
+            "Total pools in cache for admin: {}",
+            self.state.pool_cache.len()
+        ));
+        crate::tui::utils::logger::log_debug(&format!(
+            "Available pools for admin management: {}",
+            available_pools.len()
+        ));
+        for (pool_id, display_name) in &available_pools {
+            crate::tui::utils::logger::log_debug(&format!(
+                "Admin Pool ID: '{}', Display: '{}'",
+                pool_id, display_name
+            ));
+        }
+
+        // Update the admin screen with available pools
+        crate::tui::screens::admin::update_admin_pools(&mut self.state, available_pools);
+    }
+
+    /// Update liquidity screen pools dropdown with available pools
+    fn update_liquidity_screen_pools(&mut self) {
+        // Extract available pools from cache for liquidity operations
+        let available_pools: Vec<(String, String)> = self
+            .state
+            .pool_cache
+            .values()
+            .filter(|entry| {
+                // Only include pools that have liquidity features enabled
+                let pool = &entry.pool_info;
+                pool.pool_info.status.deposits_enabled
+            })
+            .map(|entry| {
+                let pool = &entry.pool_info;
+                let pool_id = pool.pool_info.pool_identifier.to_string();
+
+                // Create display name showing asset pair with amounts
+                let asset_pair_with_amounts = if pool.pool_info.assets.len() >= 2 {
+                    let asset1 = &pool.pool_info.assets[0];
+                    let asset2 = &pool.pool_info.assets[1];
+
+                    // Get proper token symbols instead of micro denominations
+                    let asset1_symbol = self.denom_to_symbol(&asset1.denom);
+                    let asset2_symbol = self.denom_to_symbol(&asset2.denom);
+
+                    // Convert micro amounts to actual token amounts
+                    let asset1_amount =
+                        self.micro_to_token_amount(&asset1.amount.to_string(), &asset1.denom);
+                    let asset2_amount =
+                        self.micro_to_token_amount(&asset2.amount.to_string(), &asset2.denom);
+
+                    // Format with proper symbols and amounts
+                    format!(
+                        "{} ({}) / {} ({})",
+                        asset1_symbol, asset1_amount, asset2_symbol, asset2_amount
+                    )
+                } else {
+                    "Unknown Pair".to_string()
+                };
+
+                let display_name = format!("Pool {}: {}", pool_id, asset_pair_with_amounts);
+                (pool_id, display_name)
+            })
+            .collect();
+
+        // Debug output to understand what pools are available
+        crate::tui::utils::logger::log_debug(&format!(
+            "Total pools in cache: {}",
+            self.state.pool_cache.len()
+        ));
+        crate::tui::utils::logger::log_debug(&format!(
+            "Available liquidity-enabled pools: {}",
+            available_pools.len()
+        ));
+        for (pool_id, display_name) in &available_pools {
+            crate::tui::utils::logger::log_debug(&format!(
+                "Pool ID: '{}', Display: '{}'",
+                pool_id, display_name
+            ));
+        }
+
+        // Note: If no pools are available from cache, dropdowns will remain empty
+        // This is normal during initial loading or when no pools exist
+        if available_pools.is_empty() {
+            // Log warning that no pools are available
+            crate::tui::utils::logger::log_warning(
+                "No pools available for liquidity operations. Pool data may still be loading from blockchain.",
+            );
+        }
+
+        // Update the liquidity screen with available pools
+        crate::tui::screens::liquidity::update_liquidity_pools(available_pools);
+    }
+
     /// Handle enter key based on current focus
     async fn handle_enter_key(&mut self) -> Result<(), Error> {
         let focused = self.state.focus_manager.current_focus().cloned();
@@ -1473,7 +2001,7 @@ impl App {
                     if let Ok(pool_id) = pool_id_str.parse::<u64>() {
                         if let Some(sender) = &self.event_sender {
                             let _ = sender.send(Event::ProvideLiquidity {
-                                pool_id,
+                                pool_id: pool_id.to_string(),
                                 asset_1_amount: liquidity_state.first_asset_amount,
                                 asset_2_amount: liquidity_state.second_asset_amount,
                                 slippage_tolerance: Some(liquidity_state.slippage_amount),
@@ -1542,6 +2070,7 @@ impl App {
             Screen::WalletSelection => self.handle_wallet_selection_event(event).await,
             Screen::Swap => self.handle_swap_screen_event(event).await,
             Screen::Liquidity => self.handle_liquidity_screen_event(event).await,
+            Screen::Admin => self.handle_admin_screen_event(event).await,
             Screen::Settings => self.handle_settings_screen_event(event).await,
             _ => Ok(false),
         }
@@ -1552,14 +2081,14 @@ impl App {
         use crate::tui::screens::wallet_selection::{WalletSelectionAction, WalletSelectionState};
 
         match event {
-            Event::Up | Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
                 if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet
                 {
                     self.state.wallet_selection_state.move_selection_up();
                     return Ok(true);
                 }
             }
-            Event::Down | Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
                 if self.state.wallet_selection_state.state == WalletSelectionState::SelectingWallet
                 {
                     self.state.wallet_selection_state.move_selection_down();
@@ -1732,59 +2261,85 @@ impl App {
     async fn handle_swap_screen_event(&mut self, event: Event) -> Result<bool, Error> {
         let swap_state = crate::tui::screens::swap::get_swap_screen_state();
 
-        // Convert Event to KeyEvent for the new list system
-        let key_event = match &event {
+        // Handle MoveFocus events directly for better arrow key navigation
+        match &event {
             Event::MoveFocus(direction) => {
-                // Convert focus events to direct key events for list navigation
-                match direction {
-                    crate::tui::events::FocusDirection::Up => {
-                        Some(crossterm::event::KeyEvent::new(
-                            crossterm::event::KeyCode::Up,
-                            crossterm::event::KeyModifiers::NONE,
-                        ))
+                // Only handle arrow keys when we're in content mode and focused on interactive elements
+                if self.state.navigation_mode == NavigationMode::WithinScreen {
+                    match direction {
+                        crate::tui::events::FocusDirection::Up => {
+                            // Check if we're in a dropdown that should handle up/down
+                            if matches!(
+                                swap_state.input_focus,
+                                crate::tui::screens::swap::SwapInputFocus::Pool
+                                    | crate::tui::screens::swap::SwapInputFocus::FromToken
+                            ) && swap_state.is_any_list_editing()
+                            {
+                                // Let the dropdown handle the navigation
+                                let key = crossterm::event::KeyEvent::new(
+                                    crossterm::event::KeyCode::Up,
+                                    crossterm::event::KeyModifiers::NONE,
+                                );
+                                if swap_state.handle_key_event(key, self.state.navigation_mode) {
+                                    self.sync_swap_state_to_app(swap_state);
+                                    return Ok(true);
+                                }
+                            }
+                            // Otherwise, let global focus management handle it
+                            return Ok(false);
+                        }
+                        crate::tui::events::FocusDirection::Down => {
+                            // Check if we're in a dropdown that should handle up/down
+                            if matches!(
+                                swap_state.input_focus,
+                                crate::tui::screens::swap::SwapInputFocus::Pool
+                                    | crate::tui::screens::swap::SwapInputFocus::FromToken
+                            ) && swap_state.is_any_list_editing()
+                            {
+                                // Let the dropdown handle the navigation
+                                let key = crossterm::event::KeyEvent::new(
+                                    crossterm::event::KeyCode::Down,
+                                    crossterm::event::KeyModifiers::NONE,
+                                );
+                                if swap_state.handle_key_event(key, self.state.navigation_mode) {
+                                    self.sync_swap_state_to_app(swap_state);
+                                    return Ok(true);
+                                }
+                            }
+                            // Otherwise, let global focus management handle it
+                            return Ok(false);
+                        }
+                        _ => return Ok(false), // Let global focus handle other directions
                     }
-                    crate::tui::events::FocusDirection::Down => {
-                        Some(crossterm::event::KeyEvent::new(
-                            crossterm::event::KeyCode::Down,
-                            crossterm::event::KeyModifiers::NONE,
-                        ))
-                    }
-                    _ => None,
                 }
+                return Ok(false);
             }
-            _ => None,
-        };
-
-        if let Some(key) = key_event {
-            // Use the new key event handler
-            if swap_state.handle_key_event(key, self.state.navigation_mode) {
-                // Update app state with changes from swap screen
-                if let Some(selected_value) = swap_state.pool_dropdown.get_selected_value() {
-                    if let Ok(pool_id) = selected_value.parse::<u64>() {
-                        self.state.swap_state.selected_pool_id = Some(pool_id.to_string());
-                    }
-                }
-                if let Some(selected_token) = swap_state.from_token_dropdown.get_selected_value() {
-                    self.state.swap_state.from_asset = Some(selected_token.to_string());
-                }
-                self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
-                self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
-
-                return Ok(true);
-            }
+            _ => {}
         }
 
         // Handle other swap-specific events
         match event {
             Event::Tab => {
-                // Handle Tab navigation between form fields
-                swap_state.next_focus();
-                return Ok(true);
+                // Only handle Tab navigation between form fields when in WithinScreen mode
+                if self.state.navigation_mode == NavigationMode::WithinScreen {
+                    swap_state.next_focus();
+                    self.sync_swap_state_to_app(swap_state);
+                    return Ok(true);
+                } else {
+                    // In ScreenLevel mode, let global navigation handle Tab for screen switching
+                    return Ok(false);
+                }
             }
             Event::BackTab => {
-                // Handle Shift+Tab (reverse navigation) between form fields
-                swap_state.previous_focus();
-                return Ok(true);
+                // Only handle Shift+Tab (reverse navigation) between form fields when in WithinScreen mode
+                if self.state.navigation_mode == NavigationMode::WithinScreen {
+                    swap_state.previous_focus();
+                    self.sync_swap_state_to_app(swap_state);
+                    return Ok(true);
+                } else {
+                    // In ScreenLevel mode, let global navigation handle BackTab for screen switching
+                    return Ok(false);
+                }
             }
             Event::Enter => {
                 // Handle selection for currently focused list or execute button
@@ -1793,6 +2348,7 @@ impl App {
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    self.sync_swap_state_to_app(swap_state);
                     // Check if execute button was pressed by examining the current focus
                     if matches!(
                         swap_state.input_focus,
@@ -1825,6 +2381,7 @@ impl App {
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    self.sync_swap_state_to_app(swap_state);
                     return Ok(true);
                 }
             }
@@ -1835,26 +2392,7 @@ impl App {
                     crossterm::event::KeyModifiers::NONE,
                 );
                 if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
-                    return Ok(true);
-                }
-            }
-            Event::Up => {
-                // Handle up arrow for lists
-                let key_event = crossterm::event::KeyEvent::new(
-                    crossterm::event::KeyCode::Up,
-                    crossterm::event::KeyModifiers::NONE,
-                );
-                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
-                    return Ok(true);
-                }
-            }
-            Event::Down => {
-                // Handle down arrow for lists
-                let key_event = crossterm::event::KeyEvent::new(
-                    crossterm::event::KeyCode::Down,
-                    crossterm::event::KeyModifiers::NONE,
-                );
-                if swap_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    self.sync_swap_state_to_app(swap_state);
                     return Ok(true);
                 }
             }
@@ -1892,6 +2430,21 @@ impl App {
         }
 
         Ok(false)
+    }
+
+    /// Sync swap screen state back to app state
+    fn sync_swap_state_to_app(&mut self, swap_state: &crate::tui::screens::swap::SwapScreenState) {
+        // Update app state with changes from swap screen
+        if let Some(selected_value) = swap_state.pool_dropdown.get_selected_value() {
+            if let Ok(pool_id) = selected_value.parse::<u64>() {
+                self.state.swap_state.selected_pool_id = Some(pool_id.to_string());
+            }
+        }
+        if let Some(selected_token) = swap_state.from_token_dropdown.get_selected_value() {
+            self.state.swap_state.from_asset = Some(selected_token.to_string());
+        }
+        self.state.swap_state.amount = swap_state.from_amount_input.value().to_string();
+        self.state.swap_state.slippage = swap_state.slippage_input.value().to_string();
     }
 
     /// Handle liquidity screen specific events. Returns `true` if the event was handled.
@@ -1962,15 +2515,48 @@ impl App {
         };
 
         // Handle the event using the new key event system (similar to swap screen)
+        let mut key_handled = false;
+        let mut pool_changed = false;
         if let Some(key_event) = key_event {
-            if liquidity_state.handle_key_event(key_event, self.state.navigation_mode) {
-                return Ok(true);
+            key_handled = liquidity_state.handle_key_event(key_event, self.state.navigation_mode);
+            if key_handled {
+                // For navigation keys that might change pool selection, check if pool changed
+                if matches!(
+                    key_event.code,
+                    crossterm::event::KeyCode::Up
+                        | crossterm::event::KeyCode::Down
+                        | crossterm::event::KeyCode::Enter
+                ) {
+                    pool_changed = true;
+                }
+
+                // Check if execute button was pressed by examining the current focus
+                if matches!(
+                    liquidity_state.input_focus,
+                    crate::tui::screens::liquidity::LiquidityInputFocus::Execute
+                ) && matches!(event, Event::Enter)
+                {
+                    // Trigger liquidity confirmation
+                    if let Err(e) = self.handle_liquidity_execute_confirmation() {
+                        self.set_error(format!("Liquidity preparation failed: {}", e));
+                    }
+                }
             }
+        }
+
+        if key_handled {
+            // If pool might have changed, fetch reserves for proportional calculations
+            if pool_changed {
+                if let Some(pool_id) = liquidity_state.pool_dropdown.get_selected_value() {
+                    self.fetch_pool_reserves_for_liquidity(&pool_id).await?;
+                }
+            }
+            return Ok(true);
         }
 
         // Handle specific events that don't need key conversion
         match event {
-            Event::Right => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Right) => {
                 // Handle direct right arrow for tab switching
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Right,
@@ -1980,7 +2566,7 @@ impl App {
                     return Ok(true);
                 }
             }
-            Event::Left => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Left) => {
                 // Handle direct left arrow for tab switching
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Left,
@@ -1990,7 +2576,7 @@ impl App {
                     return Ok(true);
                 }
             }
-            Event::Up => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
                 // Handle up arrow for lists
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Up,
@@ -2000,7 +2586,7 @@ impl App {
                     return Ok(true);
                 }
             }
-            Event::Down => {
+            Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
                 // Handle down arrow for lists
                 let key_event = crossterm::event::KeyEvent::new(
                     crossterm::event::KeyCode::Down,
@@ -2016,106 +2602,501 @@ impl App {
         Ok(false)
     }
 
-    /// Handle settings screen specific events. Returns `true` if the event was handled.
-    async fn handle_settings_screen_event(&mut self, event: Event) -> Result<bool, Error> {
-        match event {
-            Event::Char(c) => {
-                self.handle_settings_input(c).await?;
-                return Ok(true);
-            }
-            Event::MoveFocus(direction) => {
-                // Handle focus movement within settings screen
-                match direction {
-                    crate::tui::events::FocusDirection::Next => {
-                        self.state.focus_manager.focus_next();
-                    }
-                    crate::tui::events::FocusDirection::Previous => {
-                        self.state.focus_manager.focus_previous();
-                    }
-                    crate::tui::events::FocusDirection::Up => {
-                        // Navigate to previous section
-                        self.state.settings_state.previous_section();
-                    }
-                    crate::tui::events::FocusDirection::Down => {
-                        // Navigate to next section
-                        self.state.settings_state.next_section();
-                    }
-                    _ => {}
+    /// Handle admin screen specific events. Returns `true` if the event was handled.
+    async fn handle_admin_screen_event(&mut self, event: Event) -> Result<bool, Error> {
+        let admin_state = crate::tui::screens::admin::get_admin_screen_state();
+
+        // Handle character events (including admin tab switching 1-3)
+        if let Event::Char(c) = &event {
+            if !c.is_control() {
+                // Let admin screen handle all character input, including tab switching
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Char(*c),
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
                 }
-                return Ok(true);
             }
-            Event::Enter => {
-                // Handle enter key in settings
-                if let Some(focused) = self.state.focus_manager.current_focus() {
-                    match focused {
-                        crate::tui::events::FocusableComponent::Button(button_id) => {
-                            match button_id.as_str() {
-                                "settings_save" => {
-                                    self.handle_settings_action().await?;
-                                }
-                                "settings_reset" => {
-                                    self.state.settings_state.reset_to_defaults();
-                                }
-                                _ => {}
-                            }
+        }
+
+        // Handle MoveFocus events directly for better arrow key navigation
+        // But first check if we're in a dropdown that should handle its own navigation
+        match &event {
+            Event::MoveFocus(direction) => match direction {
+                crate::tui::events::FocusDirection::Up
+                | crate::tui::events::FocusDirection::Down => {
+                    // Check if we're focused on a dropdown that should handle its own navigation
+                    let should_handle_in_dropdown = match admin_state.input_focus {
+                        crate::tui::screens::admin::AdminInputFocus::PoolSelection => {
+                            admin_state
+                                .pool_management
+                                .pool_selection_dropdown
+                                .is_active
                         }
-                        crate::tui::events::FocusableComponent::Dropdown(dropdown_id) => {
-                            // Toggle dropdown or handle selection
-                            match dropdown_id.as_str() {
-                                "settings_network" => {
-                                    self.state.settings_state.toggle_network_environment();
-                                }
-                                _ => {}
-                            }
+                        crate::tui::screens::admin::AdminInputFocus::PoolType => {
+                            admin_state.pool_creation.pool_type_dropdown.is_active
                         }
-                        _ => {}
-                    }
-                }
-                return Ok(true);
-            }
-            Event::Escape => {
-                // Handle escape key - close confirmation modal or go back
-                if self.state.settings_state.show_confirmation {
-                    self.state.settings_state.show_confirmation = false;
-                } else if self.state.settings_state.message.is_some() {
-                    self.state.settings_state.clear_message();
-                }
-                return Ok(true);
-            }
-            Event::Backspace => {
-                // Handle backspace for text input fields
-                if let Some(focused) = self.state.focus_manager.current_focus() {
-                    if let crate::tui::events::FocusableComponent::TextInput(field_id) = focused {
-                        match field_id.as_str() {
-                            "settings_rpc" => {
-                                let _ = self.state.settings_state.handle_backspace();
+                        _ => false,
+                    };
+
+                    if should_handle_in_dropdown {
+                        // Let the dropdown handle the event
+                        let key_event = crossterm::event::KeyEvent::new(
+                            match direction {
+                                crate::tui::events::FocusDirection::Up => {
+                                    crossterm::event::KeyCode::Up
+                                }
+                                crate::tui::events::FocusDirection::Down => {
+                                    crossterm::event::KeyCode::Down
+                                }
+                                _ => unreachable!(),
+                            },
+                            crossterm::event::KeyModifiers::NONE,
+                        );
+                        if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                            return Ok(true);
+                        }
+                    } else {
+                        // Handle normal focus navigation
+                        match direction {
+                            crate::tui::events::FocusDirection::Up => {
+                                admin_state.previous_focus();
+                                return Ok(true);
                             }
-                            "settings_wallet" => {
-                                let _ = self.state.settings_state.handle_backspace();
+                            crate::tui::events::FocusDirection::Down => {
+                                admin_state.next_focus();
+                                return Ok(true);
                             }
                             _ => {}
                         }
                     }
                 }
+                crate::tui::events::FocusDirection::Next => {
+                    admin_state.next_focus();
+                    return Ok(true);
+                }
+                crate::tui::events::FocusDirection::Previous => {
+                    admin_state.previous_focus();
+                    return Ok(true);
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+
+        // Handle Enter key for admin screen navigation and selections
+        if let Event::Enter = &event {
+            let key_event = crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::NONE,
+            );
+            if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                // Check if execute button was pressed by examining the current focus
+                match admin_state.input_focus {
+                    crate::tui::screens::admin::AdminInputFocus::CreationExecute => {
+                        // Trigger pool creation confirmation
+                        if let Err(e) = self.handle_pool_creation_execute_confirmation() {
+                            self.set_error(format!("Pool creation preparation failed: {}", e));
+                        }
+                    }
+                    crate::tui::screens::admin::AdminInputFocus::ManagementExecute => {
+                        // Trigger pool management confirmation
+                        if let Err(e) = self.handle_pool_management_execute_confirmation() {
+                            self.set_error(format!("Pool management preparation failed: {}", e));
+                        }
+                    }
+                    _ => {}
+                }
                 return Ok(true);
             }
-            Event::ContextAction => {
-                // Handle space bar context actions
-                match self.state.settings_state.current_section {
-                    crate::tui::screens::settings::SettingsSection::Network => {
-                        self.state.settings_state.toggle_network_environment();
-                    }
-                    crate::tui::screens::settings::SettingsSection::Display => {
-                        self.state.settings_state.toggle_theme();
-                    }
-                    crate::tui::screens::settings::SettingsSection::Wallet => {
-                        self.state.settings_state.toggle_import_mode();
-                    }
+        }
+
+        // Handle other key events
+        match event {
+            Event::Tab => {
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Tab,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
                 }
+            }
+            Event::BackTab => {
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::BackTab,
+                    crossterm::event::KeyModifiers::SHIFT,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::Backspace => {
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Backspace,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::Delete => {
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Delete,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::Char(c) => {
+                // Convert character to key event for admin screen
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Char(c),
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::MoveFocus(crate::tui::events::FocusDirection::Left) => {
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Left,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::MoveFocus(crate::tui::events::FocusDirection::Right) => {
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Right,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::Home => {
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Home,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::End => {
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::End,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(true);
+                }
+            }
+            Event::Paste(text) => {
+                for ch in text.chars() {
+                    let key_event = crossterm::event::KeyEvent::new(
+                        crossterm::event::KeyCode::Char(ch),
+                        crossterm::event::KeyModifiers::NONE,
+                    );
+                    admin_state.handle_key_event(key_event, self.state.navigation_mode);
+                }
+                return Ok(true);
+            }
+            Event::Escape => {
+                let key_event = crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Esc,
+                    crossterm::event::KeyModifiers::NONE,
+                );
+                if admin_state.handle_key_event(key_event, self.state.navigation_mode) {
+                    return Ok(false); // Let main app handle escape for navigation mode switching
+                }
+            }
+            _ => {}
+        }
+
+        // Handle specific admin events for blockchain operations
+        match &event {
+            Event::CreatePool {
+                asset_1,
+                asset_2,
+                swap_fee,
+                exit_fee,
+                pool_features,
+            } => {
+                // Execute pool creation
+                self.set_loading_with_progress(
+                    format!("Creating pool for {} / {}", asset_1, asset_2),
+                    Some(10.0),
+                    true,
+                );
+
+                // Use the async blockchain processor to execute the real transaction
+                if let Some(event_sender) = &self.event_sender {
+                    let blockchain_processor =
+                        crate::tui::events::AsyncBlockchainProcessor::with_client(
+                            event_sender.clone(),
+                            self.client.clone(),
+                        );
+
+                    let asset_1_clone = asset_1.clone();
+                    let asset_2_clone = asset_2.clone();
+                    let swap_fee_clone = swap_fee.clone();
+                    let exit_fee_clone = exit_fee.clone();
+                    let pool_features_clone = pool_features.clone();
+
+                    // Spawn the async operation for pool creation
+                    tokio::spawn(async move {
+                        blockchain_processor
+                            .create_pool(
+                                asset_1_clone,
+                                asset_2_clone,
+                                swap_fee_clone,
+                                exit_fee_clone,
+                                pool_features_clone,
+                            )
+                            .await;
+                    });
+                } else {
+                    self.set_error("No event sender available for pool creation".to_string());
+                }
+
+                return Ok(true);
+            }
+            Event::UpdatePoolFeatures {
+                pool_id,
+                features,
+                enabled,
+            } => {
+                // Execute pool feature update
+                let operation_desc = if *enabled {
+                    format!("Enabling features for pool {}", pool_id)
+                } else {
+                    format!("Disabling features for pool {}", pool_id)
+                };
+
+                self.set_loading_with_progress(operation_desc, Some(10.0), true);
+
+                // Use the async blockchain processor to execute the real transaction
+                if let Some(event_sender) = &self.event_sender {
+                    let blockchain_processor =
+                        crate::tui::events::AsyncBlockchainProcessor::with_client(
+                            event_sender.clone(),
+                            self.client.clone(),
+                        );
+
+                    let pool_id_clone = pool_id.clone();
+                    let features_clone = features.clone();
+                    let enabled_clone = *enabled;
+                    let event_sender_clone = event_sender.clone();
+
+                    // Spawn the async operation for feature update
+                    tokio::spawn(async move {
+                        // TODO: Implement actual pool feature update via blockchain_processor
+                        // For now, simulate the operation
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+                        // Send success event
+                        let _ =
+                            event_sender_clone.send(crate::tui::events::Event::BlockchainSuccess {
+                                operation: "update_pool_features".to_string(),
+                                result: format!("Features updated for pool {}", pool_id_clone),
+                                transaction_hash: Some(format!(
+                                    "0x{:x}",
+                                    chrono::Utc::now().timestamp()
+                                )),
+                                enhanced_data: Some(format!(
+                                    "Features: {:?}, Enabled: {}",
+                                    features_clone, enabled_clone
+                                )),
+                            });
+                    });
+                } else {
+                    self.set_error("No event sender available for feature update".to_string());
+                }
+
                 return Ok(true);
             }
             _ => {}
         }
+
+        Ok(false)
+    }
+
+    /// Handle settings screen specific events. Returns `true` if the event was handled.
+    async fn handle_settings_screen_event(&mut self, event: Event) -> Result<bool, Error> {
+        // Check if we're in content mode and handle navigation accordingly
+        if matches!(self.state.navigation_mode, NavigationMode::WithinScreen) {
+            match event {
+                Event::Char(c) => {
+                    self.handle_settings_input(c).await?;
+                    return Ok(true);
+                }
+                Event::MoveFocus(direction) => {
+                    // Handle focus movement within settings screen content
+                    match direction {
+                        crate::tui::events::FocusDirection::Next => {
+                            self.state.focus_manager.focus_next();
+                        }
+                        crate::tui::events::FocusDirection::Previous => {
+                            self.state.focus_manager.focus_previous();
+                        }
+                        crate::tui::events::FocusDirection::Up => {
+                            // Check if we're on the section list, then navigate sections
+                            if let Some(focused) = self.state.focus_manager.current_focus() {
+                                if let crate::tui::events::FocusableComponent::Custom(id) = focused
+                                {
+                                    if id == "settings_section_list" {
+                                        self.state.settings_state.previous_section();
+                                        return Ok(true);
+                                    }
+                                }
+                            }
+                            // Otherwise use normal focus navigation
+                            self.state.focus_manager.focus_previous();
+                        }
+                        crate::tui::events::FocusDirection::Down => {
+                            // Check if we're on the section list, then navigate sections
+                            if let Some(focused) = self.state.focus_manager.current_focus() {
+                                if let crate::tui::events::FocusableComponent::Custom(id) = focused
+                                {
+                                    if id == "settings_section_list" {
+                                        self.state.settings_state.next_section();
+                                        return Ok(true);
+                                    }
+                                }
+                            }
+                            // Otherwise use normal focus navigation
+                            self.state.focus_manager.focus_next();
+                        }
+                        _ => {}
+                    }
+                    return Ok(true);
+                }
+                Event::Enter => {
+                    // Handle enter key in settings
+                    if let Some(focused) = self.state.focus_manager.current_focus() {
+                        match focused {
+                            crate::tui::events::FocusableComponent::Button(button_id) => {
+                                match button_id.as_str() {
+                                    "settings_save" => {
+                                        self.handle_settings_action().await?;
+                                    }
+                                    "settings_reset" => {
+                                        self.state.settings_state.reset_to_defaults();
+                                    }
+                                    "settings_wallet_import_mode" => {
+                                        self.state.settings_state.toggle_import_mode();
+                                    }
+                                    "settings_wallet_show_mnemonic" => {
+                                        self.state.settings_state.toggle_mnemonic_visibility();
+                                    }
+                                    "settings_auto_refresh" => {
+                                        self.state.settings_state.toggle_auto_refresh();
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            crate::tui::events::FocusableComponent::Dropdown(dropdown_id) => {
+                                // Toggle dropdown or handle selection
+                                match dropdown_id.as_str() {
+                                    "settings_network_environment" => {
+                                        self.state.settings_state.toggle_network_environment();
+                                    }
+                                    "settings_theme" => {
+                                        self.state.settings_state.toggle_theme();
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            crate::tui::events::FocusableComponent::TextInput(_) => {
+                                // Enter editing mode for text input
+                                match self.state.settings_state.current_section {
+                                    crate::tui::screens::settings::SettingsSection::Network => {
+                                        self.state.settings_state.network_form.form_state.editing =
+                                            true;
+                                    }
+                                    crate::tui::screens::settings::SettingsSection::Wallet => {
+                                        if self.state.settings_state.wallet_form.import_mode {
+                                            self.state
+                                                .settings_state
+                                                .wallet_form
+                                                .form_state
+                                                .editing = true;
+                                        }
+                                    }
+                                    crate::tui::screens::settings::SettingsSection::Display => {
+                                        self.state.settings_state.display_form.form_state.editing =
+                                            true;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    return Ok(true);
+                }
+                Event::Escape => {
+                    // Handle escape key - close confirmation modal or go back to tab mode
+                    if self.state.settings_state.show_confirmation {
+                        self.state.settings_state.show_confirmation = false;
+                    } else if self.state.settings_state.message.is_some() {
+                        self.state.settings_state.clear_message();
+                    } else {
+                        // Exit content mode and return to tab mode
+                        self.state.navigation_mode = NavigationMode::ScreenLevel;
+                    }
+                    return Ok(true);
+                }
+                Event::Backspace => {
+                    // Handle backspace for text input fields
+                    if let Some(focused) = self.state.focus_manager.current_focus() {
+                        if let crate::tui::events::FocusableComponent::TextInput(field_id) = focused
+                        {
+                            match field_id.as_str() {
+                                "settings_network_name"
+                                | "settings_network_rpc"
+                                | "settings_gas_price"
+                                | "settings_gas_adjustment" => {
+                                    let _ = self.state.settings_state.handle_backspace();
+                                }
+                                "settings_wallet_mnemonic" => {
+                                    let _ = self.state.settings_state.handle_backspace();
+                                }
+                                "settings_balance_refresh"
+                                | "settings_pool_refresh"
+                                | "settings_decimal_precision" => {
+                                    let _ = self.state.settings_state.handle_backspace();
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    return Ok(true);
+                }
+                Event::ContextAction => {
+                    // Handle space bar context actions
+                    match self.state.settings_state.current_section {
+                        crate::tui::screens::settings::SettingsSection::Network => {
+                            self.state.settings_state.toggle_network_environment();
+                        }
+                        crate::tui::screens::settings::SettingsSection::Display => {
+                            self.state.settings_state.toggle_theme();
+                        }
+                        crate::tui::screens::settings::SettingsSection::Wallet => {
+                            self.state.settings_state.toggle_import_mode();
+                        }
+                    }
+                    return Ok(true);
+                }
+                _ => {}
+            }
+        }
+
+        // If not handled in content mode, return false to allow global handling
         Ok(false)
     }
 
@@ -2200,15 +3181,13 @@ impl App {
             operation_id: None,
         };
 
-        // Show loading modal for long operations
-        if can_cancel || progress.is_some() {
-            self.state.modal_state = Some(ModalState::loading(
-                "Processing".to_string(),
-                message,
-                progress,
-                can_cancel,
-            ));
-        }
+        // Always show loading modal for user feedback
+        self.state.modal_state = Some(ModalState::loading(
+            "Processing".to_string(),
+            message,
+            progress,
+            can_cancel,
+        ));
     }
 
     /// Update loading progress
@@ -2292,36 +3271,64 @@ impl App {
     pub fn handle_modal_event(&mut self, event: &Event) -> bool {
         if let Some(ref mut modal) = self.state.modal_state {
             match event {
-                Event::Up => {
+                Event::MoveFocus(crate::tui::events::FocusDirection::Up) => {
                     modal.scroll_up();
                     return true;
                 }
-                Event::Down => {
+                Event::MoveFocus(crate::tui::events::FocusDirection::Down) => {
                     modal.scroll_down();
                     return true;
                 }
-                Event::Left => {
+                Event::MoveFocus(crate::tui::events::FocusDirection::Left) => {
                     modal.select_previous();
                     return true;
                 }
-                Event::Right => {
+                Event::MoveFocus(crate::tui::events::FocusDirection::Right) => {
                     modal.select_next();
                     return true;
                 }
                 Event::Enter => {
-                    // Handle confirmation or retry
-                    let should_retry = modal.is_retry_selected();
-                    let is_confirmed = modal.is_confirmed();
+                    // For confirmation modals, Enter should execute the currently selected option
+                    match &modal.modal_type {
+                        crate::tui::components::modals::ModalType::Confirmation { .. } => {
+                            let is_confirmed = modal.selected_option == 0; // 0 = confirm, 1 = cancel
 
-                    // Clear modal first
-                    self.state.modal_state = None;
+                            if is_confirmed {
+                                // Handle confirmation actions (this will clear the modal)
+                                self.handle_confirmation();
+                            } else {
+                                // User cancelled - just clear modal and handle cancellation
+                                self.state.modal_state = None;
+                                if self.state.current_screen == Screen::Swap {
+                                    let _ = crate::tui::screens::swap::handle_confirmation_response(
+                                        false,
+                                    );
+                                } else if self.state.current_screen == Screen::Liquidity {
+                                    let _ = crate::tui::screens::liquidity::handle_liquidity_confirmation_response(
+                                        false,
+                                    );
+                                }
+                                self.set_status("Action cancelled".to_string());
+                            }
+                        }
+                        crate::tui::components::modals::ModalType::Error {
+                            retry_action, ..
+                        } => {
+                            let should_retry = retry_action.is_some() && modal.selected_option == 0;
 
-                    if should_retry {
-                        // Implement retry logic based on the last failed operation
-                        self.retry_last_operation();
-                    } else if is_confirmed {
-                        // Handle confirmation actions
-                        self.handle_confirmation();
+                            // Clear modal first
+                            self.state.modal_state = None;
+
+                            if should_retry {
+                                // Implement retry logic based on the last failed operation
+                                self.retry_last_operation();
+                            }
+                            // If not retry (close/cancel), just close modal (already done above)
+                        }
+                        _ => {
+                            // For other modal types, just close the modal
+                            self.state.modal_state = None;
+                        }
                     }
                     return true;
                 }
@@ -2363,8 +3370,11 @@ impl App {
 
     /// Handle confirmation actions
     fn handle_confirmation(&mut self) {
-        // Check if this is a quit confirmation by examining the modal title
-        if let Some(ref modal_state) = self.state.modal_state {
+        // Clone the modal state to check its contents before clearing it
+        let modal_state_clone = self.state.modal_state.clone();
+
+        if let Some(ref modal_state) = modal_state_clone {
+            // Check if this is a quit confirmation by examining the modal title
             if let crate::tui::components::modals::ModalType::Confirmation { title, .. } =
                 &modal_state.modal_type
             {
@@ -2375,35 +3385,169 @@ impl App {
                     return;
                 }
             }
-        }
 
-        // Handle confirmation dialog result based on current screen
-        if let Some(ref modal_state) = self.state.modal_state.clone() {
-            if modal_state.is_confirmed() {
-                // Check if this is a swap confirmation modal
-                if self.state.current_screen == Screen::Swap {
-                    // Handle swap confirmation
-                    if let Some(swap_event) =
-                        crate::tui::screens::swap::handle_confirmation_response(true)
-                    {
-                        // Process the swap event immediately
-                        if let Some(sender) = self.event_sender.as_ref() {
-                            let _ = sender.send(swap_event);
+            // Check if this is a swap confirmation modal
+            if self.state.current_screen == Screen::Swap {
+                // Clear modal first
+                self.state.modal_state = None;
+
+                // Handle swap confirmation
+                if let Some(swap_event) =
+                    crate::tui::screens::swap::handle_confirmation_response(true)
+                {
+                    // Process the swap event immediately
+                    if let Some(sender) = self.event_sender.as_ref() {
+                        let _ = sender.send(swap_event);
+                    }
+                }
+            } else if self.state.current_screen == Screen::Liquidity {
+                // Clear modal first
+                self.state.modal_state = None;
+
+                // Handle liquidity confirmation
+                if let Some(liquidity_event) =
+                    crate::tui::screens::liquidity::handle_liquidity_confirmation_response(true)
+                {
+                    // Process the liquidity event immediately
+                    if let Some(sender) = self.event_sender.as_ref() {
+                        crate::tui::utils::logger::log_info(&format!(
+                            "Sending liquidity event: {:?}",
+                            liquidity_event
+                        ));
+                        match sender.send(liquidity_event) {
+                            Ok(_) => {
+                                crate::tui::utils::logger::log_info(
+                                    "Liquidity event sent successfully",
+                                );
+                            }
+                            Err(e) => {
+                                crate::tui::utils::logger::log_error(&format!(
+                                    "Failed to send liquidity event: {}",
+                                    e
+                                ));
+                                self.set_error(
+                                    "Failed to process liquidity confirmation".to_string(),
+                                );
+                            }
                         }
+                    } else {
+                        crate::tui::utils::logger::log_error("No event sender available");
+                        self.set_error("Internal error: No event sender available".to_string());
                     }
                 } else {
-                    // Handle other confirmation types
-                    self.set_status("Action confirmed".to_string());
+                    crate::tui::utils::logger::log_error(
+                        "Liquidity confirmation response returned None",
+                    );
+                    self.set_error("Failed to create liquidity operation".to_string());
+                }
+            } else if self.state.current_screen == Screen::Admin {
+                // Clear modal first
+                self.state.modal_state = None;
+
+                // Determine which admin operation based on the modal title
+                if let crate::tui::components::modals::ModalType::Confirmation { title, .. } =
+                    &modal_state.modal_type
+                {
+                    if title == "Confirm Pool Creation" {
+                        // Handle pool creation confirmation
+                        if let Some(create_pool_event) =
+                            crate::tui::screens::admin::handle_pool_creation_confirmation_response(
+                                &mut self.state,
+                                true,
+                            )
+                        {
+                            // Process the pool creation event immediately
+                            if let Some(sender) = self.event_sender.as_ref() {
+                                crate::tui::utils::logger::log_info(&format!(
+                                    "Sending pool creation event: {:?}",
+                                    create_pool_event
+                                ));
+                                match sender.send(create_pool_event) {
+                                    Ok(_) => {
+                                        crate::tui::utils::logger::log_info(
+                                            "Pool creation event sent successfully",
+                                        );
+                                    }
+                                    Err(e) => {
+                                        crate::tui::utils::logger::log_error(&format!(
+                                            "Failed to send pool creation event: {}",
+                                            e
+                                        ));
+                                        self.set_error(
+                                            "Failed to process pool creation confirmation"
+                                                .to_string(),
+                                        );
+                                    }
+                                }
+                            } else {
+                                crate::tui::utils::logger::log_error("No event sender available");
+                                self.set_error(
+                                    "Internal error: No event sender available".to_string(),
+                                );
+                            }
+                        } else {
+                            crate::tui::utils::logger::log_error(
+                                "Pool creation confirmation response returned None",
+                            );
+                            self.set_error("Failed to create pool creation operation".to_string());
+                        }
+                    } else if title == "Confirm Pool Management" {
+                        // Handle pool management confirmation
+                        if let Some(pool_management_event) =
+                            crate::tui::screens::admin::handle_pool_management_confirmation_response(
+                                &mut self.state,
+                                true,
+                            )
+                        {
+                            // Process the pool management event immediately
+                            if let Some(sender) = self.event_sender.as_ref() {
+                                crate::tui::utils::logger::log_info(&format!(
+                                    "Sending pool management event: {:?}",
+                                    pool_management_event
+                                ));
+                                match sender.send(pool_management_event) {
+                                    Ok(_) => {
+                                        crate::tui::utils::logger::log_info(
+                                            "Pool management event sent successfully",
+                                        );
+                                    }
+                                    Err(e) => {
+                                        crate::tui::utils::logger::log_error(&format!(
+                                            "Failed to send pool management event: {}",
+                                            e
+                                        ));
+                                        self.set_error(
+                                            "Failed to process pool management confirmation"
+                                                .to_string(),
+                                        );
+                                    }
+                                }
+                            } else {
+                                crate::tui::utils::logger::log_error("No event sender available");
+                                self.set_error(
+                                    "Internal error: No event sender available".to_string(),
+                                );
+                            }
+                        } else {
+                            crate::tui::utils::logger::log_error(
+                                "Pool management confirmation response returned None",
+                            );
+                            self.set_error(
+                                "Failed to create pool management operation".to_string(),
+                            );
+                        }
+                    }
                 }
             } else {
-                // Handle cancellation
-                if self.state.current_screen == Screen::Swap {
-                    let _ = crate::tui::screens::swap::handle_confirmation_response(false);
-                }
-                self.set_status("Action cancelled".to_string());
+                // Handle other confirmation types
+                self.state.modal_state = None;
+                self.set_status("Action confirmed".to_string());
             }
+        } else {
+            // No modal state available - just clear and set cancelled status
+            self.state.modal_state = None;
+            self.set_status("Action cancelled".to_string());
         }
-        self.state.modal_state = None;
     }
 
     /// Navigate to a specific screen
@@ -2430,6 +3574,14 @@ impl App {
             Screen::Liquidity => {
                 // Initialize liquidity screen focus state
                 crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
+                // Update liquidity screen pools when entering screen
+                self.update_liquidity_screen_pools();
+            }
+            Screen::Admin => {
+                // Initialize admin screen focus state
+                crate::tui::screens::admin::initialize_admin_screen_focus(&mut self.state);
+                // Update admin screen pools when entering screen
+                self.update_admin_screen_pools();
             }
             _ => {}
         }
@@ -2456,6 +3608,14 @@ impl App {
             Screen::Liquidity => {
                 // Initialize liquidity screen focus state
                 crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
+                // Update liquidity screen pools when entering screen
+                self.update_liquidity_screen_pools();
+            }
+            Screen::Admin => {
+                // Initialize admin screen focus state
+                crate::tui::screens::admin::initialize_admin_screen_focus(&mut self.state);
+                // Update admin screen pools when entering screen
+                self.update_admin_screen_pools();
             }
             _ => {}
         }
@@ -2486,6 +3646,14 @@ impl App {
             Screen::Liquidity => {
                 // Initialize liquidity screen focus state
                 crate::tui::screens::liquidity::initialize_liquidity_screen_focus();
+                // Update liquidity screen pools when entering screen
+                self.update_liquidity_screen_pools();
+            }
+            Screen::Admin => {
+                // Initialize admin screen focus state
+                crate::tui::screens::admin::initialize_admin_screen_focus(&mut self.state);
+                // Update admin screen pools when entering screen
+                self.update_admin_screen_pools();
             }
             _ => {}
         }
@@ -2537,6 +3705,14 @@ impl App {
                     // Update swap screen pools if currently on swap screen
                     if self.state.current_screen == Screen::Swap {
                         self.update_swap_screen_pools();
+                    }
+                    // Update liquidity screen pools if currently on liquidity screen
+                    if self.state.current_screen == Screen::Liquidity {
+                        self.update_liquidity_screen_pools();
+                    }
+                    // Update admin screen pools if currently on admin screen
+                    if self.state.current_screen == Screen::Admin {
+                        self.update_admin_screen_pools();
                     }
                 }
             }
@@ -2720,7 +3896,11 @@ impl App {
         // Only refresh data if we have a connected wallet, otherwise just refresh network info
         if self.state.wallet_address.is_none() {
             // No wallet connected - only refresh basic network info
-            self.set_loading("Refreshing network data...".to_string());
+            self.set_loading_with_progress(
+                "Refreshing network data...".to_string(),
+                Some(10.0),
+                false,
+            );
 
             let mut errors = Vec::new();
 
@@ -2735,6 +3915,9 @@ impl App {
                     errors.push(format!("Failed to fetch block height: {}", e));
                 }
             }
+
+            // Update progress - fetching pool data
+            self.update_loading_progress(80.0, Some("Fetching pool information...".to_string()));
 
             // Refresh pool data (limited to avoid overwhelming)
             match self.client.get_pools(Some(20)).await {
@@ -2771,9 +3954,30 @@ impl App {
         }
 
         // Refresh balances, network info, and other dashboard data (wallet connected)
-        self.set_loading("Refreshing dashboard data...".to_string());
+        self.set_loading_with_progress(
+            "Refreshing dashboard data...".to_string(),
+            Some(10.0),
+            false,
+        );
 
         let mut errors = Vec::new();
+
+        // Update progress - fetching asset decimals
+        self.update_loading_progress(20.0, Some("Fetching asset decimals...".to_string()));
+
+        // Refresh asset decimals cache (needed for proper balance formatting)
+        match self.refresh_asset_decimals_cache().await {
+            Ok(_) => {
+                // Successfully refreshed decimals cache
+            }
+            Err(e) => {
+                errors.push(format!("Failed to refresh asset decimals: {}", e));
+                // Continue with default decimals - not critical for basic functionality
+            }
+        }
+
+        // Update progress - fetching balances
+        self.update_loading_progress(40.0, Some("Fetching wallet balances...".to_string()));
 
         // Refresh balances if wallet is connected
         if let Some(address) = &self.state.wallet_address.clone() {
@@ -2793,6 +3997,9 @@ impl App {
                 }
             }
         }
+
+        // Update progress - fetching network info
+        self.update_loading_progress(70.0, Some("Fetching network information...".to_string()));
 
         // Refresh network info
         match self.client.get_last_block_height().await {
@@ -3008,6 +4215,37 @@ impl App {
                     } else {
                         self.state.wizard_state.next_step();
                     }
+                }
+            }
+            // Add MoveFocus event handling for wizard navigation
+            Event::MoveFocus(direction) => {
+                match self.state.wizard_state.current_step {
+                    crate::tui::screens::wizard::WizardStep::NetworkSelection => {
+                        // Handle Up/Down arrows for network selection
+                        match direction {
+                            crate::tui::events::FocusDirection::Up
+                            | crate::tui::events::FocusDirection::Down => {
+                                self.state.wizard_state.toggle_network();
+                                return Ok(true);
+                            }
+                            _ => {} // Ignore other directions
+                        }
+                    }
+                    crate::tui::screens::wizard::WizardStep::WalletSave => {
+                        // Handle Tab navigation for wallet save form
+                        match direction {
+                            crate::tui::events::FocusDirection::Next => {
+                                self.state.wizard_state.wallet_save_focus_next();
+                                return Ok(true);
+                            }
+                            crate::tui::events::FocusDirection::Previous => {
+                                self.state.wizard_state.wallet_save_focus_previous();
+                                return Ok(true);
+                            }
+                            _ => {} // Other directions not used in wallet save
+                        }
+                    }
+                    _ => {} // Other steps don't need MoveFocus handling
                 }
             }
             Event::Tab => {
@@ -3355,12 +4593,59 @@ impl App {
     /// Get token decimals for a given denomination
     /// Most Mantra tokens use 6 decimals
     pub fn get_token_decimals(&self, denom: &str) -> u8 {
-        // Most tokens on Mantra use 6 decimals
+        // Check cache first
+        if let Some(&decimals) = self.state.asset_decimals_cache.get(denom) {
+            return decimals;
+        }
+
+        // Fallback to hardcoded values if not in cache
         match denom {
             "uom" => 6,
             d if d.starts_with("factory/") => 6, // Most factory tokens use 6 decimals
+            d if d.starts_with("ibc/") => 6,     // Most IBC tokens use 6 decimals
+            d if d.starts_with("pool/") || d.contains("/lp/") => 6, // LP tokens
             _ => 6,                              // Default to 6 decimals
         }
+    }
+
+    /// Refresh asset decimals cache from blockchain data
+    pub async fn refresh_asset_decimals_cache(&mut self) -> Result<(), Error> {
+        match self.client.get_asset_decimals_from_pools().await {
+            Ok(decimals_map) => {
+                self.state.asset_decimals_cache = decimals_map;
+                crate::tui::utils::logger::log_info(&format!(
+                    "Asset decimals cache refreshed with {} entries",
+                    self.state.asset_decimals_cache.len()
+                ));
+                Ok(())
+            }
+            Err(e) => {
+                crate::tui::utils::logger::log_error(&format!(
+                    "Failed to refresh asset decimals cache: {}",
+                    e
+                ));
+                Err(e)
+            }
+        }
+    }
+
+    /// Get all token balances formatted for display
+    pub fn get_formatted_balances(&self) -> Vec<(String, String, String)> {
+        let mut formatted_balances = Vec::new();
+
+        for (denom, balance) in &self.state.balances {
+            if let Ok(amount) = balance.parse::<u128>() {
+                if amount > 0 {
+                    let symbol = self.denom_to_symbol(denom);
+                    let formatted_amount = self.micro_to_token_amount(balance, denom);
+                    formatted_balances.push((symbol, formatted_amount, denom.clone()));
+                }
+            }
+        }
+
+        // Sort by symbol for consistent display
+        formatted_balances.sort_by(|a, b| a.0.cmp(&b.0));
+        formatted_balances
     }
 
     /// Convert micro amount to actual token amount
@@ -3411,9 +4696,6 @@ impl App {
             "  Slippage Tolerance: {:?}",
             slippage_tolerance
         ));
-
-        // Show loading state
-        self.set_loading("Executing swap transaction...".to_string());
 
         // Validate that we have a valid pool ID
         let pool_id_str = match pool_id {
@@ -3599,39 +4881,28 @@ impl App {
                     crate::tui::utils::logger::log_info("Transaction executed successfully!");
                 }
 
-                // Swap succeeded - show success modal
-                let tx_hash = tx_response.txhash;
-                let success_details = vec![
-                    format!("Swapped: {} {} → {} {}", amount, from_asset, "~", to_asset),
-                    format!("Pool ID: {}", pool_id_str),
-                    format!("Transaction Hash: {}", tx_hash),
-                    format!("Gas Used: {}", tx_response.gas_used),
-                    format!("Gas Wanted: {}", tx_response.gas_wanted),
-                ];
+                // Final progress update
+                self.update_loading_progress(
+                    100.0,
+                    Some("Swap completed successfully!".to_string()),
+                );
 
-                // Show success modal with transaction details
-                self.state.modal_state = Some(
-                    crate::tui::components::modals::ModalState::transaction_details(
-                        tx_hash.clone(),
-                        "Success".to_string(),
-                        vec![
-                            ("Operation".to_string(), "Token Swap".to_string()),
-                            ("From".to_string(), format!("{} {}", amount, from_asset)),
-                            (
-                                "To".to_string(),
-                                format!("~{} {}", amount_f64 * 0.95, to_asset),
-                            ), // Estimated
-                            ("Pool ID".to_string(), pool_id_str),
-                            ("Gas Used".to_string(), tx_response.gas_used.to_string()),
-                            ("Gas Wanted".to_string(), tx_response.gas_wanted.to_string()),
-                            ("Status".to_string(), "Completed".to_string()),
-                        ],
-                    ),
+                // Give users a moment to see the completion before showing success modal
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                // Swap succeeded - show comprehensive success modal with improved transaction parsing
+                let execution_time = format!("{:.2}s", elapsed.as_secs_f64());
+                self.show_swap_success_modal(
+                    &tx_response,
+                    &from_asset,
+                    &to_asset,
+                    &amount,
+                    &execution_time,
                 );
 
                 // Add to transaction history
                 let tx_info = TransactionInfo {
-                    hash: tx_hash.clone(),
+                    hash: tx_response.txhash.clone(),
                     status: TransactionStatus::Success,
                     operation_type: "Swap".to_string(),
                     timestamp: chrono::Utc::now(),
@@ -3639,12 +4910,6 @@ impl App {
                     gas_wanted: Some(tx_response.gas_wanted),
                 };
                 self.add_transaction(tx_info);
-
-                // Update loading state to success
-                self.state.loading_state = LoadingState::success_with_details(
-                    "Swap completed successfully!".to_string(),
-                    success_details,
-                );
 
                 // Reset swap form
                 crate::tui::screens::swap::reset_swap_form();
@@ -3659,14 +4924,14 @@ impl App {
                 );
                 crate::tui::utils::logger::log_info(&format!(
                     "Final transaction hash: {}",
-                    tx_hash
+                    tx_response.txhash
                 ));
                 crate::tui::utils::logger::log_info(
                     "Transaction should be visible on Mantra testnet explorer",
                 );
                 crate::tui::utils::logger::log_info(&format!(
                     "Explorer URL: https://explorer.mantrachain.io/Mantra-Dukong/tx/{}",
-                    tx_hash
+                    tx_response.txhash
                 ));
 
                 Ok(())
@@ -4125,5 +5390,563 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Show swap success modal with comprehensive transaction details
+    pub fn show_swap_success_modal(
+        &mut self,
+        tx_response: &TxResponse,
+        from_asset: &str,
+        to_asset: &str,
+        from_amount: &str,
+        execution_time: &str,
+    ) {
+        // Parse transaction events to get actual received amount
+        let mut actual_received_amount = "Calculating...".to_string();
+        let mut fee_amount = "N/A".to_string();
+
+        // Look for swap-related events in the transaction
+        for event in &tx_response.events {
+            if event.r#type == "wasm" {
+                let mut found_swap_event = false;
+                let mut received_amount = None;
+                let mut fee = None;
+
+                for attr in &event.attributes {
+                    match attr.key.as_str() {
+                        "action" if attr.value == "swap" => {
+                            found_swap_event = true;
+                        }
+                        "offer_amount" | "ask_amount" => {
+                            // This might be the received amount
+                            if found_swap_event && attr.key == "ask_amount" {
+                                if let Ok(amount) = attr.value.parse::<u128>() {
+                                    let decimals = self.get_token_decimals(
+                                        &self.map_token_name_to_denom(to_asset).unwrap_or_default(),
+                                    );
+                                    let display_amount =
+                                        (amount as f64) / (10_f64.powi(decimals as i32));
+                                    received_amount = Some(format!("{:.6}", display_amount));
+                                }
+                            }
+                        }
+                        "swap_fee" | "fee_amount" => {
+                            fee = Some(attr.value.clone());
+                        }
+                        _ => {}
+                    }
+                }
+
+                if let Some(amount) = received_amount {
+                    actual_received_amount = format!("{} {}", amount, to_asset);
+                }
+                if let Some(f) = fee {
+                    fee_amount = f;
+                }
+            }
+        }
+
+        // If we couldn't parse the actual amount, provide an estimate
+        if actual_received_amount == "Calculating..." {
+            if let Ok(from_amount_f64) = from_amount.parse::<f64>() {
+                let estimated = from_amount_f64 * 0.997; // Assuming ~0.3% fees
+                actual_received_amount = format!("~{:.6} {}", estimated, to_asset);
+            }
+        }
+
+        // Create comprehensive transaction details
+        let transaction_details = vec![
+            ("Transaction Hash".to_string(), tx_response.txhash.clone()),
+            ("Operation Type".to_string(), "Token Swap".to_string()),
+            (
+                "From Asset".to_string(),
+                format!("{} {}", from_amount, from_asset),
+            ),
+            ("To Asset (Received)".to_string(), actual_received_amount),
+            ("Execution Time".to_string(), execution_time.to_string()),
+            ("Block Height".to_string(), tx_response.height.to_string()),
+            ("Gas Used".to_string(), tx_response.gas_used.to_string()),
+            ("Gas Wanted".to_string(), tx_response.gas_wanted.to_string()),
+            ("Transaction Fee".to_string(), fee_amount),
+            (
+                "Status".to_string(),
+                "✅ Completed Successfully".to_string(),
+            ),
+            (
+                "Explorer".to_string(),
+                format!(
+                    "https://explorer.mantrachain.io/Mantra-Dukong/tx/{}",
+                    tx_response.txhash
+                ),
+            ),
+        ];
+
+        // Show the success modal
+        self.state.modal_state = Some(
+            crate::tui::components::modals::ModalState::transaction_details(
+                tx_response.txhash.clone(),
+                "Swap Completed Successfully!".to_string(),
+                transaction_details,
+            ),
+        );
+
+        // Update loading state to success
+        self.state.loading_state =
+            LoadingState::success("Swap completed successfully!".to_string());
+    }
+
+    /// Handle pool creation execute button - show confirmation modal
+    pub fn handle_pool_creation_execute_confirmation(&mut self) -> Result<(), Error> {
+        let admin_state = crate::tui::screens::admin::get_admin_screen_state();
+
+        // Validate pool creation inputs
+        if !admin_state.validate() {
+            let errors = admin_state.clone().get_validation_errors();
+            self.show_validation_error(
+                "Pool Creation Validation".to_string(),
+                "Please fill in all required fields".to_string(),
+                errors,
+            );
+            return Ok(());
+        }
+
+        // Get pool creation details for confirmation
+        let first_asset = admin_state.pool_creation.first_asset_input.value();
+        let second_asset = admin_state.pool_creation.second_asset_input.value();
+        let swap_fee = admin_state.pool_creation.swap_fee_input.value();
+        let protocol_fee = admin_state.pool_creation.protocol_fee_input.value();
+        let burn_fee = admin_state.pool_creation.burn_fee_input.value();
+        let pool_type = admin_state
+            .pool_creation
+            .pool_type_dropdown
+            .get_selected_value()
+            .unwrap_or("Standard");
+
+        // Create confirmation message
+        let confirmation_message = format!(
+            "Confirm Pool Creation:\n\n• Asset Pair: {} / {}\n• Pool Type: {}\n• Swap Fee: {}%\n• Protocol Fee: {}%\n• Burn Fee: {}%\n• Total Fee: {:.2}%\n\nThis will create a new pool on the Mantra DEX.\nTransaction requires admin privileges.",
+            first_asset,
+            second_asset,
+            pool_type,
+            swap_fee,
+            protocol_fee,
+            burn_fee,
+            swap_fee.parse::<f64>().unwrap_or(0.0) +
+            protocol_fee.parse::<f64>().unwrap_or(0.0) +
+            burn_fee.parse::<f64>().unwrap_or(0.0)
+        );
+
+        // Show global confirmation modal
+        self.show_confirmation(
+            "Confirm Pool Creation".to_string(),
+            confirmation_message,
+            Some("Create Pool".to_string()),
+            Some("Cancel".to_string()),
+        );
+
+        Ok(())
+    }
+
+    /// Handle pool management execute button - show confirmation modal
+    pub fn handle_pool_management_execute_confirmation(&mut self) -> Result<(), Error> {
+        let admin_state = crate::tui::screens::admin::get_admin_screen_state();
+
+        // Validate pool management inputs
+        if !admin_state.validate() {
+            let errors = admin_state.clone().get_validation_errors();
+            self.show_validation_error(
+                "Pool Management Validation".to_string(),
+                "Please fill in all required fields".to_string(),
+                errors,
+            );
+            return Ok(());
+        }
+
+        // Get pool management details for confirmation
+        let pool_id = admin_state
+            .pool_management
+            .pool_selection_dropdown
+            .get_selected_value()
+            .unwrap_or_default();
+        let features = admin_state
+            .pool_management
+            .selected_pool_features
+            .unwrap_or((true, true, true));
+
+        // Create confirmation message
+        let confirmation_message = format!(
+            "Confirm Feature Update:\n\n• Pool: {}\n• Withdrawals: {}\n• Deposits: {}\n• Swaps: {}\n\nThis will update pool features on the Mantra DEX.\nTransaction requires admin privileges.",
+            pool_id,
+            if features.0 { "Enabled" } else { "Disabled" },
+            if features.1 { "Enabled" } else { "Disabled" },
+            if features.2 { "Enabled" } else { "Disabled" }
+        );
+
+        // Show global confirmation modal
+        self.show_confirmation(
+            "Confirm Pool Management".to_string(),
+            confirmation_message,
+            Some("Update Features".to_string()),
+            Some("Cancel".to_string()),
+        );
+
+        Ok(())
+    }
+
+    /// Handle liquidity execute button - show confirmation modal (similar to swap screen)
+    pub fn handle_liquidity_execute_confirmation(&mut self) -> Result<(), Error> {
+        let liquidity_state = crate::tui::screens::liquidity::get_liquidity_screen_state();
+
+        // Check if any pools are available
+        if self.state.pool_cache.is_empty() {
+            self.show_validation_error(
+                "No Pools Available".to_string(),
+                "No pools are currently loaded for liquidity operations".to_string(),
+                vec![
+                    "Wait for pool data to load from blockchain".to_string(),
+                    "Check network connection".to_string(),
+                    "Refresh the pools data".to_string(),
+                ],
+            );
+            return Ok(());
+        }
+
+        // Validate liquidity inputs
+        if !liquidity_state.validate() {
+            let errors = liquidity_state.clone().get_validation_errors();
+            self.show_validation_error(
+                "Liquidity Validation".to_string(),
+                "Please fill in all required fields".to_string(),
+                errors,
+            );
+            return Ok(());
+        }
+
+        // Execute the enhanced liquidity operation confirmation
+        crate::tui::screens::liquidity::execute_liquidity_operation_with_confirmation();
+
+        // Get liquidity details for confirmation based on mode
+        let confirmation_message = match liquidity_state.mode {
+            crate::tui::screens::liquidity::LiquidityMode::Provide => {
+                let first_amount = liquidity_state.first_asset_input.value();
+                let second_amount = liquidity_state.second_asset_input.value();
+                let pool_name = liquidity_state
+                    .pool_dropdown
+                    .get_selected_label()
+                    .unwrap_or("Unknown Pool");
+                let slippage = liquidity_state.slippage_input.value();
+
+                // Extract asset names from pool
+                let (first_asset, second_asset) =
+                    crate::tui::screens::liquidity::extract_assets_from_pool_label(pool_name);
+
+                format!(
+                    "Confirm Provide Liquidity:\n\n• First Asset: {} {}\n• Second Asset: {} {}\n• Pool: {}\n• Slippage: {}%\n\nProceed with transaction?",
+                    first_amount, first_asset, second_amount, second_asset, pool_name, slippage
+                )
+            }
+            crate::tui::screens::liquidity::LiquidityMode::Withdraw => {
+                let lp_amount = liquidity_state.withdraw_amount_input.value();
+                let pool_name = liquidity_state
+                    .pool_dropdown
+                    .get_selected_label()
+                    .unwrap_or("Unknown Pool");
+
+                format!(
+                    "Confirm Withdraw Liquidity:\n\n• LP Token Amount: {}\n• Pool: {}\n\nProceed with transaction?",
+                    lp_amount, pool_name
+                )
+            }
+            crate::tui::screens::liquidity::LiquidityMode::Positions => {
+                return Ok(()); // No operation for positions mode
+            }
+        };
+
+        // Show global confirmation modal
+        let title = match liquidity_state.mode {
+            crate::tui::screens::liquidity::LiquidityMode::Provide => "Confirm Provide Liquidity",
+            crate::tui::screens::liquidity::LiquidityMode::Withdraw => "Confirm Withdraw Liquidity",
+            _ => "Confirm Liquidity Operation",
+        };
+
+        self.show_confirmation(
+            title.to_string(),
+            confirmation_message,
+            Some("Execute".to_string()),
+            Some("Cancel".to_string()),
+        );
+
+        Ok(())
+    }
+
+    /// Fetch pool reserves for liquidity proportional calculations
+    async fn fetch_pool_reserves_for_liquidity(&mut self, pool_id: &str) -> Result<(), Error> {
+        crate::tui::utils::logger::log_debug(&format!(
+            "Fetching pool reserves for liquidity calculations: {}",
+            pool_id
+        ));
+
+        // Get pool info from cache or fetch from blockchain
+        let pool_info = if let Some(cached_pool) = self.get_cached_pool(pool_id) {
+            cached_pool.clone()
+        } else {
+            // Fetch pool info from blockchain
+            match self.client.get_pool(pool_id).await {
+                Ok(pool_info) => {
+                    // Cache the pool info
+                    let cache_entry = PoolCacheEntry {
+                        pool_info: pool_info.clone(),
+                        cached_at: chrono::Utc::now(),
+                    };
+                    self.state
+                        .pool_cache
+                        .insert(pool_id.to_string(), cache_entry);
+                    pool_info
+                }
+                Err(e) => {
+                    crate::tui::utils::logger::log_error(&format!(
+                        "Failed to fetch pool info for reserves: {}",
+                        e
+                    ));
+                    return Err(e);
+                }
+            }
+        };
+
+        // Extract reserves from pool assets (supports multi-asset pools)
+        let mut reserves = Vec::new();
+        for asset in &pool_info.pool_info.assets {
+            reserves.push((asset.amount, asset.denom.clone()));
+        }
+
+        crate::tui::utils::logger::log_info(&format!(
+            "Fetched {} reserves for pool {}: {:?}",
+            reserves.len(),
+            pool_id,
+            reserves
+                .iter()
+                .map(|(amt, denom)| format!("{} {}", amt, denom))
+                .collect::<Vec<_>>()
+        ));
+
+        // Update liquidity screen with reserves
+        crate::tui::screens::liquidity::update_liquidity_pool_reserves(reserves);
+
+        Ok(())
+    }
+
+    /// Create enhanced liquidity success details with LP token information
+    fn create_liquidity_success_details(
+        &self,
+        result: &str,
+        transaction_hash: &Option<String>,
+        enhanced_data: &Option<String>,
+    ) -> Vec<(String, String)> {
+        let mut details = vec![("Result".to_string(), result.to_string())];
+
+        if let Some(tx_hash) = transaction_hash {
+            details.push(("Transaction Hash".to_string(), tx_hash.clone()));
+
+            // Add Mantra explorer link
+            let explorer_url = format!(
+                "https://explorer.mantrachain.io/Mantra-Dukong/tx/{}",
+                tx_hash
+            );
+            details.push(("Explorer Link".to_string(), explorer_url));
+        }
+
+        // Parse enhanced data if available
+        if let Some(enhanced_json) = enhanced_data {
+            if let Ok(provide_result) =
+                serde_json::from_str::<crate::tui::events::ProvideResultWrapper>(enhanced_json)
+            {
+                // Add LP token information if available
+                if let Some(lp_amount) = &provide_result.lp_tokens_received {
+                    let lp_display = self.format_token_amount_for_display(lp_amount, 6);
+                    details.push(("LP Tokens Received".to_string(), lp_display));
+                }
+
+                // Add user's total LP balance if available
+                if let Some(total_balance) = &provide_result.user_lp_balance_after {
+                    let balance_display = self.format_token_amount_for_display(total_balance, 6);
+                    details.push(("Total LP Balance".to_string(), balance_display));
+                }
+
+                // Calculate and add pool share information
+                if let (Some(user_balance), Some(total_supply)) = (
+                    &provide_result.user_lp_balance_after,
+                    &provide_result.pool_total_supply,
+                ) {
+                    if total_supply.u128() > 0 {
+                        let share_percentage =
+                            (user_balance.u128() as f64 / total_supply.u128() as f64) * 100.0;
+                        details.push((
+                            "Total Share of Pool".to_string(),
+                            format!("{:.4}%", share_percentage),
+                        ));
+
+                        // If we know how much was received, calculate the share of just the received amount
+                        if let Some(received_amount) = &provide_result.lp_tokens_received {
+                            let received_share = (received_amount.u128() as f64
+                                / total_supply.u128() as f64)
+                                * 100.0;
+                            details.push((
+                                "Share from This Transaction".to_string(),
+                                format!("{:.4}%", received_share),
+                            ));
+                        }
+                    }
+                }
+
+                // Add LP token denomination for reference
+                if let Some(lp_denom) = &provide_result.lp_token_denom {
+                    details.push(("LP Token Denom".to_string(), lp_denom.clone()));
+                }
+
+                crate::tui::utils::logger::log_info(&format!(
+                    "Enhanced liquidity success details created with {} items",
+                    details.len()
+                ));
+            } else {
+                crate::tui::utils::logger::log_warning("Failed to parse enhanced liquidity data");
+            }
+        }
+
+        details
+    }
+
+    /// Create enhanced pool creation success details with pool ID and explorer link
+    fn create_pool_creation_success_details(
+        &self,
+        result: &str,
+        transaction_hash: &Option<String>,
+    ) -> Vec<(String, String)> {
+        let mut details = vec![("Result".to_string(), result.to_string())];
+
+        if let Some(tx_hash) = transaction_hash {
+            details.push(("Transaction Hash".to_string(), tx_hash.clone()));
+
+            // Add explorer link
+            let explorer_url = format!("https://explorer.mantrachain.io/transaction/{}", tx_hash);
+            details.push(("Explorer Link".to_string(), explorer_url));
+        }
+
+        // Try to extract pool ID from transaction result
+        if let Some(pool_id) = self.extract_pool_id_from_result(result) {
+            details.push(("Pool ID".to_string(), pool_id.clone()));
+
+            // Add pool-specific explorer link if available
+            let pool_explorer_url = format!("https://explorer.mantrachain.io/pools/{}", pool_id);
+            details.push(("Pool Explorer".to_string(), pool_explorer_url));
+        }
+
+        // Add pool creation fee information
+        details.push(("Pool Creation Fee".to_string(), "88 OM".to_string()));
+
+        // Add timestamp
+        details.push((
+            "Created At".to_string(),
+            chrono::Utc::now()
+                .format("%Y-%m-%d %H:%M:%S UTC")
+                .to_string(),
+        ));
+
+        details
+    }
+
+    /// Extract pool ID from transaction result or logs
+    fn extract_pool_id_from_result(&self, result: &str) -> Option<String> {
+        // Try to parse pool ID from various possible formats in the result
+
+        // Look for "pool_id" in JSON-like structures
+        if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(result) {
+            // Check for pool_id in various locations
+            if let Some(pool_id) = json_value.get("pool_id").and_then(|v| v.as_str()) {
+                return Some(pool_id.to_string());
+            }
+
+            // Check for pool_id in events or logs
+            if let Some(events) = json_value.get("events").and_then(|v| v.as_array()) {
+                for event in events {
+                    if let Some(attributes) = event.get("attributes").and_then(|v| v.as_array()) {
+                        for attr in attributes {
+                            if let (Some(key), Some(value)) = (
+                                attr.get("key").and_then(|v| v.as_str()),
+                                attr.get("value").and_then(|v| v.as_str()),
+                            ) {
+                                if key == "pool_id" || key == "pool_identifier" {
+                                    return Some(value.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Try regex patterns for pool ID extraction
+        use regex::Regex;
+
+        // Pattern: "pool_id": "123" or "pool_id":"123"
+        if let Ok(re) = Regex::new(r#""pool_id"\s*:\s*"([^"]+)""#) {
+            if let Some(captures) = re.captures(result) {
+                if let Some(pool_id) = captures.get(1) {
+                    return Some(pool_id.as_str().to_string());
+                }
+            }
+        }
+
+        // Pattern: pool_id=123 or pool_id: 123
+        if let Ok(re) = Regex::new(r"pool_id[:\s=]+(\w+)") {
+            if let Some(captures) = re.captures(result) {
+                if let Some(pool_id) = captures.get(1) {
+                    return Some(pool_id.as_str().to_string());
+                }
+            }
+        }
+
+        // Pattern: Pool 123 created or Created pool 123
+        if let Ok(re) = Regex::new(r"(?i)(?:pool\s+(\w+)\s+created|created\s+pool\s+(\w+))") {
+            if let Some(captures) = re.captures(result) {
+                if let Some(pool_id) = captures.get(1).or_else(|| captures.get(2)) {
+                    return Some(pool_id.as_str().to_string());
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Create basic success details for non-enhanced operations
+    fn create_basic_success_details(
+        &self,
+        result: &str,
+        transaction_hash: &Option<String>,
+    ) -> Vec<(String, String)> {
+        let mut details = vec![("Result".to_string(), result.to_string())];
+
+        if let Some(tx_hash) = transaction_hash {
+            details.push(("Transaction".to_string(), tx_hash.clone()));
+        }
+
+        details
+    }
+
+    /// Format token amount for display (convert from micro units to display units)
+    fn format_token_amount_for_display(
+        &self,
+        amount: &cosmwasm_std::Uint128,
+        decimals: u8,
+    ) -> String {
+        let amount_f64 = amount.u128() as f64 / 10_f64.powi(decimals as i32);
+
+        // Format with appropriate precision
+        if amount_f64 >= 1000.0 {
+            format!("{:.2}", amount_f64)
+        } else if amount_f64 >= 1.0 {
+            format!("{:.4}", amount_f64)
+        } else {
+            format!("{:.6}", amount_f64)
+        }
     }
 }

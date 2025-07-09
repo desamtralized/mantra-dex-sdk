@@ -68,6 +68,7 @@ prost = "0.13.5"
 prost-types = "0.13.5"
 cosmos-sdk-proto = "0.26.1"
 serde_bytes = "0.11.17"
+regex = "1.10"
 
 # TUI dependencies - optional via "tui" feature
 ratatui = { version = "0.29.0", features = [
