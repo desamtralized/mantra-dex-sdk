@@ -786,7 +786,8 @@ impl App {
                 }
                 "create_pool" => {
                     let title = "Pool Created Successfully!".to_string();
-                    let details = self.create_pool_creation_success_details(result, transaction_hash);
+                    let details =
+                        self.create_pool_creation_success_details(result, transaction_hash);
                     // Reset admin forms after successful pool creation
                     crate::tui::screens::admin::reset_admin_forms(&mut self.state);
                     (title, details)
@@ -1573,26 +1574,42 @@ impl App {
             Screen::Settings => vec![
                 // Section navigation
                 crate::tui::events::FocusableComponent::Custom("settings_section_list".to_string()),
-                
                 // Network section components
-                crate::tui::events::FocusableComponent::Dropdown("settings_network_environment".to_string()),
-                crate::tui::events::FocusableComponent::TextInput("settings_network_name".to_string()),
-                crate::tui::events::FocusableComponent::TextInput("settings_network_rpc".to_string()),
+                crate::tui::events::FocusableComponent::Dropdown(
+                    "settings_network_environment".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_network_name".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_network_rpc".to_string(),
+                ),
                 crate::tui::events::FocusableComponent::TextInput("settings_gas_price".to_string()),
-                crate::tui::events::FocusableComponent::TextInput("settings_gas_adjustment".to_string()),
-                
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_gas_adjustment".to_string(),
+                ),
                 // Wallet section components
-                crate::tui::events::FocusableComponent::Button("settings_wallet_import_mode".to_string()),
-                crate::tui::events::FocusableComponent::TextInput("settings_wallet_mnemonic".to_string()),
-                crate::tui::events::FocusableComponent::Button("settings_wallet_show_mnemonic".to_string()),
-                
+                crate::tui::events::FocusableComponent::Button(
+                    "settings_wallet_import_mode".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_wallet_mnemonic".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::Button(
+                    "settings_wallet_show_mnemonic".to_string(),
+                ),
                 // Display section components
                 crate::tui::events::FocusableComponent::Dropdown("settings_theme".to_string()),
-                crate::tui::events::FocusableComponent::TextInput("settings_balance_refresh".to_string()),
-                crate::tui::events::FocusableComponent::TextInput("settings_pool_refresh".to_string()),
-                crate::tui::events::FocusableComponent::TextInput("settings_decimal_precision".to_string()),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_balance_refresh".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_pool_refresh".to_string(),
+                ),
+                crate::tui::events::FocusableComponent::TextInput(
+                    "settings_decimal_precision".to_string(),
+                ),
                 crate::tui::events::FocusableComponent::Button("settings_auto_refresh".to_string()),
-                
                 // Action buttons
                 settings_save_button(),
                 settings_reset_button(),
@@ -2607,11 +2624,15 @@ impl App {
         // But first check if we're in a dropdown that should handle its own navigation
         match &event {
             Event::MoveFocus(direction) => match direction {
-                crate::tui::events::FocusDirection::Up | crate::tui::events::FocusDirection::Down => {
+                crate::tui::events::FocusDirection::Up
+                | crate::tui::events::FocusDirection::Down => {
                     // Check if we're focused on a dropdown that should handle its own navigation
                     let should_handle_in_dropdown = match admin_state.input_focus {
                         crate::tui::screens::admin::AdminInputFocus::PoolSelection => {
-                            admin_state.pool_management.pool_selection_dropdown.is_active
+                            admin_state
+                                .pool_management
+                                .pool_selection_dropdown
+                                .is_active
                         }
                         crate::tui::screens::admin::AdminInputFocus::PoolType => {
                             admin_state.pool_creation.pool_type_dropdown.is_active
@@ -2623,8 +2644,12 @@ impl App {
                         // Let the dropdown handle the event
                         let key_event = crossterm::event::KeyEvent::new(
                             match direction {
-                                crate::tui::events::FocusDirection::Up => crossterm::event::KeyCode::Up,
-                                crate::tui::events::FocusDirection::Down => crossterm::event::KeyCode::Down,
+                                crate::tui::events::FocusDirection::Up => {
+                                    crossterm::event::KeyCode::Up
+                                }
+                                crate::tui::events::FocusDirection::Down => {
+                                    crossterm::event::KeyCode::Down
+                                }
                                 _ => unreachable!(),
                             },
                             crossterm::event::KeyModifiers::NONE,
@@ -2922,7 +2947,8 @@ impl App {
                         crate::tui::events::FocusDirection::Up => {
                             // Check if we're on the section list, then navigate sections
                             if let Some(focused) = self.state.focus_manager.current_focus() {
-                                if let crate::tui::events::FocusableComponent::Custom(id) = focused {
+                                if let crate::tui::events::FocusableComponent::Custom(id) = focused
+                                {
                                     if id == "settings_section_list" {
                                         self.state.settings_state.previous_section();
                                         return Ok(true);
@@ -2935,7 +2961,8 @@ impl App {
                         crate::tui::events::FocusDirection::Down => {
                             // Check if we're on the section list, then navigate sections
                             if let Some(focused) = self.state.focus_manager.current_focus() {
-                                if let crate::tui::events::FocusableComponent::Custom(id) = focused {
+                                if let crate::tui::events::FocusableComponent::Custom(id) = focused
+                                {
                                     if id == "settings_section_list" {
                                         self.state.settings_state.next_section();
                                         return Ok(true);
@@ -2989,15 +3016,21 @@ impl App {
                                 // Enter editing mode for text input
                                 match self.state.settings_state.current_section {
                                     crate::tui::screens::settings::SettingsSection::Network => {
-                                        self.state.settings_state.network_form.form_state.editing = true;
+                                        self.state.settings_state.network_form.form_state.editing =
+                                            true;
                                     }
                                     crate::tui::screens::settings::SettingsSection::Wallet => {
                                         if self.state.settings_state.wallet_form.import_mode {
-                                            self.state.settings_state.wallet_form.form_state.editing = true;
+                                            self.state
+                                                .settings_state
+                                                .wallet_form
+                                                .form_state
+                                                .editing = true;
                                         }
                                     }
                                     crate::tui::screens::settings::SettingsSection::Display => {
-                                        self.state.settings_state.display_form.form_state.editing = true;
+                                        self.state.settings_state.display_form.form_state.editing =
+                                            true;
                                     }
                                 }
                             }
@@ -3021,15 +3054,21 @@ impl App {
                 Event::Backspace => {
                     // Handle backspace for text input fields
                     if let Some(focused) = self.state.focus_manager.current_focus() {
-                        if let crate::tui::events::FocusableComponent::TextInput(field_id) = focused {
+                        if let crate::tui::events::FocusableComponent::TextInput(field_id) = focused
+                        {
                             match field_id.as_str() {
-                                "settings_network_name" | "settings_network_rpc" | "settings_gas_price" | "settings_gas_adjustment" => {
+                                "settings_network_name"
+                                | "settings_network_rpc"
+                                | "settings_gas_price"
+                                | "settings_gas_adjustment" => {
                                     let _ = self.state.settings_state.handle_backspace();
                                 }
                                 "settings_wallet_mnemonic" => {
                                     let _ = self.state.settings_state.handle_backspace();
                                 }
-                                "settings_balance_refresh" | "settings_pool_refresh" | "settings_decimal_precision" => {
+                                "settings_balance_refresh"
+                                | "settings_pool_refresh"
+                                | "settings_decimal_precision" => {
                                     let _ = self.state.settings_state.handle_backspace();
                                 }
                                 _ => {}
@@ -3056,7 +3095,7 @@ impl App {
                 _ => {}
             }
         }
-        
+
         // If not handled in content mode, return false to allow global handling
         Ok(false)
     }
@@ -3412,7 +3451,10 @@ impl App {
                     if title == "Confirm Pool Creation" {
                         // Handle pool creation confirmation
                         if let Some(create_pool_event) =
-                            crate::tui::screens::admin::handle_pool_creation_confirmation_response(&mut self.state, true)
+                            crate::tui::screens::admin::handle_pool_creation_confirmation_response(
+                                &mut self.state,
+                                true,
+                            )
                         {
                             // Process the pool creation event immediately
                             if let Some(sender) = self.event_sender.as_ref() {
@@ -3432,13 +3474,16 @@ impl App {
                                             e
                                         ));
                                         self.set_error(
-                                            "Failed to process pool creation confirmation".to_string(),
+                                            "Failed to process pool creation confirmation"
+                                                .to_string(),
                                         );
                                     }
                                 }
                             } else {
                                 crate::tui::utils::logger::log_error("No event sender available");
-                                self.set_error("Internal error: No event sender available".to_string());
+                                self.set_error(
+                                    "Internal error: No event sender available".to_string(),
+                                );
                             }
                         } else {
                             crate::tui::utils::logger::log_error(
@@ -3449,7 +3494,10 @@ impl App {
                     } else if title == "Confirm Pool Management" {
                         // Handle pool management confirmation
                         if let Some(pool_management_event) =
-                            crate::tui::screens::admin::handle_pool_management_confirmation_response(&mut self.state, true)
+                            crate::tui::screens::admin::handle_pool_management_confirmation_response(
+                                &mut self.state,
+                                true,
+                            )
                         {
                             // Process the pool management event immediately
                             if let Some(sender) = self.event_sender.as_ref() {
@@ -3469,19 +3517,24 @@ impl App {
                                             e
                                         ));
                                         self.set_error(
-                                            "Failed to process pool management confirmation".to_string(),
+                                            "Failed to process pool management confirmation"
+                                                .to_string(),
                                         );
                                     }
                                 }
                             } else {
                                 crate::tui::utils::logger::log_error("No event sender available");
-                                self.set_error("Internal error: No event sender available".to_string());
+                                self.set_error(
+                                    "Internal error: No event sender available".to_string(),
+                                );
                             }
                         } else {
                             crate::tui::utils::logger::log_error(
                                 "Pool management confirmation response returned None",
                             );
-                            self.set_error("Failed to create pool management operation".to_string());
+                            self.set_error(
+                                "Failed to create pool management operation".to_string(),
+                            );
                         }
                     }
                 }
@@ -4170,7 +4223,8 @@ impl App {
                     crate::tui::screens::wizard::WizardStep::NetworkSelection => {
                         // Handle Up/Down arrows for network selection
                         match direction {
-                            crate::tui::events::FocusDirection::Up | crate::tui::events::FocusDirection::Down => {
+                            crate::tui::events::FocusDirection::Up
+                            | crate::tui::events::FocusDirection::Down => {
                                 self.state.wizard_state.toggle_network();
                                 return Ok(true);
                             }
@@ -4543,7 +4597,7 @@ impl App {
         if let Some(&decimals) = self.state.asset_decimals_cache.get(denom) {
             return decimals;
         }
-        
+
         // Fallback to hardcoded values if not in cache
         match denom {
             "uom" => 6,
@@ -4578,7 +4632,7 @@ impl App {
     /// Get all token balances formatted for display
     pub fn get_formatted_balances(&self) -> Vec<(String, String, String)> {
         let mut formatted_balances = Vec::new();
-        
+
         for (denom, balance) in &self.state.balances {
             if let Ok(amount) = balance.parse::<u128>() {
                 if amount > 0 {
@@ -4588,7 +4642,7 @@ impl App {
                 }
             }
         }
-        
+
         // Sort by symbol for consistent display
         formatted_balances.sort_by(|a, b| a.0.cmp(&b.0));
         formatted_balances
@@ -5477,8 +5531,8 @@ impl App {
             swap_fee,
             protocol_fee,
             burn_fee,
-            swap_fee.parse::<f64>().unwrap_or(0.0) + 
-            protocol_fee.parse::<f64>().unwrap_or(0.0) + 
+            swap_fee.parse::<f64>().unwrap_or(0.0) +
+            protocol_fee.parse::<f64>().unwrap_or(0.0) +
             burn_fee.parse::<f64>().unwrap_or(0.0)
         );
 
@@ -5692,9 +5746,12 @@ impl App {
 
         if let Some(tx_hash) = transaction_hash {
             details.push(("Transaction Hash".to_string(), tx_hash.clone()));
-            
+
             // Add Mantra explorer link
-            let explorer_url = format!("https://explorer.mantrachain.io/Mantra-Dukong/tx/{}", tx_hash);
+            let explorer_url = format!(
+                "https://explorer.mantrachain.io/Mantra-Dukong/tx/{}",
+                tx_hash
+            );
             details.push(("Explorer Link".to_string(), explorer_url));
         }
 
@@ -5768,7 +5825,7 @@ impl App {
 
         if let Some(tx_hash) = transaction_hash {
             details.push(("Transaction Hash".to_string(), tx_hash.clone()));
-            
+
             // Add explorer link
             let explorer_url = format!("https://explorer.mantrachain.io/transaction/{}", tx_hash);
             details.push(("Explorer Link".to_string(), explorer_url));
@@ -5777,7 +5834,7 @@ impl App {
         // Try to extract pool ID from transaction result
         if let Some(pool_id) = self.extract_pool_id_from_result(result) {
             details.push(("Pool ID".to_string(), pool_id.clone()));
-            
+
             // Add pool-specific explorer link if available
             let pool_explorer_url = format!("https://explorer.mantrachain.io/pools/{}", pool_id);
             details.push(("Pool Explorer".to_string(), pool_explorer_url));
@@ -5789,7 +5846,9 @@ impl App {
         // Add timestamp
         details.push((
             "Created At".to_string(),
-            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            chrono::Utc::now()
+                .format("%Y-%m-%d %H:%M:%S UTC")
+                .to_string(),
         ));
 
         details
@@ -5798,14 +5857,14 @@ impl App {
     /// Extract pool ID from transaction result or logs
     fn extract_pool_id_from_result(&self, result: &str) -> Option<String> {
         // Try to parse pool ID from various possible formats in the result
-        
+
         // Look for "pool_id" in JSON-like structures
         if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(result) {
             // Check for pool_id in various locations
             if let Some(pool_id) = json_value.get("pool_id").and_then(|v| v.as_str()) {
                 return Some(pool_id.to_string());
             }
-            
+
             // Check for pool_id in events or logs
             if let Some(events) = json_value.get("events").and_then(|v| v.as_array()) {
                 for event in events {
@@ -5813,7 +5872,7 @@ impl App {
                         for attr in attributes {
                             if let (Some(key), Some(value)) = (
                                 attr.get("key").and_then(|v| v.as_str()),
-                                attr.get("value").and_then(|v| v.as_str())
+                                attr.get("value").and_then(|v| v.as_str()),
                             ) {
                                 if key == "pool_id" || key == "pool_identifier" {
                                     return Some(value.to_string());
@@ -5827,7 +5886,7 @@ impl App {
 
         // Try regex patterns for pool ID extraction
         use regex::Regex;
-        
+
         // Pattern: "pool_id": "123" or "pool_id":"123"
         if let Ok(re) = Regex::new(r#""pool_id"\s*:\s*"([^"]+)""#) {
             if let Some(captures) = re.captures(result) {

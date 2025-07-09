@@ -1110,14 +1110,12 @@ fn render_wallet_save_modal(
         Style::default().fg(Color::White)
     };
 
-    let name_input = Paragraph::new(wallet_name)
-        .style(name_style)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Wallet Name")
-                .padding(Padding::uniform(1)),
-        );
+    let name_input = Paragraph::new(wallet_name).style(name_style).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Wallet Name")
+            .padding(Padding::uniform(1)),
+    );
 
     f.render_widget(name_input, chunks[1]);
 
@@ -1158,14 +1156,12 @@ fn render_wallet_save_modal(
         "*".repeat(confirm_password.len())
     };
 
-    let confirm_input = Paragraph::new(confirm_display)
-        .style(confirm_style)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Confirm Password")
-                .padding(Padding::uniform(1)),
-        );
+    let confirm_input = Paragraph::new(confirm_display).style(confirm_style).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Confirm Password")
+            .padding(Padding::uniform(1)),
+    );
 
     f.render_widget(confirm_input, chunks[3]);
 

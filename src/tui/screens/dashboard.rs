@@ -6,10 +6,7 @@
 use crate::tui::{
     app::{App, LoadingState, TransactionStatus},
     components::{
-        charts::{
-            render_network_sync_progress,
-            render_transaction_confirmation_progress,
-        },
+        charts::{render_network_sync_progress, render_transaction_confirmation_progress},
         header::render_header,
         navigation::render_navigation,
         status_bar::render_status_bar,

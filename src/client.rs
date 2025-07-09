@@ -119,10 +119,7 @@ impl MantraDexClient {
     }
 
     /// Get balance for a specific denom for the configured wallet
-    pub async fn get_balance(
-        &self,
-        denom: &str,
-    ) -> Result<cosmwasm_std::Coin, Error> {
+    pub async fn get_balance(&self, denom: &str) -> Result<cosmwasm_std::Coin, Error> {
         // Get wallet balances and find the specific denom
         let balances = self.get_balances().await?;
 
@@ -403,7 +400,6 @@ impl MantraDexClient {
 
         Ok(tx_response)
     }
-
 
     /// Query asset decimals for a specific asset in a pool
     ///
@@ -830,11 +826,13 @@ impl MantraDexClient {
     }
 
     /// Query the pool manager configuration
-    pub async fn get_pool_manager_config(&self) -> Result<mantra_dex_std::pool_manager::Config, Error> {
+    pub async fn get_pool_manager_config(
+        &self,
+    ) -> Result<mantra_dex_std::pool_manager::Config, Error> {
         let query = pool_manager::QueryMsg::Config {};
         let pool_manager_address = self.config.contracts.pool_manager.clone();
         // The contract returns Config directly, not wrapped in ConfigResponse
-        let config: mantra_dex_std::pool_manager::Config = 
+        let config: mantra_dex_std::pool_manager::Config =
             self.query(&pool_manager_address, &query).await?;
         Ok(config)
     }
@@ -893,7 +891,7 @@ impl MantraDexClient {
 
         // Query the actual pool creation fee from the contract configuration
         let creation_fee = self.get_pool_creation_fee().await?;
-        
+
         // Handle case where contract config shows 0 but contract actually expects 88 OM
         let pool_creation_fee = if creation_fee.amount.is_zero() {
             // Fallback to known testnet pool creation fee of 88 OM

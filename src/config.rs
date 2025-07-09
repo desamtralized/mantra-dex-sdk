@@ -28,7 +28,7 @@ impl NetworkConstants {
     /// Load network constants from the configuration file
     pub fn load(network: &str) -> Result<Self, ConfigError> {
         let config_dir = env::var("MANTRA_CONFIG_DIR").unwrap_or_else(|_| "config".to_string());
-        
+
         // Try multiple paths for the config file
         let config_paths = vec![
             format!("{}/network", config_dir),
@@ -36,7 +36,7 @@ impl NetworkConstants {
             "../config/network".to_string(),
             "../../config/network".to_string(),
         ];
-        
+
         for config_path in &config_paths {
             if let Ok(settings) = ConfigLoader::builder()
                 .add_source(File::with_name(config_path))
@@ -47,7 +47,7 @@ impl NetworkConstants {
                 }
             }
         }
-        
+
         // If we can't load from config files, return hardcoded constants
         match network {
             "mantra-dukong" => Ok(NetworkConstants {
@@ -58,7 +58,10 @@ impl NetworkConstants {
                 default_gas_adjustment: 1.5,
                 native_denom: "uom".to_string(),
             }),
-            _ => Err(ConfigError::NotFound(format!("Network configuration for '{}' not found", network))),
+            _ => Err(ConfigError::NotFound(format!(
+                "Network configuration for '{}' not found",
+                network
+            ))),
         }
     }
 
@@ -167,10 +170,17 @@ impl MantraNetworkConfig {
         // If we can't load from config, return hardcoded testnet addresses as fallback
         match network {
             "mantra-dukong" => ContractAddresses {
-                pool_manager: "mantra1vwj600jud78djej7ttq44dktu4wr3t2yrrsjgmld8v3jq8mud68q5w7455".to_string(),
-                farm_manager: Some("mantra1h3ypj6fhpn4tegj0flhx42j5c4jejq45dypyjy7wdpr268amh5ssa4nnzf".to_string()),
-                fee_collector: Some("mantra1ze9rccntuvd37gs5fv8ddtjtay4944zn3mksdnne8zyntjmgsg9syav".to_string()),
-                epoch_manager: Some("mantra1kz0gcs8n0qa9rje5zdrlwqccxlwu8zttzmdtxhdq0jpk3efjs37qr4s2sv".to_string()),
+                pool_manager: "mantra1vwj600jud78djej7ttq44dktu4wr3t2yrrsjgmld8v3jq8mud68q5w7455"
+                    .to_string(),
+                farm_manager: Some(
+                    "mantra1h3ypj6fhpn4tegj0flhx42j5c4jejq45dypyjy7wdpr268amh5ssa4nnzf".to_string(),
+                ),
+                fee_collector: Some(
+                    "mantra1ze9rccntuvd37gs5fv8ddtjtay4944zn3mksdnne8zyntjmgsg9syav".to_string(),
+                ),
+                epoch_manager: Some(
+                    "mantra1kz0gcs8n0qa9rje5zdrlwqccxlwu8zttzmdtxhdq0jpk3efjs37qr4s2sv".to_string(),
+                ),
             },
             _ => ContractAddresses::default(),
         }

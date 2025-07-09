@@ -543,15 +543,15 @@ impl SettingsState {
     pub fn next_field(&mut self) {
         match self.current_section {
             SettingsSection::Network => {
-                self.network_form.form_state.current_field = 
+                self.network_form.form_state.current_field =
                     (self.network_form.form_state.current_field + 1) % 4; // 4 fields in network section
             }
             SettingsSection::Wallet => {
-                self.wallet_form.form_state.current_field = 
+                self.wallet_form.form_state.current_field =
                     (self.wallet_form.form_state.current_field + 1) % 1; // 1 field in wallet section
             }
             SettingsSection::Display => {
-                self.display_form.form_state.current_field = 
+                self.display_form.form_state.current_field =
                     (self.display_form.form_state.current_field + 1) % 3; // 3 fields in display section
             }
         }
@@ -601,26 +601,20 @@ impl SettingsState {
     /// Get the current field name for focus identification
     pub fn get_current_field_id(&self) -> Option<String> {
         match self.current_section {
-            SettingsSection::Network => {
-                match self.network_form.form_state.current_field {
-                    0 => Some("settings_network_name".to_string()),
-                    1 => Some("settings_network_rpc".to_string()),
-                    2 => Some("settings_gas_price".to_string()),
-                    3 => Some("settings_gas_adjustment".to_string()),
-                    _ => None,
-                }
-            }
-            SettingsSection::Wallet => {
-                Some("settings_wallet_mnemonic".to_string())
-            }
-            SettingsSection::Display => {
-                match self.display_form.form_state.current_field {
-                    0 => Some("settings_balance_refresh".to_string()),
-                    1 => Some("settings_pool_refresh".to_string()),
-                    2 => Some("settings_decimal_precision".to_string()),
-                    _ => None,
-                }
-            }
+            SettingsSection::Network => match self.network_form.form_state.current_field {
+                0 => Some("settings_network_name".to_string()),
+                1 => Some("settings_network_rpc".to_string()),
+                2 => Some("settings_gas_price".to_string()),
+                3 => Some("settings_gas_adjustment".to_string()),
+                _ => None,
+            },
+            SettingsSection::Wallet => Some("settings_wallet_mnemonic".to_string()),
+            SettingsSection::Display => match self.display_form.form_state.current_field {
+                0 => Some("settings_balance_refresh".to_string()),
+                1 => Some("settings_pool_refresh".to_string()),
+                2 => Some("settings_decimal_precision".to_string()),
+                _ => None,
+            },
         }
     }
 }

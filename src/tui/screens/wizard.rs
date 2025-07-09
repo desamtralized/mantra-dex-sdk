@@ -5,9 +5,7 @@
 
 use crate::tui::{
     app::App,
-    components::{
-        header::render_header, status_bar::render_status_bar,
-    },
+    components::{header::render_header, status_bar::render_status_bar},
 };
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},

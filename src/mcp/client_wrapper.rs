@@ -244,10 +244,7 @@ impl McpClientWrapper {
         self.adapter.cache_clear().await;
         self.adapter.cleanup().await?;
 
-        info!(
-            "Successfully switched to network: {}",
-            new_config.chain_id
-        );
+        info!("Successfully switched to network: {}", new_config.chain_id);
 
         Ok(serde_json::json!({
             "previous_network": self.network_config.chain_id,

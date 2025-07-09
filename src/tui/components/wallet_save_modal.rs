@@ -29,9 +29,16 @@ pub enum WalletSaveStep {
 pub enum WalletSaveState {
     Idle,
     Validating,
-    Saving { progress: f64 },
-    Success { wallet_name: String },
-    Error { message: String, retry_available: bool },
+    Saving {
+        progress: f64,
+    },
+    Success {
+        wallet_name: String,
+    },
+    Error {
+        message: String,
+        retry_available: bool,
+    },
 }
 
 /// Form data for wallet saving
@@ -66,8 +73,15 @@ impl WalletSaveForm {
         if self.wallet_name.len() > 50 {
             return Err("Wallet name must be less than 50 characters".to_string());
         }
-        if !self.wallet_name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == ' ') {
-            return Err("Wallet name can only contain letters, numbers, spaces, hyphens, and underscores".to_string());
+        if !self
+            .wallet_name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == ' ')
+        {
+            return Err(
+                "Wallet name can only contain letters, numbers, spaces, hyphens, and underscores"
+                    .to_string(),
+            );
         }
         Ok(())
     }
@@ -165,10 +179,11 @@ impl WalletSaveModal {
     /// Handle character input
     pub fn handle_char(&mut self, c: char) {
         self.validation_errors.clear();
-        
+
         match self.current_step {
             WalletSaveStep::WalletName => {
-                self.wallet_name_input.handle(tui_input::InputRequest::InsertChar(c));
+                self.wallet_name_input
+                    .handle(tui_input::InputRequest::InsertChar(c));
                 self.form.wallet_name = self.wallet_name_input.value().to_string();
             }
             WalletSaveStep::Password => {
@@ -186,10 +201,11 @@ impl WalletSaveModal {
     /// Handle backspace
     pub fn handle_backspace(&mut self) {
         self.validation_errors.clear();
-        
+
         match self.current_step {
             WalletSaveStep::WalletName => {
-                self.wallet_name_input.handle(tui_input::InputRequest::DeletePrevChar);
+                self.wallet_name_input
+                    .handle(tui_input::InputRequest::DeletePrevChar);
                 self.form.wallet_name = self.wallet_name_input.value().to_string();
             }
             WalletSaveStep::Password => {
@@ -268,7 +284,13 @@ impl WalletSaveModal {
     /// Navigate buttons
     pub fn select_next_button(&mut self) {
         let button_count = match self.current_step {
-            WalletSaveStep::Confirmation => if self.allow_skip { 3 } else { 2 },
+            WalletSaveStep::Confirmation => {
+                if self.allow_skip {
+                    3
+                } else {
+                    2
+                }
+            }
             WalletSaveStep::Error => 2,
             _ => 2,
         };
@@ -277,7 +299,13 @@ impl WalletSaveModal {
 
     pub fn select_previous_button(&mut self) {
         let button_count = match self.current_step {
-            WalletSaveStep::Confirmation => if self.allow_skip { 3 } else { 2 },
+            WalletSaveStep::Confirmation => {
+                if self.allow_skip {
+                    3
+                } else {
+                    2
+                }
+            }
             WalletSaveStep::Error => 2,
             _ => 2,
         };
@@ -287,7 +315,9 @@ impl WalletSaveModal {
     /// Handle enter key
     pub fn handle_enter(&mut self) {
         match self.current_step {
-            WalletSaveStep::WalletName | WalletSaveStep::Password | WalletSaveStep::PasswordConfirm => {
+            WalletSaveStep::WalletName
+            | WalletSaveStep::Password
+            | WalletSaveStep::PasswordConfirm => {
                 if self.selected_button == 0 {
                     self.next_step();
                 } else {
@@ -296,9 +326,9 @@ impl WalletSaveModal {
             }
             WalletSaveStep::Confirmation => {
                 match self.selected_button {
-                    0 => self.next_step(), // Save
+                    0 => self.next_step(),     // Save
                     1 => self.previous_step(), // Back
-                    2 => self.skip_saving(), // Skip (if available)
+                    2 => self.skip_saving(),   // Skip (if available)
                     _ => {}
                 }
             }
@@ -336,7 +366,8 @@ impl WalletSaveModal {
                         return false;
                     }
                 } else {
-                    self.validation_errors.push("Password is required".to_string());
+                    self.validation_errors
+                        .push("Password is required".to_string());
                     return false;
                 }
             }
@@ -403,7 +434,7 @@ impl WalletSaveModal {
 
         // Inner area for content (calculate before rendering)
         let inner_area = modal_block.inner(modal_area);
-        
+
         modal_block.render(modal_area, buf);
 
         match self.current_step {
@@ -467,8 +498,7 @@ impl WalletSaveModal {
         let cursor_x = chunks[1].x + 1 + self.wallet_name_input.visual_cursor() as u16;
         let cursor_y = chunks[1].y + 1;
         if cursor_x < chunks[1].right() {
-            buf[(cursor_x, cursor_y)]
-                .set_style(Style::default().bg(Color::White).fg(Color::Black));
+            buf[(cursor_x, cursor_y)].set_style(Style::default().bg(Color::White).fg(Color::Black));
         }
 
         // Validation errors
@@ -521,8 +551,8 @@ impl WalletSaveModal {
             .split(area);
 
         // Instructions
-        let instructions = Paragraph::new("Confirm your password:")
-            .style(Style::default().fg(Color::White));
+        let instructions =
+            Paragraph::new("Confirm your password:").style(Style::default().fg(Color::White));
         instructions.render(chunks[0], buf);
 
         // Password confirmation input
@@ -549,8 +579,8 @@ impl WalletSaveModal {
             .split(area);
 
         // Title
-        let title = Paragraph::new("Confirm Wallet Save")
-            .style(Style::default().fg(Color::Yellow).bold());
+        let title =
+            Paragraph::new("Confirm Wallet Save").style(Style::default().fg(Color::Yellow).bold());
         title.render(chunks[0], buf);
 
         // Summary
@@ -603,10 +633,11 @@ impl WalletSaveModal {
         }
 
         // Progress text
-        let progress_text = Paragraph::new("Please wait while your wallet is being encrypted and saved securely.")
-            .style(Style::default().fg(Color::Gray))
-            .alignment(Alignment::Center)
-            .wrap(ratatui::widgets::Wrap { trim: true });
+        let progress_text =
+            Paragraph::new("Please wait while your wallet is being encrypted and saved securely.")
+                .style(Style::default().fg(Color::Gray))
+                .alignment(Alignment::Center)
+                .wrap(ratatui::widgets::Wrap { trim: true });
         progress_text.render(chunks[2], buf);
     }
 
@@ -663,7 +694,10 @@ impl WalletSaveModal {
         error.render(chunks[0], buf);
 
         // Error details
-        let error_text = self.error_message.as_deref().unwrap_or("An unknown error occurred while saving the wallet.");
+        let error_text = self
+            .error_message
+            .as_deref()
+            .unwrap_or("An unknown error occurred while saving the wallet.");
         let details = Paragraph::new(error_text)
             .style(Style::default().fg(Color::White))
             .alignment(Alignment::Center)
@@ -688,11 +722,11 @@ impl WalletSaveModal {
     /// Render step navigation buttons
     fn render_step_buttons(&self, area: Rect, buf: &mut Buffer, button_labels: &[&str]) {
         let button_width = area.width / button_labels.len() as u16;
-        
+
         for (i, &label) in button_labels.iter().enumerate() {
             let x = area.x + (i as u16 * button_width);
             let button_area = Rect::new(x, area.y, button_width, area.height);
-            
+
             let style = if i == self.selected_button {
                 Style::default().bg(Color::Yellow).fg(Color::Black)
             } else {

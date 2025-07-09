@@ -1,9 +1,12 @@
+use aes_gcm::aead::{generic_array::GenericArray, Aead, OsRng};
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
+use argon2::{
+    password_hash::{rand_core::RngCore, SaltString},
+    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
-use aes_gcm::aead::{Aead, OsRng, generic_array::GenericArray};
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::{rand_core::RngCore, SaltString}};
-use serde::{Serialize, Deserialize};
 
 use crate::error::Error;
 
@@ -39,7 +42,7 @@ impl WalletStorage {
     /// Create a new WalletStorage instance
     pub fn new() -> Result<Self, Error> {
         let storage_dir = Self::get_storage_directory()?;
-        
+
         // Create directory if it doesn't exist
         if !storage_dir.exists() {
             fs::create_dir_all(&storage_dir)
@@ -53,7 +56,7 @@ impl WalletStorage {
     pub fn get_storage_directory() -> Result<PathBuf, Error> {
         let home_dir = dirs::home_dir()
             .ok_or_else(|| Error::Wallet("Could not determine home directory".to_string()))?;
-        
+
         Ok(home_dir.join(".mantra_dex").join("wallets"))
     }
 
@@ -69,7 +72,7 @@ impl WalletStorage {
         for entry in entries {
             let entry = entry
                 .map_err(|e| Error::Wallet(format!("Failed to read directory entry: {}", e)))?;
-            
+
             if let Some(extension) = entry.path().extension() {
                 if extension == "wallet" {
                     return Ok(true);
@@ -94,7 +97,7 @@ impl WalletStorage {
         for entry in entries {
             let entry = entry
                 .map_err(|e| Error::Wallet(format!("Failed to read directory entry: {}", e)))?;
-            
+
             if let Some(extension) = entry.path().extension() {
                 if extension == "wallet" {
                     // Try to load and decrypt wallet metadata
@@ -121,7 +124,7 @@ impl WalletStorage {
 
         // Generate salt for Argon2
         let salt = SaltString::generate(&mut OsRng);
-        
+
         // Hash password with Argon2
         let argon2 = Argon2::default();
         let password_hash = argon2
@@ -173,7 +176,7 @@ impl WalletStorage {
     /// Load and decrypt a wallet
     pub fn load_wallet(&self, name: &str, password: &str) -> Result<String, Error> {
         let wallet_path = self.storage_dir.join(format!("{}.wallet", name));
-        
+
         if !wallet_path.exists() {
             return Err(Error::Wallet(format!("Wallet '{}' not found", name)));
         }
@@ -211,7 +214,7 @@ impl WalletStorage {
     /// Delete a saved wallet
     pub fn delete_wallet(&self, name: &str) -> Result<(), Error> {
         let wallet_path = self.storage_dir.join(format!("{}.wallet", name));
-        
+
         if !wallet_path.exists() {
             return Err(Error::Wallet(format!("Wallet '{}' not found", name)));
         }
@@ -234,11 +237,14 @@ impl WalletStorage {
     }
 
     /// Derive encryption key from password hash
-    fn derive_key_from_hash(&self, password_hash: &str) -> Result<GenericArray<u8, aes_gcm::aes::cipher::typenum::U32>, Error> {
+    fn derive_key_from_hash(
+        &self,
+        password_hash: &str,
+    ) -> Result<GenericArray<u8, aes_gcm::aes::cipher::typenum::U32>, Error> {
         // Use the first 32 bytes of the password hash as the key
         let hash_bytes = password_hash.as_bytes();
         let mut key_bytes = [0u8; 32];
-        
+
         if hash_bytes.len() >= 32 {
             key_bytes.copy_from_slice(&hash_bytes[..32]);
         } else {
@@ -252,9 +258,9 @@ impl WalletStorage {
     fn update_last_accessed(&self, name: &str) -> Result<(), Error> {
         let wallet_path = self.storage_dir.join(format!("{}.wallet", name));
         let mut wallet_data = self.load_wallet_file(&wallet_path)?;
-        
+
         wallet_data.metadata.last_accessed = Some(chrono::Utc::now().to_rfc3339());
-        
+
         let wallet_json = serde_json::to_string_pretty(&wallet_data)
             .map_err(|e| Error::Wallet(format!("Failed to serialize wallet data: {}", e)))?;
 
@@ -267,7 +273,9 @@ impl WalletStorage {
     /// Validate password strength
     pub fn validate_password(&self, password: &str) -> Result<(), Error> {
         if password.len() < 12 {
-            return Err(Error::Wallet("Password must be at least 12 characters long".to_string()));
+            return Err(Error::Wallet(
+                "Password must be at least 12 characters long".to_string(),
+            ));
         }
 
         let has_upper = password.chars().any(|c| c.is_uppercase());
@@ -276,16 +284,24 @@ impl WalletStorage {
         let has_symbol = password.chars().any(|c| !c.is_alphanumeric());
 
         if !has_upper {
-            return Err(Error::Wallet("Password must contain at least one uppercase letter".to_string()));
+            return Err(Error::Wallet(
+                "Password must contain at least one uppercase letter".to_string(),
+            ));
         }
         if !has_lower {
-            return Err(Error::Wallet("Password must contain at least one lowercase letter".to_string()));
+            return Err(Error::Wallet(
+                "Password must contain at least one lowercase letter".to_string(),
+            ));
         }
         if !has_digit {
-            return Err(Error::Wallet("Password must contain at least one number".to_string()));
+            return Err(Error::Wallet(
+                "Password must contain at least one number".to_string(),
+            ));
         }
         if !has_symbol {
-            return Err(Error::Wallet("Password must contain at least one symbol".to_string()));
+            return Err(Error::Wallet(
+                "Password must contain at least one symbol".to_string(),
+            ));
         }
 
         Ok(())
@@ -296,4 +312,4 @@ impl Default for WalletStorage {
     fn default() -> Self {
         Self::new().expect("Failed to initialize WalletStorage")
     }
-} 
+}

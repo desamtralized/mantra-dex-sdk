@@ -211,7 +211,7 @@ impl AdminScreenState {
         {
             let was_active = self.pool_management.pool_selection_dropdown.is_active;
             let was_editing = self.pool_management.pool_selection_dropdown.is_editing;
-            
+
             let options: Vec<SimpleListOption> = pools
                 .iter()
                 .map(|(pool_id, display_name)| {
@@ -226,16 +226,22 @@ impl AdminScreenState {
             // Reset selection
             self.pool_management.pool_selection_dropdown.selected_index = None;
             if !pools.is_empty() {
-                self.pool_management.pool_selection_dropdown.list_state.select(Some(0));
+                self.pool_management
+                    .pool_selection_dropdown
+                    .list_state
+                    .select(Some(0));
             } else {
-                self.pool_management.pool_selection_dropdown.list_state.select(None);
+                self.pool_management
+                    .pool_selection_dropdown
+                    .list_state
+                    .select(None);
             }
         }
-        
+
         {
             let was_active = self.feature_control.pool_selection_dropdown.is_active;
             let was_editing = self.feature_control.pool_selection_dropdown.is_editing;
-            
+
             let options: Vec<SimpleListOption> = pools
                 .iter()
                 .map(|(pool_id, display_name)| {
@@ -250,14 +256,18 @@ impl AdminScreenState {
             // Reset selection
             self.feature_control.pool_selection_dropdown.selected_index = None;
             if !pools.is_empty() {
-                self.feature_control.pool_selection_dropdown.list_state.select(Some(0));
+                self.feature_control
+                    .pool_selection_dropdown
+                    .list_state
+                    .select(Some(0));
             } else {
-                self.feature_control.pool_selection_dropdown.list_state.select(None);
+                self.feature_control
+                    .pool_selection_dropdown
+                    .list_state
+                    .select(None);
             }
         }
     }
-
-
 
     /// Switch admin mode/tab
     pub fn set_mode(&mut self, mode: AdminMode) {
@@ -394,9 +404,18 @@ impl AdminScreenState {
             AdminInputFocus::PoolType => {
                 self.pool_creation.pool_type_dropdown.set_active(true);
                 // Ensure list state is properly initialized for navigation
-                if self.pool_creation.pool_type_dropdown.list_state.selected().is_none() 
-                    && !self.pool_creation.pool_type_dropdown.options.is_empty() {
-                    self.pool_creation.pool_type_dropdown.list_state.select(Some(0));
+                if self
+                    .pool_creation
+                    .pool_type_dropdown
+                    .list_state
+                    .selected()
+                    .is_none()
+                    && !self.pool_creation.pool_type_dropdown.options.is_empty()
+                {
+                    self.pool_creation
+                        .pool_type_dropdown
+                        .list_state
+                        .select(Some(0));
                 }
             }
             AdminInputFocus::CreationExecute => {} // Button focus handled separately
@@ -439,13 +458,13 @@ impl AdminScreenState {
                     .pool_selection_dropdown
                     .get_selected_value()
                     .is_some();
-                
+
                 ValidationResult {
                     is_valid: pool_selected,
-                    errors: if pool_selected { 
-                        Vec::new() 
-                    } else { 
-                        vec!["Please select a pool to manage".to_string()] 
+                    errors: if pool_selected {
+                        Vec::new()
+                    } else {
+                        vec!["Please select a pool to manage".to_string()]
                     },
                 }
             }
@@ -482,7 +501,12 @@ impl AdminScreenState {
                 }
 
                 ValidationResult {
-                    is_valid: first_valid && second_valid && swap_fee_valid && protocol_fee_valid && burn_fee_valid && pool_type_valid,
+                    is_valid: first_valid
+                        && second_valid
+                        && swap_fee_valid
+                        && protocol_fee_valid
+                        && burn_fee_valid
+                        && pool_type_valid,
                     errors,
                 }
             }
@@ -492,13 +516,13 @@ impl AdminScreenState {
                     .pool_selection_dropdown
                     .get_selected_value()
                     .is_some();
-                
+
                 ValidationResult {
                     is_valid: pool_selected,
-                    errors: if pool_selected { 
-                        Vec::new() 
-                    } else { 
-                        vec!["Please select a pool to control".to_string()] 
+                    errors: if pool_selected {
+                        Vec::new()
+                    } else {
+                        vec!["Please select a pool to control".to_string()]
                     },
                 }
             }
@@ -752,8 +776,11 @@ impl AdminScreenState {
                 if list_event == ListEvent::SelectionMade {
                     self.mark_input_change();
                     // When a selection is made, sync the selected_index with the highlighted item
-                    if let Some(highlighted_idx) = self.pool_creation.pool_type_dropdown.list_state.selected() {
-                        self.pool_creation.pool_type_dropdown.selected_index = Some(highlighted_idx);
+                    if let Some(highlighted_idx) =
+                        self.pool_creation.pool_type_dropdown.list_state.selected()
+                    {
+                        self.pool_creation.pool_type_dropdown.selected_index =
+                            Some(highlighted_idx);
                     }
                 }
 
@@ -1014,15 +1041,33 @@ fn render_pool_creation_form(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, area);
 
     // Render input fields
-    admin_state.pool_creation.first_asset_input.render(f, chunks[0]);
-    admin_state.pool_creation.second_asset_input.render(f, chunks[1]);
-    admin_state.pool_creation.swap_fee_input.render(f, chunks[2]);
-    admin_state.pool_creation.protocol_fee_input.render(f, chunks[3]);
-    admin_state.pool_creation.burn_fee_input.render(f, chunks[4]);
-    
+    admin_state
+        .pool_creation
+        .first_asset_input
+        .render(f, chunks[0]);
+    admin_state
+        .pool_creation
+        .second_asset_input
+        .render(f, chunks[1]);
+    admin_state
+        .pool_creation
+        .swap_fee_input
+        .render(f, chunks[2]);
+    admin_state
+        .pool_creation
+        .protocol_fee_input
+        .render(f, chunks[3]);
+    admin_state
+        .pool_creation
+        .burn_fee_input
+        .render(f, chunks[4]);
+
     // Pool type dropdown
     let admin_state_mut = get_admin_screen_state();
-    admin_state_mut.pool_creation.pool_type_dropdown.render(f, chunks[5]);
+    admin_state_mut
+        .pool_creation
+        .pool_type_dropdown
+        .render(f, chunks[5]);
 
     // Execute button
     render_creation_execute_button(f, chunks[6], app);
@@ -1045,7 +1090,11 @@ fn render_pool_creation_preview(f: &mut Frame, area: Rect, app: &App) {
     let swap_fee = admin_state.pool_creation.swap_fee_input.value();
     let protocol_fee = admin_state.pool_creation.protocol_fee_input.value();
     let burn_fee = admin_state.pool_creation.burn_fee_input.value();
-    let pool_type = admin_state.pool_creation.pool_type_dropdown.get_selected_label().unwrap_or("Not selected");
+    let pool_type = admin_state
+        .pool_creation
+        .pool_type_dropdown
+        .get_selected_label()
+        .unwrap_or("Not selected");
 
     let preview_content = if first_asset.is_empty() || second_asset.is_empty() {
         "Enter asset denominations to see preview".to_string()
@@ -1058,8 +1107,8 @@ fn render_pool_creation_preview(f: &mut Frame, area: Rect, app: &App) {
             swap_fee,
             protocol_fee,
             burn_fee,
-            swap_fee.parse::<f64>().unwrap_or(0.0) + 
-            protocol_fee.parse::<f64>().unwrap_or(0.0) + 
+            swap_fee.parse::<f64>().unwrap_or(0.0) +
+            protocol_fee.parse::<f64>().unwrap_or(0.0) +
             burn_fee.parse::<f64>().unwrap_or(0.0)
         )
     };
@@ -1078,7 +1127,10 @@ fn render_creation_execute_button(f: &mut Frame, area: Rect, app: &App) {
     let is_valid = admin_state.clone().validate();
 
     let is_loading = matches!(app.state.loading_state, LoadingState::Loading { .. });
-    let loading_message = if let LoadingState::Loading { message, progress, .. } = &app.state.loading_state {
+    let loading_message = if let LoadingState::Loading {
+        message, progress, ..
+    } = &app.state.loading_state
+    {
         if let Some(p) = progress {
             format!("{} ({}%)", message, *p as u16)
         } else {
@@ -1094,7 +1146,11 @@ fn render_creation_execute_button(f: &mut Frame, area: Rect, app: &App) {
                 .fg(Color::Black)
                 .bg(Color::Yellow)
                 .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
-            if loading_message.is_empty() { "Creating Pool..." } else { &loading_message },
+            if loading_message.is_empty() {
+                "Creating Pool..."
+            } else {
+                &loading_message
+            },
             Style::default().fg(Color::Yellow),
         )
     } else if !is_valid {
@@ -1114,7 +1170,9 @@ fn render_creation_execute_button(f: &mut Frame, area: Rect, app: &App) {
         )
     } else {
         (
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
             "Create Pool",
             Style::default().fg(Color::Green),
         )
@@ -1124,7 +1182,9 @@ fn render_creation_execute_button(f: &mut Frame, area: Rect, app: &App) {
         let dots = match (std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis() / 500) % 4
+            .as_millis()
+            / 500)
+            % 4
         {
             0 => "",
             1 => ".",
@@ -1186,7 +1246,10 @@ fn render_pool_management_form(f: &mut Frame, area: Rect, app: &App) {
 
     // Pool selection dropdown
     let admin_state_mut = get_admin_screen_state();
-    admin_state_mut.pool_management.pool_selection_dropdown.render(f, chunks[0]);
+    admin_state_mut
+        .pool_management
+        .pool_selection_dropdown
+        .render(f, chunks[0]);
 
     // Feature toggles
     render_pool_feature_toggles(f, chunks[1], app);
@@ -1215,28 +1278,43 @@ fn render_pool_feature_toggles(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let features = admin_state.pool_management.selected_pool_features.unwrap_or((true, true, true));
+    let features = admin_state
+        .pool_management
+        .selected_pool_features
+        .unwrap_or((true, true, true));
 
     let content = vec![
         Line::from(vec![
             Span::styled("• [W] Withdrawals: ", Style::default().fg(Color::White)),
             Span::styled(
                 if features.0 { "ENABLED" } else { "DISABLED" },
-                if features.0 { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Red) }
+                if features.0 {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::Red)
+                },
             ),
         ]),
         Line::from(vec![
             Span::styled("• [D] Deposits: ", Style::default().fg(Color::White)),
             Span::styled(
                 if features.1 { "ENABLED" } else { "DISABLED" },
-                if features.1 { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Red) }
+                if features.1 {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::Red)
+                },
             ),
         ]),
         Line::from(vec![
             Span::styled("• [S] Swaps: ", Style::default().fg(Color::White)),
             Span::styled(
                 if features.2 { "ENABLED" } else { "DISABLED" },
-                if features.2 { Style::default().fg(Color::Green) } else { Style::default().fg(Color::Red) }
+                if features.2 {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::Red)
+                },
             ),
         ]),
         Line::from(""),
@@ -1246,8 +1324,7 @@ fn render_pool_feature_toggles(f: &mut Frame, area: Rect, app: &App) {
         )]),
     ];
 
-    let paragraph = Paragraph::new(Text::from(content))
-        .wrap(Wrap { trim: true });
+    let paragraph = Paragraph::new(Text::from(content)).wrap(Wrap { trim: true });
 
     f.render_widget(paragraph, inner);
 }
@@ -1286,7 +1363,9 @@ fn render_management_execute_button(f: &mut Frame, area: Rect, app: &App) {
         )
     } else {
         (
-            Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
             "Apply Changes",
             Style::default().fg(Color::Blue),
         )
@@ -1317,8 +1396,15 @@ fn render_pool_management_details(f: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let content = if let Some(pool_id) = admin_state.pool_management.pool_selection_dropdown.get_selected_value() {
-        let features = admin_state.pool_management.selected_pool_features.unwrap_or((true, true, true));
+    let content = if let Some(pool_id) = admin_state
+        .pool_management
+        .pool_selection_dropdown
+        .get_selected_value()
+    {
+        let features = admin_state
+            .pool_management
+            .selected_pool_features
+            .unwrap_or((true, true, true));
         format!(
             "Selected Pool: {}\n\nCurrent Feature Status:\n• Withdrawals: {}\n• Deposits: {}\n• Swaps: {}\n\nPool Management:\n• Real-time feature control\n• Immediate blockchain updates\n• Admin privileges required\n\nChanges will be applied to the\nMantra DEX smart contract.",
             pool_id,
@@ -1374,7 +1460,10 @@ fn render_feature_controls_form(f: &mut Frame, area: Rect, app: &App) {
 
     // Pool selection
     let admin_state_mut = get_admin_screen_state();
-    admin_state_mut.feature_control.pool_selection_dropdown.render(f, chunks[0]);
+    admin_state_mut
+        .feature_control
+        .pool_selection_dropdown
+        .render(f, chunks[0]);
 
     // Bulk controls
     render_bulk_feature_controls(f, chunks[1], app);
@@ -1420,12 +1509,13 @@ fn render_bulk_feature_controls(f: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from(vec![Span::styled(
             "⚠️ Warning: Changes are immediate!",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         )]),
     ];
 
-    let paragraph = Paragraph::new(Text::from(content))
-        .wrap(Wrap { trim: true });
+    let paragraph = Paragraph::new(Text::from(content)).wrap(Wrap { trim: true });
 
     f.render_widget(paragraph, inner);
 }
@@ -1501,14 +1591,6 @@ fn render_feature_controls_details(f: &mut Frame, area: Rect, app: &App) {
 
     f.render_widget(paragraph, inner);
 }
-
-
-
-
-
-
-
-
 
 /// Render pool creation progress indicator
 fn render_creation_progress(f: &mut Frame, area: Rect) {
@@ -1866,7 +1948,10 @@ fn render_validation_overlay(f: &mut Frame, area: Rect, _app: &App) {
 // Public API functions (like swap/liquidity screens)
 
 /// Handle admin screen input (legacy compatibility)
-pub fn handle_admin_screen_input(app_state: &mut crate::tui::app::AppState, input: InputRequest) -> bool {
+pub fn handle_admin_screen_input(
+    app_state: &mut crate::tui::app::AppState,
+    input: InputRequest,
+) -> bool {
     app_state.admin_screen_state.handle_input(input)
 }
 
@@ -1909,7 +1994,11 @@ pub fn execute_pool_creation_with_confirmation(app_state: &mut crate::tui::app::
     let swap_fee = admin_state.pool_creation.swap_fee_input.value();
     let protocol_fee = admin_state.pool_creation.protocol_fee_input.value();
     let burn_fee = admin_state.pool_creation.burn_fee_input.value();
-    let pool_type = admin_state.pool_creation.pool_type_dropdown.get_selected_value().unwrap_or_default();
+    let pool_type = admin_state
+        .pool_creation
+        .pool_type_dropdown
+        .get_selected_value()
+        .unwrap_or_default();
 
     // Log pool creation parameters
     crate::tui::utils::logger::log_info("Pool Creation parameters:");
@@ -1937,14 +2026,20 @@ pub fn execute_pool_creation_with_confirmation(app_state: &mut crate::tui::app::
         pool_details.swap_fee,
         pool_details.protocol_fee,
         pool_details.burn_fee,
-        pool_details.swap_fee.parse::<f64>().unwrap_or(0.0) + 
-        pool_details.protocol_fee.parse::<f64>().unwrap_or(0.0) + 
+        pool_details.swap_fee.parse::<f64>().unwrap_or(0.0) +
+        pool_details.protocol_fee.parse::<f64>().unwrap_or(0.0) +
         pool_details.burn_fee.parse::<f64>().unwrap_or(0.0)
     );
 
     crate::tui::utils::logger::log_info("Pool creation confirmation modal prepared");
-    crate::tui::utils::logger::log_debug(&format!("Confirmation message: {}", confirmation_message));
-    crate::tui::utils::logger::log_info(&format!("Pool creation confirmation ready: {}", confirmation_message));
+    crate::tui::utils::logger::log_debug(&format!(
+        "Confirmation message: {}",
+        confirmation_message
+    ));
+    crate::tui::utils::logger::log_info(&format!(
+        "Pool creation confirmation ready: {}",
+        confirmation_message
+    ));
 }
 
 /// Execute pool feature management with confirmation
@@ -1962,8 +2057,15 @@ pub fn execute_pool_management_with_confirmation(app_state: &mut crate::tui::app
         return;
     }
 
-    let pool_id = admin_state.pool_management.pool_selection_dropdown.get_selected_value().unwrap_or_default();
-    let features = admin_state.pool_management.selected_pool_features.unwrap_or((true, true, true));
+    let pool_id = admin_state
+        .pool_management
+        .pool_selection_dropdown
+        .get_selected_value()
+        .unwrap_or_default();
+    let features = admin_state
+        .pool_management
+        .selected_pool_features
+        .unwrap_or((true, true, true));
 
     crate::tui::utils::logger::log_info("Pool Management parameters:");
     crate::tui::utils::logger::log_info(&format!("  Pool ID: {}", pool_id));
@@ -1987,11 +2089,17 @@ pub fn execute_pool_management_with_confirmation(app_state: &mut crate::tui::app
     );
 
     crate::tui::utils::logger::log_info("Pool management confirmation modal prepared");
-    crate::tui::utils::logger::log_info(&format!("Pool management confirmation ready: {}", confirmation_message));
+    crate::tui::utils::logger::log_info(&format!(
+        "Pool management confirmation ready: {}",
+        confirmation_message
+    ));
 }
 
 /// Handle pool creation confirmation response
-pub fn handle_pool_creation_confirmation_response(app_state: &mut crate::tui::app::AppState, confirmed: bool) -> Option<crate::tui::events::Event> {
+pub fn handle_pool_creation_confirmation_response(
+    app_state: &mut crate::tui::app::AppState,
+    confirmed: bool,
+) -> Option<crate::tui::events::Event> {
     crate::tui::utils::logger::log_info(&format!(
         "=== POOL CREATION CONFIRMATION RESPONSE: {} ===",
         if confirmed { "CONFIRMED" } else { "CANCELLED" }
@@ -1999,13 +2107,17 @@ pub fn handle_pool_creation_confirmation_response(app_state: &mut crate::tui::ap
 
     if confirmed {
         let admin_state = &mut app_state.admin_screen_state;
-        
+
         let first_asset = admin_state.pool_creation.first_asset_input.value();
         let second_asset = admin_state.pool_creation.second_asset_input.value();
         let swap_fee = admin_state.pool_creation.swap_fee_input.value();
         let protocol_fee = admin_state.pool_creation.protocol_fee_input.value();
         let burn_fee = admin_state.pool_creation.burn_fee_input.value();
-        let pool_type = admin_state.pool_creation.pool_type_dropdown.get_selected_value().unwrap_or_default();
+        let pool_type = admin_state
+            .pool_creation
+            .pool_type_dropdown
+            .get_selected_value()
+            .unwrap_or_default();
 
         // Create pool creation event
         Some(crate::tui::events::Event::CreatePool {
@@ -2024,7 +2136,10 @@ pub fn handle_pool_creation_confirmation_response(app_state: &mut crate::tui::ap
 }
 
 /// Handle pool management confirmation response
-pub fn handle_pool_management_confirmation_response(app_state: &mut crate::tui::app::AppState, confirmed: bool) -> Option<crate::tui::events::Event> {
+pub fn handle_pool_management_confirmation_response(
+    app_state: &mut crate::tui::app::AppState,
+    confirmed: bool,
+) -> Option<crate::tui::events::Event> {
     crate::tui::utils::logger::log_info(&format!(
         "=== POOL MANAGEMENT CONFIRMATION RESPONSE: {} ===",
         if confirmed { "CONFIRMED" } else { "CANCELLED" }
@@ -2032,18 +2147,40 @@ pub fn handle_pool_management_confirmation_response(app_state: &mut crate::tui::
 
     if confirmed {
         let admin_state = &mut app_state.admin_screen_state;
-        
-        let pool_id = admin_state.pool_management.pool_selection_dropdown.get_selected_value().unwrap_or_default();
-        let features = admin_state.pool_management.selected_pool_features.unwrap_or((true, true, true));
+
+        let pool_id = admin_state
+            .pool_management
+            .pool_selection_dropdown
+            .get_selected_value()
+            .unwrap_or_default();
+        let features = admin_state
+            .pool_management
+            .selected_pool_features
+            .unwrap_or((true, true, true));
 
         // Create pool management event
         Some(crate::tui::events::Event::UpdatePoolFeatures {
             pool_id: pool_id.to_string(),
             features: vec![
-                if features.0 { "withdrawals".to_string() } else { "".to_string() },
-                if features.1 { "deposits".to_string() } else { "".to_string() },
-                if features.2 { "swaps".to_string() } else { "".to_string() },
-            ].into_iter().filter(|s| !s.is_empty()).collect(),
+                if features.0 {
+                    "withdrawals".to_string()
+                } else {
+                    "".to_string()
+                },
+                if features.1 {
+                    "deposits".to_string()
+                } else {
+                    "".to_string()
+                },
+                if features.2 {
+                    "swaps".to_string()
+                } else {
+                    "".to_string()
+                },
+            ]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect(),
             enabled: features.0 || features.1 || features.2,
         })
     } else {
@@ -2062,7 +2199,10 @@ pub fn reset_admin_forms(app_state: &mut crate::tui::app::AppState) {
     admin_state.pool_creation.first_asset_input.clear();
     admin_state.pool_creation.second_asset_input.clear();
     admin_state.pool_creation.swap_fee_input.set_value("0.03");
-    admin_state.pool_creation.protocol_fee_input.set_value("0.01");
+    admin_state
+        .pool_creation
+        .protocol_fee_input
+        .set_value("0.01");
     admin_state.pool_creation.burn_fee_input.set_value("0.0");
 
     // Reset pool management
@@ -2073,4 +2213,3 @@ pub fn reset_admin_forms(app_state: &mut crate::tui::app::AppState) {
 
     crate::tui::utils::logger::log_info("Admin forms reset completed");
 }
-

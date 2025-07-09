@@ -1544,7 +1544,10 @@ mod tests {
             kind: event::KeyEventKind::Press,
             state: event::KeyEventState::NONE,
         };
-        assert_eq!(EventHandler::convert_key_event(quit_q), Some(Event::Char('q')));
+        assert_eq!(
+            EventHandler::convert_key_event(quit_q),
+            Some(Event::Char('q'))
+        );
 
         let quit_ctrl_c = KeyEvent {
             code: KeyCode::Char('c'),
