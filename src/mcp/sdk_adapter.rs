@@ -537,6 +537,105 @@ impl McpSdkAdapter {
         Ok(())
     }
 
+    /// Get all available wallets
+    pub async fn get_all_wallets(&self) -> McpResult<HashMap<String, WalletInfo>> {
+        let wallets = self.wallets.read().await;
+        Ok(wallets.clone())
+    }
+
+    /// Add a new wallet to the collection
+    pub async fn add_wallet(&self, wallet: MantraWallet) -> McpResult<String> {
+        let wallet_info = wallet.info();
+        let address = wallet_info.address.clone();
+        
+        // Store the wallet info
+        self.wallets.write().await.insert(address.clone(), wallet_info);
+        
+        info!("Added new wallet: {}", address);
+        Ok(address)
+    }
+
+    /// Remove a wallet from the collection
+    pub async fn remove_wallet(&self, address: &str) -> McpResult<()> {
+        let mut wallets = self.wallets.write().await;
+        
+        if wallets.remove(address).is_some() {
+            // If this was the active wallet, clear the active wallet
+            let mut active_wallet = self.active_wallet.lock().await;
+            if active_wallet.as_ref() == Some(&address.to_string()) {
+                *active_wallet = None;
+                *self.active_wallet_instance.lock().await = None;
+            }
+            info!("Removed wallet: {}", address);
+            Ok(())
+        } else {
+            Err(McpServerError::InvalidArguments(format!("Wallet not found: {}", address)))
+        }
+    }
+
+    /// Switch active wallet to a different address
+    pub async fn switch_active_wallet(&self, address: &str) -> McpResult<()> {
+        let wallets = self.wallets.read().await;
+        
+        if let Some(wallet_info) = wallets.get(address) {
+            *self.active_wallet.lock().await = Some(address.to_string());
+            // Clear the wallet instance - will be recreated when needed
+            *self.active_wallet_instance.lock().await = None;
+            info!("Switched active wallet to: {}", address);
+            Ok(())
+        } else {
+            Err(McpServerError::InvalidArguments(format!("Wallet not found: {}", address)))
+        }
+    }
+
+    /// Get wallet info by address
+    pub async fn get_wallet_info(&self, address: &str) -> McpResult<Option<WalletInfo>> {
+        let wallets = self.wallets.read().await;
+        Ok(wallets.get(address).cloned())
+    }
+
+    /// Check if a wallet exists
+    pub async fn wallet_exists(&self, address: &str) -> bool {
+        let wallets = self.wallets.read().await;
+        wallets.contains_key(address)
+    }
+
+    /// Get a wallet instance by address
+    /// Note: This method tries to recreate the wallet from environment mnemonic
+    pub async fn get_wallet_by_address(&self, address: &str) -> McpResult<Option<MantraWallet>> {
+        use crate::wallet::MantraWallet;
+        use std::env;
+
+        // Check if wallet exists in our collection
+        if !self.wallet_exists(address).await {
+            return Ok(None);
+        }
+
+        // Try to recreate wallet from environment mnemonic
+        if let Ok(mnemonic) = env::var("WALLET_MNEMONIC") {
+            if !mnemonic.trim().is_empty() {
+                // Try different derivation indices to find the matching wallet
+                for index in 0..10 {
+                    match MantraWallet::from_mnemonic(&mnemonic, index) {
+                        Ok(wallet) => {
+                            if wallet.info().address == address {
+                                debug!("Found wallet at index {} for address {}", index, address);
+                                return Ok(Some(wallet));
+                            }
+                        }
+                        Err(e) => {
+                            debug!("Failed to create wallet at index {}: {}", index, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // If we can't recreate from mnemonic, return None
+        debug!("Could not recreate wallet instance for address: {}", address);
+        Ok(None)
+    }
+
     /// Get wallet error handling with proper error messages
     pub async fn get_active_wallet_with_validation(&self) -> McpResult<MantraWallet> {
         match self.get_active_wallet().await? {
@@ -1322,8 +1421,20 @@ impl McpSdkAdapter {
             .and_then(|v| v.as_str())
             .and_then(|s| Decimal::from_str(s).ok());
 
-        // Get active wallet (required for providing liquidity)
-        let wallet = self.get_active_wallet_with_validation().await?;
+        // Get wallet (use provided wallet_address or active wallet)
+        let wallet = if let Some(wallet_address) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            match self.get_wallet_by_address(wallet_address).await? {
+                Some(wallet) => wallet,
+                None => {
+                    return Err(McpServerError::InvalidArguments(format!(
+                        "Wallet with address {} not found",
+                        wallet_address
+                    )));
+                }
+            }
+        } else {
+            self.get_active_wallet_with_validation().await?
+        };
 
         // Get network config and client with wallet
         let network_config = self.get_default_network_config().await?;
@@ -1385,8 +1496,20 @@ impl McpSdkAdapter {
         let lp_amount = Uint128::from_str(amount_str)
             .map_err(|e| McpServerError::InvalidArguments(format!("Invalid LP amount: {}", e)))?;
 
-        // Get active wallet (required for withdrawing liquidity)
-        let wallet = self.get_active_wallet_with_validation().await?;
+        // Get wallet (use provided wallet_address or active wallet)
+        let wallet = if let Some(wallet_address) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            match self.get_wallet_by_address(wallet_address).await? {
+                Some(wallet) => wallet,
+                None => {
+                    return Err(McpServerError::InvalidArguments(format!(
+                        "Wallet with address {} not found",
+                        wallet_address
+                    )));
+                }
+            }
+        } else {
+            self.get_active_wallet_with_validation().await?
+        };
 
         // Get network config and client with wallet
         let network_config = self.get_default_network_config().await?;
@@ -1551,8 +1674,20 @@ impl McpSdkAdapter {
             .and_then(|v| v.as_str())
             .and_then(|s| Decimal::from_str(s).ok());
 
-        // Get active wallet (required for swaps)
-        let wallet = self.get_active_wallet_with_validation().await?;
+        // Get wallet (use provided wallet_address or active wallet)
+        let wallet = if let Some(wallet_address) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            match self.get_wallet_by_address(wallet_address).await? {
+                Some(wallet) => wallet,
+                None => {
+                    return Err(McpServerError::InvalidArguments(format!(
+                        "Wallet with address {} not found",
+                        wallet_address
+                    )));
+                }
+            }
+        } else {
+            self.get_active_wallet_with_validation().await?
+        };
 
         // Get network config and client with wallet
         let network_config = self.get_default_network_config().await?;
