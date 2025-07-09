@@ -788,7 +788,7 @@ impl App {
                     let title = "Pool Created Successfully!".to_string();
                     let details = self.create_pool_creation_success_details(result, transaction_hash);
                     // Reset admin forms after successful pool creation
-                    crate::tui::screens::admin::reset_admin_forms();
+                    crate::tui::screens::admin::reset_admin_forms(&mut self.state);
                     (title, details)
                 }
                 "update_pool_features" => {
@@ -1662,7 +1662,7 @@ impl App {
             }
             Screen::Admin => {
                 // Initialize focus for admin screen
-                crate::tui::screens::admin::initialize_admin_screen_focus();
+                crate::tui::screens::admin::initialize_admin_screen_focus(&mut self.state);
 
                 // Refresh pool data for admin screen
                 if let Some(sender) = &self.event_sender {
@@ -1845,7 +1845,7 @@ impl App {
         }
 
         // Update the admin screen with available pools
-        crate::tui::screens::admin::update_admin_pools(available_pools);
+        crate::tui::screens::admin::update_admin_pools(&mut self.state, available_pools);
     }
 
     /// Update liquidity screen pools dropdown with available pools
@@ -3412,7 +3412,7 @@ impl App {
                     if title == "Confirm Pool Creation" {
                         // Handle pool creation confirmation
                         if let Some(create_pool_event) =
-                            crate::tui::screens::admin::handle_pool_creation_confirmation_response(true)
+                            crate::tui::screens::admin::handle_pool_creation_confirmation_response(&mut self.state, true)
                         {
                             // Process the pool creation event immediately
                             if let Some(sender) = self.event_sender.as_ref() {
@@ -3449,7 +3449,7 @@ impl App {
                     } else if title == "Confirm Pool Management" {
                         // Handle pool management confirmation
                         if let Some(pool_management_event) =
-                            crate::tui::screens::admin::handle_pool_management_confirmation_response(true)
+                            crate::tui::screens::admin::handle_pool_management_confirmation_response(&mut self.state, true)
                         {
                             // Process the pool management event immediately
                             if let Some(sender) = self.event_sender.as_ref() {
@@ -3526,7 +3526,7 @@ impl App {
             }
             Screen::Admin => {
                 // Initialize admin screen focus state
-                crate::tui::screens::admin::initialize_admin_screen_focus();
+                crate::tui::screens::admin::initialize_admin_screen_focus(&mut self.state);
                 // Update admin screen pools when entering screen
                 self.update_admin_screen_pools();
             }
@@ -3560,7 +3560,7 @@ impl App {
             }
             Screen::Admin => {
                 // Initialize admin screen focus state
-                crate::tui::screens::admin::initialize_admin_screen_focus();
+                crate::tui::screens::admin::initialize_admin_screen_focus(&mut self.state);
                 // Update admin screen pools when entering screen
                 self.update_admin_screen_pools();
             }
@@ -3598,7 +3598,7 @@ impl App {
             }
             Screen::Admin => {
                 // Initialize admin screen focus state
-                crate::tui::screens::admin::initialize_admin_screen_focus();
+                crate::tui::screens::admin::initialize_admin_screen_focus(&mut self.state);
                 // Update admin screen pools when entering screen
                 self.update_admin_screen_pools();
             }

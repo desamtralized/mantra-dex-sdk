@@ -1866,35 +1866,31 @@ fn render_validation_overlay(f: &mut Frame, area: Rect, _app: &App) {
 // Public API functions (like swap/liquidity screens)
 
 /// Handle admin screen input (legacy compatibility)
-pub fn handle_admin_screen_input(input: InputRequest) -> bool {
-    let admin_state = get_admin_screen_state();
-    admin_state.handle_input(input)
+pub fn handle_admin_screen_input(app_state: &mut crate::tui::app::AppState, input: InputRequest) -> bool {
+    app_state.admin_screen_state.handle_input(input)
 }
 
 /// Switch admin mode
-pub fn switch_admin_mode(mode: AdminMode) {
-    let admin_state = get_admin_screen_state();
-    admin_state.set_mode(mode);
+pub fn switch_admin_mode(app_state: &mut crate::tui::app::AppState, mode: AdminMode) {
+    app_state.admin_screen_state.set_mode(mode);
 }
 
 /// Update available pools for admin operations
-pub fn update_admin_pools(pools: Vec<(String, String)>) {
-    let admin_state = get_admin_screen_state();
-    admin_state.update_available_pools(pools);
+pub fn update_admin_pools(app_state: &mut crate::tui::app::AppState, pools: Vec<(String, String)>) {
+    app_state.admin_screen_state.update_available_pools(pools);
 }
 
 /// Initialize admin screen focus
-pub fn initialize_admin_screen_focus() {
-    let admin_state = get_admin_screen_state();
-    admin_state.input_focus = AdminInputFocus::PoolSelection;
-    admin_state.apply_focus();
+pub fn initialize_admin_screen_focus(app_state: &mut crate::tui::app::AppState) {
+    app_state.admin_screen_state.input_focus = AdminInputFocus::PoolSelection;
+    app_state.admin_screen_state.apply_focus();
 
     crate::tui::utils::logger::log_info("Admin screen focus initialized");
 }
 
 /// Execute pool creation with confirmation
-pub fn execute_pool_creation_with_confirmation() {
-    let admin_state = get_admin_screen_state();
+pub fn execute_pool_creation_with_confirmation(app_state: &mut crate::tui::app::AppState) {
+    let admin_state = &mut app_state.admin_screen_state;
 
     crate::tui::utils::logger::log_info("=== POOL CREATION EXECUTION ATTEMPT ===");
 
@@ -1952,8 +1948,8 @@ pub fn execute_pool_creation_with_confirmation() {
 }
 
 /// Execute pool feature management with confirmation
-pub fn execute_pool_management_with_confirmation() {
-    let admin_state = get_admin_screen_state();
+pub fn execute_pool_management_with_confirmation(app_state: &mut crate::tui::app::AppState) {
+    let admin_state = &mut app_state.admin_screen_state;
 
     crate::tui::utils::logger::log_info("=== POOL MANAGEMENT EXECUTION ATTEMPT ===");
 
@@ -1995,14 +1991,14 @@ pub fn execute_pool_management_with_confirmation() {
 }
 
 /// Handle pool creation confirmation response
-pub fn handle_pool_creation_confirmation_response(confirmed: bool) -> Option<crate::tui::events::Event> {
+pub fn handle_pool_creation_confirmation_response(app_state: &mut crate::tui::app::AppState, confirmed: bool) -> Option<crate::tui::events::Event> {
     crate::tui::utils::logger::log_info(&format!(
         "=== POOL CREATION CONFIRMATION RESPONSE: {} ===",
         if confirmed { "CONFIRMED" } else { "CANCELLED" }
     ));
 
     if confirmed {
-        let admin_state = get_admin_screen_state();
+        let admin_state = &mut app_state.admin_screen_state;
         
         let first_asset = admin_state.pool_creation.first_asset_input.value();
         let second_asset = admin_state.pool_creation.second_asset_input.value();
@@ -2028,14 +2024,14 @@ pub fn handle_pool_creation_confirmation_response(confirmed: bool) -> Option<cra
 }
 
 /// Handle pool management confirmation response
-pub fn handle_pool_management_confirmation_response(confirmed: bool) -> Option<crate::tui::events::Event> {
+pub fn handle_pool_management_confirmation_response(app_state: &mut crate::tui::app::AppState, confirmed: bool) -> Option<crate::tui::events::Event> {
     crate::tui::utils::logger::log_info(&format!(
         "=== POOL MANAGEMENT CONFIRMATION RESPONSE: {} ===",
         if confirmed { "CONFIRMED" } else { "CANCELLED" }
     ));
 
     if confirmed {
-        let admin_state = get_admin_screen_state();
+        let admin_state = &mut app_state.admin_screen_state;
         
         let pool_id = admin_state.pool_management.pool_selection_dropdown.get_selected_value().unwrap_or_default();
         let features = admin_state.pool_management.selected_pool_features.unwrap_or((true, true, true));
@@ -2056,8 +2052,8 @@ pub fn handle_pool_management_confirmation_response(confirmed: bool) -> Option<c
 }
 
 /// Reset admin forms
-pub fn reset_admin_forms() {
-    let admin_state = get_admin_screen_state();
+pub fn reset_admin_forms(app_state: &mut crate::tui::app::AppState) {
+    let admin_state = &mut app_state.admin_screen_state;
 
     // Preserve pool data before reset
     let available_pools = admin_state.available_pools.clone();
