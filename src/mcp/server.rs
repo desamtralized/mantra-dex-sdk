@@ -2909,6 +2909,53 @@ impl McpToolProvider for MantraDexMcpServer {
                     "required": ["pool_id"]
                 }
             }),
+            // Script Execution Tool
+            serde_json::json!({
+                "name": "run_script",
+                "description": "Execute a natural language test script from a markdown file",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "script_path": {
+                            "type": "string",
+                            "description": "Path to the markdown script file to execute"
+                        },
+                        "script_content": {
+                            "type": "string",
+                            "description": "Markdown script content to execute (alternative to script_path)"
+                        },
+                        "config": {
+                            "type": "object",
+                            "properties": {
+                                "max_script_timeout": {
+                                    "type": "integer",
+                                    "description": "Maximum execution time for entire script in seconds (default: 300)",
+                                    "default": 300
+                                },
+                                "default_step_timeout": {
+                                    "type": "integer",
+                                    "description": "Default timeout for individual steps in seconds (default: 30)",
+                                    "default": 30
+                                },
+                                "continue_on_failure": {
+                                    "type": "boolean",
+                                    "description": "Whether to continue execution after a step fails (default: false)",
+                                    "default": false
+                                },
+                                "validate_outcomes": {
+                                    "type": "boolean",
+                                    "description": "Whether to validate expected outcomes (default: true)",
+                                    "default": true
+                                }
+                            }
+                        }
+                    },
+                    "oneOf": [
+                        {"required": ["script_path"]},
+                        {"required": ["script_content"]}
+                    ]
+                }
+            }),
         ]
     }
 
@@ -2937,6 +2984,7 @@ impl McpToolProvider for MantraDexMcpServer {
             "estimate_lp_withdrawal_amounts" => {
                 self.handle_estimate_lp_withdrawal_amounts(arguments).await
             }
+            "run_script" => self.handle_run_script(arguments).await,
             _ => Err(McpServerError::UnknownTool(tool_name.to_string())),
         }
     }
@@ -3969,6 +4017,85 @@ impl MantraDexMcpServer {
             .await;
 
         Ok(balances_result)
+    }
+
+    /// Handle run_script tool
+    async fn handle_run_script(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        use super::script_parser::ScriptParser;
+        use super::script_runner::{ScriptExecutionConfig, ScriptRunner};
+
+        info!(?arguments, "Handling run_script tool call");
+
+        // Parse arguments
+        let script_content =
+            if let Some(script_path) = arguments.get("script_path").and_then(|v| v.as_str()) {
+                // Load script from file
+                std::fs::read_to_string(script_path).map_err(|e| {
+                    McpServerError::InvalidArguments(format!(
+                        "Failed to read script file {}: {}",
+                        script_path, e
+                    ))
+                })?
+            } else if let Some(content) = arguments.get("script_content").and_then(|v| v.as_str()) {
+                // Use provided script content
+                content.to_string()
+            } else {
+                return Err(McpServerError::InvalidArguments(
+                    "Either script_path or script_content must be provided".to_string(),
+                ));
+            };
+
+        // Parse script
+        let script = ScriptParser::parse_content(&script_content).map_err(|e| {
+            McpServerError::InvalidArguments(format!("Failed to parse script: {}", e))
+        })?;
+
+        // Parse configuration
+        let mut config = ScriptExecutionConfig::default();
+        if let Some(config_obj) = arguments.get("config") {
+            if let Some(max_timeout) = config_obj
+                .get("max_script_timeout")
+                .and_then(|v| v.as_u64())
+            {
+                config.max_script_timeout = max_timeout;
+            }
+            if let Some(step_timeout) = config_obj
+                .get("default_step_timeout")
+                .and_then(|v| v.as_u64())
+            {
+                config.default_step_timeout = step_timeout;
+            }
+            if let Some(continue_on_failure) = config_obj
+                .get("continue_on_failure")
+                .and_then(|v| v.as_bool())
+            {
+                config.continue_on_failure = continue_on_failure;
+            }
+            if let Some(validate_outcomes) = config_obj
+                .get("validate_outcomes")
+                .and_then(|v| v.as_bool())
+            {
+                config.validate_outcomes = validate_outcomes;
+            }
+        }
+
+        // Create script runner
+        let mut script_runner = ScriptRunner::with_config(self.state.sdk_adapter.clone(), config);
+
+        // Execute script
+        let result = script_runner
+            .execute_script(script)
+            .await
+            .map_err(|e| McpServerError::Internal(format!("Script execution failed: {}", e)))?;
+
+        // Convert result to JSON
+        let json_result = serde_json::to_value(result)
+            .map_err(|e| McpServerError::Internal(format!("Failed to serialize result: {}", e)))?;
+
+        Ok(json_result)
     }
 }
 

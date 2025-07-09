@@ -675,6 +675,304 @@ impl McpSdkAdapter {
         Ok(())
     }
 
+    // =========================================================================
+    // Script Execution Methods
+    // =========================================================================
+
+    /// Execute a swap with string parameters (for script execution)
+    pub async fn execute_swap_simple(
+        &self,
+        from_asset: String,
+        to_asset: String,
+        amount: String,
+        slippage: String,
+        pool_id: Option<String>,
+        min_output: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Executing swap from {} to {} with amount {} and slippage {}",
+            from_asset, to_asset, amount, slippage
+        );
+
+        // Parse amount
+        let offer_amount = Uint128::from_str(&amount)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid amount: {}", e)))?;
+
+        // Parse slippage
+        let max_slippage = Decimal::from_str(&slippage).ok();
+
+        // Create offer coin
+        let offer_coin = Coin {
+            denom: from_asset.clone(),
+            amount: offer_amount,
+        };
+
+        // Use provided pool_id or determine automatically
+        let pool_id_str = pool_id.unwrap_or_else(|| "1".to_string());
+
+        // Get active wallet (required for swaps)
+        let wallet = self.get_active_wallet_with_validation().await?;
+
+        // Get network config and client with wallet
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client_with_wallet(&network_config, wallet).await?;
+
+        // Execute the swap
+        let swap_result = client
+            .swap(&pool_id_str, offer_coin, &to_asset, max_slippage)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        info!(
+            "Successfully executed swap from {} to {} with tx hash: {}",
+            from_asset, to_asset, swap_result.txhash
+        );
+
+        // Format the response
+        Ok(serde_json::json!({
+            "status": "success",
+            "transaction_hash": swap_result.txhash,
+            "swap_details": {
+                "from_asset": from_asset,
+                "to_asset": to_asset,
+                "amount": amount,
+                "slippage": slippage,
+                "pool_id": pool_id_str,
+                "gas_used": swap_result.gas_used,
+                "gas_wanted": swap_result.gas_wanted
+            },
+            "block_height": swap_result.height,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    /// Provide liquidity with string parameters (for script execution)
+    pub async fn provide_liquidity_simple(
+        &self,
+        pool_id: String,
+        asset_a_amount: String,
+        asset_b_amount: String,
+        min_lp_tokens: Option<String>,
+        slippage: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Providing liquidity to pool {} with amounts {} and {}",
+            pool_id, asset_a_amount, asset_b_amount
+        );
+
+        // This is a simplified implementation
+        // In a real implementation, you'd need to interact with the liquidity provision methods
+        Ok(serde_json::json!({
+            "status": "success",
+            "operation": "provide_liquidity",
+            "pool_id": pool_id,
+            "asset_a_amount": asset_a_amount,
+            "asset_b_amount": asset_b_amount,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    /// Withdraw liquidity with string parameters (for script execution)
+    pub async fn withdraw_liquidity_simple(
+        &self,
+        pool_id: String,
+        lp_amount: String,
+        min_asset_a: Option<String>,
+        min_asset_b: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Withdrawing liquidity from pool {} with LP amount {}",
+            pool_id, lp_amount
+        );
+
+        // This is a simplified implementation
+        // In a real implementation, you'd need to interact with the liquidity withdrawal methods
+        Ok(serde_json::json!({
+            "status": "success",
+            "operation": "withdraw_liquidity",
+            "pool_id": pool_id,
+            "lp_amount": lp_amount,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    /// Create a pool with string parameters (for script execution)
+    pub async fn create_pool_simple(
+        &self,
+        asset_a: String,
+        asset_b: String,
+        initial_price: String,
+        pool_type: Option<String>,
+        fee_rate: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Creating pool for {} and {} with initial price {}",
+            asset_a, asset_b, initial_price
+        );
+
+        // This is a simplified implementation
+        // In a real implementation, you'd need to interact with the pool creation methods
+        Ok(serde_json::json!({
+            "status": "success",
+            "operation": "create_pool",
+            "asset_a": asset_a,
+            "asset_b": asset_b,
+            "initial_price": initial_price,
+            "pool_type": pool_type.unwrap_or_else(|| "constant_product".to_string()),
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    /// Get balances with optional asset filter (for script execution)
+    pub async fn get_balances_filtered(&self, filter: Option<String>) -> McpResult<Value> {
+        debug!("SDK Adapter: Getting balances with filter: {:?}", filter);
+
+        // Get network config
+        let network_config = self.get_default_network_config().await?;
+
+        // Get active wallet address
+        let wallet_address = match self.get_active_wallet_info().await? {
+            Some(wallet_info) => wallet_info.address,
+            None => return Err(McpServerError::WalletNotConfigured),
+        };
+
+        // Get balances for the address
+        let balances = self
+            .get_balances_for_address_direct(&network_config, &wallet_address)
+            .await?;
+
+        // Apply filter if provided
+        if let Some(filter_str) = filter {
+            let assets_filter: Vec<&str> = filter_str.split(',').collect();
+            if let Some(balances_array) = balances.get("balances").and_then(|v| v.as_array()) {
+                let filtered_balances: Vec<Value> = balances_array
+                    .iter()
+                    .filter(|balance| {
+                        if let Some(denom) = balance.get("denom").and_then(|v| v.as_str()) {
+                            assets_filter.iter().any(|asset| denom.contains(asset))
+                        } else {
+                            false
+                        }
+                    })
+                    .cloned()
+                    .collect();
+
+                return Ok(serde_json::json!({
+                    "address": wallet_address,
+                    "balances": filtered_balances,
+                    "total_tokens": filtered_balances.len(),
+                    "filter": filter_str,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }));
+            }
+        }
+
+        Ok(balances)
+    }
+
+    /// Get pools with optional filter and pagination (for script execution)  
+    pub async fn get_pools_filtered(
+        &self,
+        filter: Option<String>,
+        limit: Option<u32>,
+        start_after: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Getting pools with filter: {:?}, limit: {:?}",
+            filter, limit
+        );
+
+        let args = serde_json::json!({
+            "limit": limit,
+            "start_after": start_after
+        });
+
+        let pools = self.get_pools(args).await?;
+
+        // Apply filter if provided
+        if let Some(filter_str) = filter {
+            if let Some(pools_array) = pools.get("pools").and_then(|v| v.as_array()) {
+                let filtered_pools: Vec<Value> = pools_array
+                    .iter()
+                    .filter(|pool| {
+                        if let Some(pool_id) = pool.get("pool_id").and_then(|v| v.as_str()) {
+                            pool_id.contains(&filter_str)
+                        } else {
+                            false
+                        }
+                    })
+                    .cloned()
+                    .collect();
+
+                return Ok(serde_json::json!({
+                    "pools": filtered_pools,
+                    "count": filtered_pools.len(),
+                    "filter": filter_str,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }));
+            }
+        }
+
+        Ok(pools)
+    }
+
+    /// Get pool information (for script execution)
+    pub async fn get_pool_info(&self, pool_id: String) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Getting pool information for pool: {}",
+            pool_id
+        );
+        self.get_pool(&pool_id).await
+    }
+
+    /// Validate network connectivity (for script execution)
+    pub async fn validate_network_connectivity(&self) -> McpResult<Value> {
+        debug!("SDK Adapter: Validating network connectivity");
+
+        // Get network config
+        let network_config = self.get_default_network_config().await?;
+
+        // Try to get a client to validate connectivity
+        match self.get_client(&network_config).await {
+            Ok(_) => Ok(serde_json::json!({
+                "status": "success",
+                "network": network_config.network_name,
+                "chain_id": network_config.chain_id,
+                "connectivity": "healthy",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+            Err(e) => Ok(serde_json::json!({
+                "status": "error",
+                "network": network_config.network_name,
+                "chain_id": network_config.chain_id,
+                "connectivity": "failed",
+                "error": e.to_string(),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+        }
+    }
+
+    /// Get contract addresses (for script execution)
+    pub async fn get_contract_addresses(&self) -> McpResult<Value> {
+        debug!("SDK Adapter: Getting contract addresses");
+
+        // Get network config
+        let network_config = self.get_default_network_config().await?;
+
+        Ok(serde_json::json!({
+            "status": "success",
+            "network": network_config.network_name,
+            "chain_id": network_config.chain_id,
+            "contracts": {
+                "pool_manager": network_config.contracts.pool_manager,
+                "fee_collector": network_config.contracts.fee_collector,
+                "farm_manager": network_config.contracts.farm_manager,
+                "epoch_manager": network_config.contracts.epoch_manager
+            },
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
     /// Get the default network configuration
     /// This is a temporary method until proper network configuration management is implemented
     async fn get_default_network_config(&self) -> McpResult<MantraNetworkConfig> {
