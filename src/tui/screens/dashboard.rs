@@ -7,7 +7,7 @@ use crate::tui::{
     app::{App, LoadingState, TransactionStatus},
     components::{
         charts::{
-            render_network_sync_progress, render_progress_dashboard,
+            render_network_sync_progress,
             render_transaction_confirmation_progress,
         },
         header::render_header,
@@ -19,7 +19,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, Gauge, List, ListItem, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, Padding, Paragraph, Wrap},
     Frame,
 };
 use std::collections::HashMap;

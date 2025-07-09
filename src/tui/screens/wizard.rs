@@ -6,7 +6,7 @@
 use crate::tui::{
     app::App,
     components::{
-        header::render_header, navigation::render_navigation, status_bar::render_status_bar,
+        header::render_header, status_bar::render_status_bar,
     },
 };
 use ratatui::{

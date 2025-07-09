@@ -118,13 +118,12 @@ impl MantraDexClient {
         }
     }
 
-    /// Get balance for a specific denom for a wallet address
+    /// Get balance for a specific denom for the configured wallet
     pub async fn get_balance(
         &self,
-        _address: &str,
         denom: &str,
     ) -> Result<cosmwasm_std::Coin, Error> {
-        // Get all balances and find the specific denom
+        // Get wallet balances and find the specific denom
         let balances = self.get_balances().await?;
 
         // Find the balance for the specific denomination

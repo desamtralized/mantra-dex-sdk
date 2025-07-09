@@ -494,7 +494,7 @@ impl AsyncBlockchainProcessor {
             let user_lp_balance_before =
                 if let Some(wallet_address) = client.get_wallet_address().await {
                     // Fetch user's LP token balance
-                    match client.get_balance(&wallet_address, &lp_token_denom).await {
+                    match client.get_balance(&lp_token_denom).await {
                         Ok(balance) => balance.amount,
                         Err(_) => Uint128::zero(), // If balance query fails, assume zero
                     }
@@ -661,7 +661,7 @@ impl AsyncBlockchainProcessor {
 
         // Get user's updated LP balance
         let user_lp_balance = if let Some(wallet_address) = client.get_wallet_address().await {
-            match client.get_balance(&wallet_address, lp_token_denom).await {
+            match client.get_balance(lp_token_denom).await {
                 Ok(balance) => Some(balance.amount),
                 Err(e) => {
                     crate::tui::utils::logger::log_warning(&format!(

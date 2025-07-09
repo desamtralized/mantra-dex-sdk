@@ -13,8 +13,6 @@ use crate::tui::{
         status_bar::render_status_bar,
     },
 };
-// use cosmwasm_std::{Decimal, Uint128};
-// use mantra_dex_std::{fee::PoolFee, pool_manager::PoolType};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},

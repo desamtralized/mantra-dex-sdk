@@ -1282,7 +1282,7 @@ impl App {
                     let focus_event = match direction {
                         crate::tui::events::FocusDirection::Up => Event::FocusPrevious,
                         crate::tui::events::FocusDirection::Down => Event::FocusNext,
-                        _ => Event::MoveFocus(direction), // Keep other directions as-is
+                        _ => Event::MoveFocus(direction.clone()), // Keep other directions as-is
                     };
 
                     if let Some(focused_component) =
