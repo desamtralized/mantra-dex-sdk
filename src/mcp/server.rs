@@ -4190,6 +4190,34 @@ pub async fn create_http_server(config: McpServerConfig) -> McpResult<MantraDexM
 // =============================================================================
 
 impl MantraDexMcpServer {
+    /// Validates that a script path is within allowed directories to prevent directory traversal attacks
+    fn validate_script_path(script_path: &str) -> Result<std::path::PathBuf, McpServerError> {
+        // Define allowed base directory for scripts (configurable in future)
+        let allowed_base = std::env::current_dir()
+            .map_err(|e| McpServerError::Internal(format!("Failed to get current directory: {}", e)))?
+            .join("scripts");
+
+        // Canonicalize the provided path to resolve any ".." or symbolic links
+        let requested_path = Path::new(script_path);
+        let canonical_path = requested_path.canonicalize()
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid script path '{}': {}", script_path, e)))?;
+
+        // Canonicalize the allowed base directory
+        let canonical_base = allowed_base.canonicalize()
+            .unwrap_or(allowed_base); // If scripts dir doesn't exist, use non-canonical for comparison
+
+        // Check if the canonical path starts with the canonical base
+        if !canonical_path.starts_with(&canonical_base) {
+            return Err(McpServerError::InvalidArguments(format!(
+                "Script path '{}' is outside allowed directory '{}'", 
+                script_path, 
+                canonical_base.display()
+            )));
+        }
+
+        Ok(canonical_path)
+    }
+
     // Resource handler methods for MCP resources
 
     // LP Token Management Tool Handlers
@@ -4333,11 +4361,14 @@ impl MantraDexMcpServer {
         // Parse arguments
         let script_content =
             if let Some(script_path) = arguments.get("script_path").and_then(|v| v.as_str()) {
-                // Load script from file
-                std::fs::read_to_string(script_path).map_err(|e| {
+                // Validate script path to prevent directory traversal
+                let validated_path = Self::validate_script_path(script_path)?;
+                
+                // Load script from validated file path
+                std::fs::read_to_string(&validated_path).map_err(|e| {
                     McpServerError::InvalidArguments(format!(
                         "Failed to read script file {}: {}",
-                        script_path, e
+                        validated_path.display(), e
                     ))
                 })?
             } else if let Some(content) = arguments.get("script_content").and_then(|v| v.as_str()) {
