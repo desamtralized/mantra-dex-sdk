@@ -4199,21 +4199,73 @@ impl MantraDexMcpServer {
             .map_err(|e| McpServerError::Internal(format!("Failed to get current directory: {}", e)))?
             .join("scripts");
 
-        // Canonicalize the provided path to resolve any ".." or symbolic links
-        let requested_path = Path::new(script_path);
-        let canonical_path = requested_path.canonicalize()
-            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid script path '{}': {}", script_path, e)))?;
+        // Ensure the allowed base directory exists before proceeding
+        if !allowed_base.exists() {
+            return Err(McpServerError::InvalidArguments(format!(
+                "Scripts directory '{}' does not exist", 
+                allowed_base.display()
+            )));
+        }
 
-        // Canonicalize the allowed base directory
+        // Ensure the allowed base directory is actually a directory
+        if !allowed_base.is_dir() {
+            return Err(McpServerError::InvalidArguments(format!(
+                "Scripts path '{}' is not a directory", 
+                allowed_base.display()
+            )));
+        }
+
+        // Canonicalize the allowed base directory first (now we know it exists)
         let canonical_base = allowed_base.canonicalize()
-            .unwrap_or(allowed_base); // If scripts dir doesn't exist, use non-canonical for comparison
+            .map_err(|e| McpServerError::Internal(format!(
+                "Failed to canonicalize scripts directory '{}': {}", 
+                allowed_base.display(), e
+            )))?;
 
-        // Check if the canonical path starts with the canonical base
+        // Construct the full path from the allowed base
+        let requested_path = canonical_base.join(script_path);
+
+        // Check if the requested file exists and is a regular file
+        if !requested_path.exists() {
+            return Err(McpServerError::InvalidArguments(format!(
+                "Script file '{}' does not exist", 
+                script_path
+            )));
+        }
+
+        if !requested_path.is_file() {
+            return Err(McpServerError::InvalidArguments(format!(
+                "Script path '{}' is not a regular file", 
+                script_path
+            )));
+        }
+
+        // Canonicalize the requested path to resolve any symbolic links
+        let canonical_path = requested_path.canonicalize()
+            .map_err(|e| McpServerError::InvalidArguments(format!(
+                "Failed to resolve script path '{}': {}", 
+                script_path, e
+            )))?;
+
+        // Verify that the canonical path is still within the allowed base directory
+        // This prevents symlink attacks where a symlink points outside the allowed directory
         if !canonical_path.starts_with(&canonical_base) {
             return Err(McpServerError::InvalidArguments(format!(
-                "Script path '{}' is outside allowed directory '{}'", 
-                script_path, 
+                "Script path '{}' resolves to '{}' which is outside allowed directory '{}'", 
+                script_path,
+                canonical_path.display(),
                 canonical_base.display()
+            )));
+        }
+
+        // Additional security check: ensure no path components contain ".." after canonicalization
+        // This is redundant but provides defense in depth
+        if canonical_path.components().any(|component| {
+            component.as_os_str() == ".." || component.as_os_str() == "."
+        }) {
+            return Err(McpServerError::InvalidArguments(format!(
+                "Script path '{}' contains invalid path components", 
+                script_path
             )));
         }
 
