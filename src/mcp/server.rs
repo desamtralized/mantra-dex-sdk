@@ -19,9 +19,10 @@ use uuid::Uuid;
 // Configuration support
 use config::{Config, ConfigError, Environment, File, FileFormat};
 
-// TODO: Import correct MCP types when API is finalized
+// Note: MCP SDK types not imported due to API instability
 // Current rust-mcp-sdk 0.4.2 has unstable APIs that don't match documentation
-// Using minimal imports for now until API stabilizes
+// The server implements MCP protocol manually using standard HTTP/JSON-RPC
+// until the rust-mcp-sdk API stabilizes in future versions
 
 use crate::client::MantraDexClient;
 use crate::config::{MantraNetworkConfig, NetworkConstants};
@@ -2239,9 +2240,10 @@ impl McpServerStateData {
 
 /// Mantra DEX MCP Server handler
 ///
-/// TODO: Implement ServerHandler trait when MCP API is stable
+/// Note: ServerHandler trait not implemented due to MCP API instability
 /// Current rust-mcp-sdk 0.4.2 has unstable APIs that are changing between versions
-/// This provides a solid foundation for implementing MCP functionality
+/// This implementation provides MCP functionality via direct HTTP/JSON-RPC handling
+/// and can be migrated to ServerHandler trait when the rust-mcp-sdk API stabilizes
 pub struct MantraDexMcpServer {
     /// Server state
     state: Arc<McpServerStateData>,

@@ -503,13 +503,10 @@ impl ScriptRunner {
             }
 
             StepAction::MonitorTransaction { tx_hash, timeout } => {
-                // Create a simple result for monitoring
-                let result = serde_json::json!({
-                    "tx_hash": tx_hash,
-                    "status": "monitoring",
-                    "timeout": timeout
-                });
-                Ok(result)
+                self.sdk_adapter
+                    .monitor_transaction(tx_hash.clone(), Some(*timeout))
+                    .await
+                    .map_err(|e| ScriptExecutionError::SdkError(e.to_string()))
             }
 
             StepAction::ValidateNetwork => self
@@ -528,13 +525,10 @@ impl ScriptRunner {
                 tool_name,
                 parameters,
             } => {
-                // For custom actions, create a result with the parameters
-                let result = serde_json::json!({
-                    "tool_name": tool_name,
-                    "parameters": parameters,
-                    "status": "executed"
-                });
-                Ok(result)
+                self.sdk_adapter
+                    .execute_custom_tool(tool_name, parameters)
+                    .await
+                    .map_err(|e| ScriptExecutionError::SdkError(e.to_string()))
             }
         }
     }

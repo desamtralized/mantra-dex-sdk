@@ -206,17 +206,51 @@ impl MantraDexClient {
     }
 
     /// Query a transaction by hash
-    /// TODO: Implement proper transaction querying with correct field mapping
     pub async fn query_transaction(&self, tx_hash: &str) -> Result<serde_json::Value, Error> {
-        // Placeholder implementation - return basic transaction info
-        // This needs to be implemented properly with correct field mappings
-        // from the cosmrs transaction response types
-
-        Ok(serde_json::json!({
+        let rpc_client = self.rpc_client.lock().await;
+        
+        // Parse the transaction hash
+        let hash = Hash::from_hex_upper(cosmrs::tendermint::hash::Algorithm::Sha256, tx_hash.trim_start_matches("0x"))
+            .map_err(|e| Error::Other(format!("Invalid transaction hash: {}", e)))?;
+        
+        // Query the transaction
+        let tx_response = rpc_client
+            .tx(hash, false)
+            .await
+            .map_err(|e| Error::Rpc(format!("Failed to query transaction: {}", e)))?;
+        
+        // Create a simplified response structure
+        let result = serde_json::json!({
             "hash": tx_hash,
-            "status": "pending",
-            "message": "Transaction query implementation pending - requires proper field mapping from cosmrs types"
-        }))
+            "height": tx_response.height.value(),
+            "index": tx_response.index,
+            "tx_result": {
+                "code": tx_response.tx_result.code.value(),
+                "data": hex::encode(&tx_response.tx_result.data),
+                "log": tx_response.tx_result.log,
+                "info": tx_response.tx_result.info,
+                "gas_wanted": tx_response.tx_result.gas_wanted,
+                "gas_used": tx_response.tx_result.gas_used,
+                "events": tx_response.tx_result.events.iter().map(|event| {
+                    serde_json::json!({
+                        "type": event.kind,
+                        "attributes": event.attributes.iter().map(|attr| {
+                            serde_json::json!({
+                                "key": attr.key_str().unwrap_or(""),
+                                "value": attr.value_str().unwrap_or("")
+                            })
+                        }).collect::<Vec<_>>()
+                    })
+                }).collect::<Vec<_>>(),
+                "codespace": tx_response.tx_result.codespace
+            },
+            "tx_raw": {
+                "size": tx_response.tx.len(),
+                "note": "Full transaction parsing not implemented - use specialized tools for detailed analysis"
+            }
+        });
+        
+        Ok(result)
     }
 
     /// Query a smart contract

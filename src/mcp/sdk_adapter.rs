@@ -1072,6 +1072,140 @@ impl McpSdkAdapter {
         }))
     }
 
+    /// Monitor a transaction by hash with timeout (for script execution)
+    pub async fn monitor_transaction(
+        &self,
+        tx_hash: String,
+        timeout_seconds: Option<u64>,
+    ) -> McpResult<Value> {
+        debug!("SDK Adapter: Monitoring transaction: {}", tx_hash);
+
+        let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30));
+        let start_time = Instant::now();
+
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+
+        // Poll the transaction with timeout
+        let poll_interval = Duration::from_secs(2);
+        
+        loop {
+            // Check if we've exceeded the timeout
+            if start_time.elapsed() > timeout {
+                return Ok(serde_json::json!({
+                    "status": "timeout",
+                    "tx_hash": tx_hash,
+                    "message": format!("Transaction monitoring timed out after {} seconds", timeout.as_secs()),
+                    "elapsed_seconds": start_time.elapsed().as_secs(),
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }));
+            }
+
+            // Query the transaction
+            match client.query_transaction(&tx_hash).await {
+                Ok(tx_result) => {
+                    // Check if the transaction has a result code
+                    if let Some(tx_result_obj) = tx_result.get("tx_result") {
+                        if let Some(code) = tx_result_obj.get("code").and_then(|c| c.as_u64()) {
+                            let status = if code == 0 { "success" } else { "failed" };
+                            
+                            return Ok(serde_json::json!({
+                                "status": status,
+                                "tx_hash": tx_hash,
+                                "code": code,
+                                "height": tx_result.get("height"),
+                                "gas_used": tx_result_obj.get("gas_used"),
+                                "gas_wanted": tx_result_obj.get("gas_wanted"),
+                                "log": tx_result_obj.get("log"),
+                                "events": tx_result_obj.get("events"),
+                                "elapsed_seconds": start_time.elapsed().as_secs(),
+                                "timestamp": chrono::Utc::now().to_rfc3339()
+                            }));
+                        }
+                    }
+                    
+                    // If we can't determine the status, but got a result, it's likely pending
+                    debug!("Transaction {} found but status unclear, continuing to monitor", tx_hash);
+                }
+                Err(e) => {
+                    // If the transaction is not found, it might still be pending
+                    debug!("Transaction {} not found or error occurred: {}", tx_hash, e);
+                }
+            }
+
+            // Wait before polling again
+            tokio::time::sleep(poll_interval).await;
+        }
+    }
+
+    /// Execute a custom MCP tool by name with parameters (for script execution)
+    pub async fn execute_custom_tool(
+        &self,
+        tool_name: &str,
+        parameters: &HashMap<String, String>,
+    ) -> McpResult<Value> {
+        debug!("SDK Adapter: Executing custom tool: {} with parameters: {:?}", tool_name, parameters);
+
+        // Convert string parameters to serde_json::Value
+        let mut json_params = serde_json::Map::new();
+        for (key, value) in parameters {
+            // Try to parse as JSON first, fallback to string
+            let json_value = if let Ok(parsed) = serde_json::from_str::<Value>(value) {
+                parsed
+            } else {
+                Value::String(value.clone())
+            };
+            json_params.insert(key.clone(), json_value);
+        }
+        let args = Value::Object(json_params);
+
+        // Route to appropriate tool based on tool_name
+        match tool_name {
+            "get_balances" => {
+                // get_balances needs network_config and wallet_address parameters
+                let network_config = self.get_default_network_config().await?;
+                let wallet_address = parameters.get("wallet_address").map(|s| s.clone());
+                self.get_balances(&network_config, wallet_address).await
+            }
+            "get_pool" => {
+                let pool_id = parameters.get("pool_id")
+                    .ok_or_else(|| McpServerError::InvalidArguments("pool_id parameter required".to_string()))?
+                    .clone();
+                self.get_pool_info(pool_id).await
+            }
+            "get_pools" => self.get_pools(args).await,
+            "swap" | "execute_swap" => self.execute_swap(args).await,
+            "provide_liquidity" => self.provide_liquidity(args).await,
+            "withdraw_liquidity" => self.withdraw_liquidity(args).await,
+            "create_pool" => self.create_pool(args).await,
+            "get_lp_token_balance" => self.get_lp_token_balance(args).await,
+            "get_all_lp_token_balances" => self.get_all_lp_token_balances(args).await,
+            "validate_network" => self.validate_network_connectivity().await,
+            "get_contracts" => self.get_contract_addresses().await,
+            "monitor_transaction" => {
+                // Special handling for monitor_transaction which needs different parameters
+                let tx_hash = parameters.get("tx_hash")
+                    .ok_or_else(|| McpServerError::InvalidArguments("tx_hash parameter required".to_string()))?
+                    .clone();
+                let timeout_seconds = parameters.get("timeout")
+                    .and_then(|t| t.parse::<u64>().ok());
+                
+                self.monitor_transaction(tx_hash, timeout_seconds).await
+            }
+            _ => {
+                // For unknown tools, return an error result
+                Ok(serde_json::json!({
+                    "status": "error",
+                    "tool_name": tool_name,
+                    "message": format!("Unknown tool: {}. Available tools: get_balances, get_pool, get_pools, swap, execute_swap, provide_liquidity, withdraw_liquidity, create_pool, get_lp_token_balance, get_all_lp_token_balances, validate_network, get_contracts, monitor_transaction", tool_name),
+                    "parameters": parameters,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }))
+            }
+        }
+    }
+
     /// Get the default network configuration
     /// This is a temporary method until proper network configuration management is implemented
     async fn get_default_network_config(&self) -> McpResult<MantraNetworkConfig> {
