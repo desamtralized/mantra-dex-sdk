@@ -467,7 +467,8 @@ impl ScriptRunner {
                         asset_a_amount.clone(),
                         asset_b_amount.clone(),
                         None, // min_lp_tokens
-                        None, // slippage
+                        None, // liquidity_slippage
+                        None, // swap_slippage
                     )
                     .await
                     .map_err(|e| ScriptExecutionError::SdkError(e.to_string()))

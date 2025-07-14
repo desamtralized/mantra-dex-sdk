@@ -852,23 +852,92 @@ impl McpSdkAdapter {
         asset_a_amount: String,
         asset_b_amount: String,
         min_lp_tokens: Option<String>,
-        slippage: Option<String>,
+        liquidity_slippage: Option<String>,
+        swap_slippage: Option<String>,
     ) -> McpResult<Value> {
         debug!(
             "SDK Adapter: Providing liquidity to pool {} with amounts {} and {}",
             pool_id, asset_a_amount, asset_b_amount
         );
 
-        // This is a simplified implementation
-        // In a real implementation, you'd need to interact with the liquidity provision methods
-        Ok(serde_json::json!({
-            "status": "success",
-            "operation": "provide_liquidity",
+        // First, get the pool information to determine the asset denoms
+        let pool_info = self.get_pool(&pool_id).await?;
+        
+        // Extract asset denoms from pool info
+        let assets_array = pool_info
+            .get("assets")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("Pool does not have valid assets".to_string())
+            })?;
+
+        if assets_array.len() != 2 {
+            return Err(McpServerError::InvalidArguments(
+                "Pool must have exactly 2 assets for simple liquidity provision".to_string(),
+            ));
+        }
+
+        // Get the asset denoms
+        let asset_a_denom = assets_array[0]
+            .get("denom")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("Invalid asset A denom".to_string())
+            })?;
+
+        let asset_b_denom = assets_array[1]
+            .get("denom")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("Invalid asset B denom".to_string())
+            })?;
+
+        // Construct the assets array for the provide_liquidity call
+        let assets_json = serde_json::json!([
+            {
+                "denom": asset_a_denom,
+                "amount": asset_a_amount
+            },
+            {
+                "denom": asset_b_denom,
+                "amount": asset_b_amount
+            }
+        ]);
+
+        // Construct the arguments for the provide_liquidity method
+        let mut args = serde_json::json!({
             "pool_id": pool_id,
-            "asset_a_amount": asset_a_amount,
-            "asset_b_amount": asset_b_amount,
-            "timestamp": chrono::Utc::now().to_rfc3339()
-        }))
+            "assets": assets_json
+        });
+
+        // Add slippage parameters if provided
+        if let Some(liquidity_slippage_str) = liquidity_slippage {
+            args["liquidity_max_slippage"] = serde_json::Value::String(liquidity_slippage_str);
+        }
+        if let Some(swap_slippage_str) = swap_slippage {
+            args["swap_max_slippage"] = serde_json::Value::String(swap_slippage_str);
+        }
+
+        // Call the existing provide_liquidity method
+        let result = self.provide_liquidity(args).await?;
+
+        // Add the min_lp_tokens parameter to the response for reference
+        if let Some(min_lp) = min_lp_tokens {
+            if let Some(liquidity_details) = result.get("liquidity_details") {
+                let mut details = liquidity_details.clone();
+                if let Some(details_obj) = details.as_object_mut() {
+                    details_obj.insert("min_lp_tokens".to_string(), serde_json::Value::String(min_lp));
+                }
+                
+                let mut modified_result = result.clone();
+                if let Some(result_obj) = modified_result.as_object_mut() {
+                    result_obj.insert("liquidity_details".to_string(), details);
+                }
+                return Ok(modified_result);
+            }
+        }
+
+        Ok(result)
     }
 
     /// Withdraw liquidity with string parameters (for script execution)
