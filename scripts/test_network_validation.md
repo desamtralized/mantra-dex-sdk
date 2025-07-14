@@ -6,7 +6,9 @@
 
 ## Steps
 1. **Validate network** connectivity
+   - Assert: network connection is established successfully
 2. **Get contract addresses** for the current network
+   - Assert: all required contract addresses are retrieved and valid
 3. **Get available pools** to test pool manager contract
    - Assert: pool query returns at least one pool
 4. **Check wallet balance** to test balance queries
