@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use tracing::{debug, error, info, warn};
+use regex::Regex;
 
 /// Represents a parsed test script with all its components
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -258,7 +259,8 @@ impl ScriptParser {
         let header_text = header.trim_start_matches('#').trim();
 
         if header_text.to_lowercase().contains("test script:") {
-            script.name = header_text.replace("Test Script:", "").trim().to_string();
+            let re = Regex::new(r"(?i)test script:").unwrap();
+            script.name = re.replace(header_text, "").trim().to_string();
             return Ok(ScriptSection::Title);
         }
 
