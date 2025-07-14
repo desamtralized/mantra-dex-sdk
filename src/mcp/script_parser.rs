@@ -134,6 +134,10 @@ impl ScriptParser {
     /// Parse script content from a string
     pub fn parse_content(content: &str) -> Result<TestScript, ScriptParseError> {
         let lines: Vec<&str> = content.lines().collect();
+        
+        // Compile regex for step number detection (matches one or more digits followed by a dot)
+        let step_regex = Regex::new(r"^\d+\.")
+            .map_err(|e| ScriptParseError::InvalidFormat(format!("Regex compilation failed: {}", e)))?;
         let mut script = TestScript {
             name: String::new(),
             description: None,
@@ -191,20 +195,7 @@ impl ScriptParser {
                     Self::parse_setup_line(trimmed, &mut script.setup)?;
                 }
                 ScriptSection::Steps => {
-                    if trimmed.starts_with("1.")
-                        || trimmed.starts_with("2.")
-                        || trimmed.starts_with("3.")
-                        || trimmed.starts_with("4.")
-                        || trimmed.starts_with("5.")
-                        || trimmed.starts_with("6.")
-                        || trimmed.starts_with("7.")
-                        || trimmed.starts_with("8.")
-                        || trimmed.starts_with("9.")
-                        || trimmed.starts_with("10.")
-                        || (trimmed.len() > 2
-                            && trimmed.chars().nth(1) == Some('.')
-                            && trimmed.chars().nth(0).unwrap().is_ascii_digit())
-                    {
+                    if step_regex.is_match(trimmed) {
                         // New step detected, process previous step if any
                         if !current_step_lines.is_empty() {
                             step_counter += 1;
