@@ -442,6 +442,7 @@ impl ScriptRunner {
                 to_asset,
                 amount,
                 slippage,
+                pool_id,
             } => {
                 self.sdk_adapter
                     .execute_swap_simple(
@@ -449,7 +450,7 @@ impl ScriptRunner {
                         to_asset.clone(),
                         amount.clone(),
                         slippage.clone(),
-                        None, // pool_id
+                        pool_id.clone(),
                         None, // min_output
                     )
                     .await

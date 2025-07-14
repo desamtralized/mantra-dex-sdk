@@ -577,7 +577,7 @@ impl McpSdkAdapter {
     pub async fn switch_active_wallet(&self, address: &str) -> McpResult<()> {
         let wallets = self.wallets.read().await;
         
-        if let Some(wallet_info) = wallets.get(address) {
+        if let Some(_wallet_info) = wallets.get(address) {
             *self.active_wallet.lock().await = Some(address.to_string());
             // Clear the wallet instance - will be recreated when needed
             *self.active_wallet_instance.lock().await = None;
@@ -778,6 +778,24 @@ impl McpSdkAdapter {
     // Script Execution Methods
     // =========================================================================
 
+    /// Get the first available pool ID as a fallback
+    pub async fn get_first_available_pool_id(&self) -> McpResult<String> {
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+        
+        // Get available pools
+        let pools = client.get_pools(Some(10)).await
+            .map_err(|e| McpServerError::Sdk(e))?;
+        
+        if pools.is_empty() {
+            return Err(McpServerError::InvalidArguments("No pools available".to_string()));
+        }
+        
+        // Return the first available pool ID
+        Ok(pools[0].pool_info.pool_identifier.clone())
+    }
+
     /// Execute a swap with string parameters (for script execution)
     pub async fn execute_swap_simple(
         &self,
@@ -785,8 +803,8 @@ impl McpSdkAdapter {
         to_asset: String,
         amount: String,
         slippage: String,
-        pool_id: Option<String>,
-        min_output: Option<String>,
+        pool_id: String,
+        _min_output: Option<String>,
     ) -> McpResult<Value> {
         debug!(
             "SDK Adapter: Executing swap from {} to {} with amount {} and slippage {}",
@@ -806,8 +824,8 @@ impl McpSdkAdapter {
             amount: offer_amount,
         };
 
-        // Use provided pool_id or determine automatically
-        let pool_id_str = pool_id.unwrap_or_else(|| "1".to_string());
+        // Use provided pool_id
+        let pool_id_str = pool_id;
 
         // Get active wallet (required for swaps)
         let wallet = self.get_active_wallet_with_validation().await?;
@@ -1004,7 +1022,7 @@ impl McpSdkAdapter {
         asset_b: String,
         initial_price: String,
         pool_type: Option<String>,
-        fee_rate: Option<String>,
+        _fee_rate: Option<String>,
     ) -> McpResult<Value> {
         debug!(
             "SDK Adapter: Creating pool for {} and {} with initial price {}",

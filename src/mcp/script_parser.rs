@@ -76,6 +76,7 @@ pub enum StepAction {
         to_asset: String,
         amount: String,
         slippage: String,
+        pool_id: String,
     },
     /// Provide liquidity to a pool
     ProvideLiquidity {
@@ -404,13 +405,14 @@ impl ScriptParser {
         }
 
         if desc_lower.contains("execute") && desc_lower.contains("swap") {
-            let (from_asset, to_asset, amount, slippage) =
+            let (from_asset, to_asset, amount, slippage, pool_id) =
                 Self::extract_swap_params(description, lines)?;
             return Ok(StepAction::ExecuteSwap {
                 from_asset,
                 to_asset,
                 amount,
                 slippage,
+                pool_id,
             });
         }
 
@@ -512,9 +514,10 @@ impl ScriptParser {
             "ATOM/USDC".to_string()
         } else if description.contains("pool") {
             // Extract pool identifier after "pool"
-            "1".to_string() // Default pool ID
+            // Note: This should ideally be specified in the script
+            "DEFAULT_POOL_ID".to_string() // Placeholder - should be specified in script
         } else {
-            "1".to_string()
+            "DEFAULT_POOL_ID".to_string()
         }
     }
 
@@ -522,11 +525,12 @@ impl ScriptParser {
     fn extract_swap_params(
         description: &str,
         lines: &[String],
-    ) -> Result<(String, String, String, String), ScriptParseError> {
+    ) -> Result<(String, String, String, String, String), ScriptParseError> {
         let mut from_asset = "ATOM".to_string();
         let mut to_asset = "USDC".to_string();
         let mut amount = "10".to_string();
         let mut slippage = "1".to_string();
+        let mut pool_id = None;
 
         // Parse from description
         if let Some(of_pos) = description.find(" of ") {
@@ -564,10 +568,17 @@ impl ScriptParser {
                 amount = line.split(':').nth(1).unwrap_or("10").trim().to_string();
             } else if line.contains("slippage:") {
                 slippage = line.split(':').nth(1).unwrap_or("1").trim().to_string();
+            } else if line.contains("pool_id:") {
+                pool_id = Some(line.split(':').nth(1).unwrap_or("").trim().to_string());
             }
         }
 
-        Ok((from_asset, to_asset, amount, slippage))
+        // pool_id is required - return error if not provided
+        let pool_id = pool_id.ok_or_else(|| {
+            ScriptParseError::InvalidParameter("pool_id is required for swap operations".to_string())
+        })?;
+
+        Ok((from_asset, to_asset, amount, slippage, pool_id))
     }
 
     /// Extract liquidity parameters
@@ -575,20 +586,25 @@ impl ScriptParser {
         description: &str,
         lines: &[String],
     ) -> Result<(String, String, String), ScriptParseError> {
-        let mut pool_id = "1".to_string();
+        let mut pool_id = None;
         let mut asset_a_amount = "100".to_string();
         let mut asset_b_amount = "100".to_string();
 
         // Extract from additional lines
         for line in lines {
             if line.contains("pool_id:") {
-                pool_id = line.split(':').nth(1).unwrap_or("1").trim().to_string();
+                pool_id = Some(line.split(':').nth(1).unwrap_or("").trim().to_string());
             } else if line.contains("asset_a_amount:") {
                 asset_a_amount = line.split(':').nth(1).unwrap_or("100").trim().to_string();
             } else if line.contains("asset_b_amount:") {
                 asset_b_amount = line.split(':').nth(1).unwrap_or("100").trim().to_string();
             }
         }
+
+        // pool_id is required - return error if not provided
+        let pool_id = pool_id.ok_or_else(|| {
+            ScriptParseError::InvalidParameter("pool_id is required for liquidity operations".to_string())
+        })?;
 
         Ok((pool_id, asset_a_amount, asset_b_amount))
     }
@@ -598,17 +614,22 @@ impl ScriptParser {
         description: &str,
         lines: &[String],
     ) -> Result<(String, String), ScriptParseError> {
-        let mut pool_id = "1".to_string();
+        let mut pool_id = None;
         let mut lp_amount = "50".to_string();
 
         // Extract from additional lines
         for line in lines {
             if line.contains("pool_id:") {
-                pool_id = line.split(':').nth(1).unwrap_or("1").trim().to_string();
+                pool_id = Some(line.split(':').nth(1).unwrap_or("").trim().to_string());
             } else if line.contains("lp_amount:") {
                 lp_amount = line.split(':').nth(1).unwrap_or("50").trim().to_string();
             }
         }
+
+        // pool_id is required - return error if not provided
+        let pool_id = pool_id.ok_or_else(|| {
+            ScriptParseError::InvalidParameter("pool_id is required for withdrawal operations".to_string())
+        })?;
 
         Ok((pool_id, lp_amount))
     }
@@ -710,6 +731,7 @@ mod tests {
 ## Steps
 1. **Check wallet balance** for ATOM and USDC
 2. **Execute swap** of 10 ATOM for USDC with 1% slippage
+   pool_id: ATOM/USDC
 
 ## Expected Results
 - Swap should complete successfully
@@ -721,5 +743,12 @@ mod tests {
         assert_eq!(script.setup.network, "mantra-dukong");
         assert_eq!(script.steps.len(), 2);
         assert_eq!(script.expected_results.len(), 2);
+        
+        // Check that the swap step has the required pool_id
+        if let StepAction::ExecuteSwap { pool_id, .. } = &script.steps[1].action {
+            assert_eq!(pool_id, "ATOM/USDC");
+        } else {
+            panic!("Expected ExecuteSwap action");
+        }
     }
 }
