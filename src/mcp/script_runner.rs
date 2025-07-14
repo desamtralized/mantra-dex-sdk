@@ -3,10 +3,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::time::{sleep, timeout};
-use tracing::{debug, error, info, warn};
+use tokio::time::timeout;
+use tracing::{debug, error, info};
 
-use super::script_parser::{ScriptParseError, StepAction, TestScript, TestStep};
+use super::script_parser::{StepAction, TestScript, TestStep};
 use super::sdk_adapter::McpSdkAdapter;
 
 /// Script execution result
@@ -409,7 +409,7 @@ impl ScriptRunner {
     async fn execute_step_action(
         &self,
         action: &StepAction,
-        parameters: &HashMap<String, String>,
+        _parameters: &HashMap<String, String>,
     ) -> Result<Value, ScriptExecutionError> {
         match action {
             StepAction::CheckBalance { assets } => {
@@ -615,7 +615,6 @@ impl ScriptRunner {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::mcp::script_parser::ScriptParser;
 
     #[tokio::test]

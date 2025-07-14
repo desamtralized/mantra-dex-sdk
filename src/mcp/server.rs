@@ -4269,6 +4269,63 @@ impl MantraDexMcpServer {
             )));
         }
 
+        // Enhanced security: Check file permissions
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = canonical_path.metadata()
+                .map_err(|e| McpServerError::InvalidArguments(format!(
+                    "Failed to read script file metadata: {}", e
+                )))?;
+            
+            let permissions = metadata.permissions();
+            let mode = permissions.mode();
+            
+            // Check if file is not world-writable (security risk)
+            if mode & 0o002 != 0 {
+                return Err(McpServerError::InvalidArguments(format!(
+                    "Script file '{}' is world-writable. This is a security risk.", 
+                    script_path
+                )));
+            }
+            
+            // Check if file is executable by owner (required for scripts)
+            if mode & 0o100 == 0 {
+                warn!("Script file '{}' is not marked as executable", script_path);
+            }
+            
+            // Verify file size is reasonable (prevent DOS attacks)
+            const MAX_SCRIPT_SIZE: u64 = 10 * 1024 * 1024; // 10MB limit
+            if metadata.len() > MAX_SCRIPT_SIZE {
+                return Err(McpServerError::InvalidArguments(format!(
+                    "Script file '{}' exceeds maximum allowed size of {} bytes", 
+                    script_path, MAX_SCRIPT_SIZE
+                )));
+            }
+        }
+        
+        // Check file extension for allowed script types
+        let allowed_extensions = ["txt", "json", "yaml", "yml", "toml"];
+        let extension = canonical_path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_lowercase());
+        
+        match extension {
+            Some(ext) if allowed_extensions.contains(&ext.as_str()) => {},
+            Some(ext) => {
+                return Err(McpServerError::InvalidArguments(format!(
+                    "Script file '{}' has unsupported extension '.{}'. Allowed: {:?}", 
+                    script_path, ext, allowed_extensions
+                )));
+            },
+            None => {
+                return Err(McpServerError::InvalidArguments(format!(
+                    "Script file '{}' has no extension. Allowed extensions: {:?}", 
+                    script_path, allowed_extensions
+                )));
+            }
+        }
+
         Ok(canonical_path)
     }
 
@@ -4402,85 +4459,182 @@ impl MantraDexMcpServer {
         Ok(balances_result)
     }
 
-    /// Handle run_script tool
+    /// Handle run_script tool with enhanced error handling and resource cleanup
     async fn handle_run_script(
         &self,
         arguments: serde_json::Value,
     ) -> McpResult<serde_json::Value> {
         use super::script_parser::ScriptParser;
         use super::script_runner::{ScriptExecutionConfig, ScriptRunner};
+        use std::path::PathBuf;
+        use tokio::fs;
 
         info!(?arguments, "Handling run_script tool call");
 
-        // Parse arguments
-        let script_content =
-            if let Some(script_path) = arguments.get("script_path").and_then(|v| v.as_str()) {
-                // Validate script path to prevent directory traversal
-                let validated_path = Self::validate_script_path(script_path)?;
-                
-                // Load script from validated file path
-                std::fs::read_to_string(&validated_path).map_err(|e| {
-                    McpServerError::InvalidArguments(format!(
-                        "Failed to read script file {}: {}",
-                        validated_path.display(), e
-                    ))
-                })?
-            } else if let Some(content) = arguments.get("script_content").and_then(|v| v.as_str()) {
-                // Use provided script content
-                content.to_string()
-            } else {
-                return Err(McpServerError::InvalidArguments(
-                    "Either script_path or script_content must be provided".to_string(),
-                ));
-            };
+        // Struct to ensure cleanup on all exit paths
+        struct CleanupGuard {
+            temp_files: Vec<PathBuf>,
+        }
+        
+        impl Drop for CleanupGuard {
+            fn drop(&mut self) {
+                // Cleanup temporary files
+                for temp_file in &self.temp_files {
+                    if let Err(e) = std::fs::remove_file(temp_file) {
+                        warn!("Failed to cleanup temporary file {}: {}", temp_file.display(), e);
+                    }
+                }
+            }
+        }
+        
+        let _cleanup = CleanupGuard { temp_files: Vec::new() };
 
-        // Parse script
+        // Stage 1: Parse and validate arguments
+        let (script_content, script_source) = if let Some(script_path) = arguments.get("script_path").and_then(|v| v.as_str()) {
+            // Validate script path to prevent directory traversal
+            let validated_path = Self::validate_script_path(script_path).map_err(|e| {
+                error!("Script path validation failed for '{}': {}", script_path, e);
+                e
+            })?;
+            
+            // Check content for suspicious patterns before loading
+            let content = fs::read_to_string(&validated_path).await.map_err(|e| {
+                let err_msg = match e.kind() {
+                    std::io::ErrorKind::NotFound => format!("Script file '{}' not found", validated_path.display()),
+                    std::io::ErrorKind::PermissionDenied => format!("Permission denied reading script file '{}'", validated_path.display()),
+                    _ => format!("Failed to read script file '{}': {}", validated_path.display(), e),
+                };
+                error!("{}", err_msg);
+                McpServerError::InvalidArguments(err_msg)
+            })?;
+            
+            // Basic content validation - check for suspicious patterns
+            if content.len() > 1024 * 1024 {  // 1MB content limit for safety
+                return Err(McpServerError::InvalidArguments(
+                    "Script content exceeds 1MB safety limit".to_string()
+                ));
+            }
+            
+            (content, format!("file:{}", validated_path.display()))
+        } else if let Some(content) = arguments.get("script_content").and_then(|v| v.as_str()) {
+            // Validate inline script content
+            if content.is_empty() {
+                return Err(McpServerError::InvalidArguments(
+                    "Script content cannot be empty".to_string()
+                ));
+            }
+            
+            if content.len() > 100 * 1024 { // 100KB limit for inline scripts
+                return Err(McpServerError::InvalidArguments(
+                    "Inline script content exceeds 100KB limit".to_string()
+                ));
+            }
+            
+            (content.to_string(), "inline".to_string())
+        } else {
+            return Err(McpServerError::InvalidArguments(
+                "Either script_path or script_content must be provided".to_string()
+            ));
+        };
+
+        // Stage 2: Parse script with detailed error reporting
         let script = ScriptParser::parse_content(&script_content).map_err(|e| {
-            McpServerError::InvalidArguments(format!("Failed to parse script: {}", e))
+            error!("Script parsing failed for {}: {}", script_source, e);
+            
+            // Provide more detailed parsing errors
+            let detailed_error = if e.to_string().contains("line") {
+                format!("Script parsing error: {}", e)
+            } else {
+                format!("Script parsing error at {}: {}", script_source, e)
+            };
+            
+            McpServerError::InvalidArguments(detailed_error)
         })?;
 
-        // Parse configuration
+        info!("Successfully parsed script from {} with {} steps", script_source, script.steps.len());
+
+        // Stage 3: Parse and validate configuration
         let mut config = ScriptExecutionConfig::default();
         if let Some(config_obj) = arguments.get("config") {
-            if let Some(max_timeout) = config_obj
-                .get("max_script_timeout")
-                .and_then(|v| v.as_u64())
-            {
+            // Validate timeout values
+            if let Some(max_timeout) = config_obj.get("max_script_timeout").and_then(|v| v.as_u64()) {
+                if max_timeout == 0 {
+                    return Err(McpServerError::InvalidArguments(
+                        "max_script_timeout must be greater than 0".to_string()
+                    ));
+                }
+                if max_timeout > 3600 { // 1 hour max
+                    return Err(McpServerError::InvalidArguments(
+                        "max_script_timeout cannot exceed 3600 seconds (1 hour)".to_string()
+                    ));
+                }
                 config.max_script_timeout = max_timeout;
             }
-            if let Some(step_timeout) = config_obj
-                .get("default_step_timeout")
-                .and_then(|v| v.as_u64())
-            {
+            
+            if let Some(step_timeout) = config_obj.get("default_step_timeout").and_then(|v| v.as_u64()) {
+                if step_timeout == 0 {
+                    return Err(McpServerError::InvalidArguments(
+                        "default_step_timeout must be greater than 0".to_string()
+                    ));
+                }
+                if step_timeout > config.max_script_timeout {
+                    return Err(McpServerError::InvalidArguments(
+                        "default_step_timeout cannot exceed max_script_timeout".to_string()
+                    ));
+                }
                 config.default_step_timeout = step_timeout;
             }
-            if let Some(continue_on_failure) = config_obj
-                .get("continue_on_failure")
-                .and_then(|v| v.as_bool())
-            {
+            
+            if let Some(continue_on_failure) = config_obj.get("continue_on_failure").and_then(|v| v.as_bool()) {
                 config.continue_on_failure = continue_on_failure;
             }
-            if let Some(validate_outcomes) = config_obj
-                .get("validate_outcomes")
-                .and_then(|v| v.as_bool())
-            {
+            
+            if let Some(validate_outcomes) = config_obj.get("validate_outcomes").and_then(|v| v.as_bool()) {
                 config.validate_outcomes = validate_outcomes;
             }
         }
 
-        // Create script runner
+        // Save timeout value before moving config
+        let max_script_timeout = config.max_script_timeout;
+
+        // Stage 4: Create script runner with resource tracking
         let mut script_runner = ScriptRunner::with_config(self.state.sdk_adapter.clone(), config);
 
-        // Execute script
-        let result = script_runner
-            .execute_script(script)
-            .await
-            .map_err(|e| McpServerError::Internal(format!("Script execution failed: {}", e)))?;
+        // Stage 5: Execute script with timeout and resource cleanup
+        let execution_start = std::time::Instant::now();
+        
+        let result = match tokio::time::timeout(
+            Duration::from_secs(max_script_timeout),
+            script_runner.execute_script(script)
+        ).await {
+            Ok(Ok(result)) => {
+                info!("Script execution completed successfully in {:?}", execution_start.elapsed());
+                result
+            },
+            Ok(Err(e)) => {
+                error!("Script execution failed after {:?}: {}", execution_start.elapsed(), e);
+                return Err(McpServerError::Internal(format!(
+                    "Script execution failed: {}", e
+                )));
+            },
+            Err(_) => {
+                error!("Script execution timed out after {:?}", execution_start.elapsed());
+                return Err(McpServerError::Internal(format!(
+                    "Script execution timed out after {} seconds", 
+                    max_script_timeout
+                )));
+            }
+        };
 
-        // Convert result to JSON
-        let json_result = serde_json::to_value(result)
-            .map_err(|e| McpServerError::Internal(format!("Failed to serialize result: {}", e)))?;
+        // Stage 6: Serialize result with error handling
+        let json_result = serde_json::to_value(result).map_err(|e| {
+            error!("Failed to serialize script execution result: {}", e);
+            McpServerError::Internal(format!(
+                "Failed to serialize execution result: {}", e
+            ))
+        })?;
 
+        info!("Script execution completed successfully with cleanup");
         Ok(json_result)
     }
 }

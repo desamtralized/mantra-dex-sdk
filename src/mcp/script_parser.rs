@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use tracing::{debug, error, info, warn};
+use tracing::error;
 use regex::Regex;
 
 /// Represents a parsed test script with all its components
@@ -583,7 +583,7 @@ impl ScriptParser {
 
     /// Extract liquidity parameters
     fn extract_liquidity_params(
-        description: &str,
+        _description: &str,
         lines: &[String],
     ) -> Result<(String, String, String), ScriptParseError> {
         let mut pool_id = None;
@@ -611,7 +611,7 @@ impl ScriptParser {
 
     /// Extract withdrawal parameters
     fn extract_withdrawal_params(
-        description: &str,
+        _description: &str,
         lines: &[String],
     ) -> Result<(String, String), ScriptParseError> {
         let mut pool_id = None;
@@ -636,7 +636,7 @@ impl ScriptParser {
 
     /// Extract pool creation parameters
     fn extract_pool_creation_params(
-        description: &str,
+        _description: &str,
         lines: &[String],
     ) -> Result<(String, String, String), ScriptParseError> {
         let mut asset_a = "ATOM".to_string();
@@ -659,7 +659,7 @@ impl ScriptParser {
 
     /// Extract monitor parameters
     fn extract_monitor_params(
-        description: &str,
+        _description: &str,
         lines: &[String],
     ) -> Result<(String, u64), ScriptParseError> {
         let mut tx_hash = "".to_string();
