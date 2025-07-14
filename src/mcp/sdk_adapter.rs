@@ -953,14 +953,47 @@ impl McpSdkAdapter {
             pool_id, lp_amount
         );
 
-        // This is a simplified implementation
-        // In a real implementation, you'd need to interact with the liquidity withdrawal methods
+        // Note: min_asset_a and min_asset_b parameters are not currently supported by the underlying SDK
+        if min_asset_a.is_some() || min_asset_b.is_some() {
+            debug!("min_asset_a and min_asset_b parameters are not currently supported by the underlying SDK and will be ignored");
+        }
+
+        // Parse LP amount to Uint128
+        let lp_amount_uint = Uint128::from_str(&lp_amount)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid LP amount: {}", e)))?;
+
+        // Get active wallet
+        let wallet = self.get_active_wallet_with_validation().await?;
+
+        // Get network config and client with wallet
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client_with_wallet(&network_config, wallet).await?;
+
+        // Execute withdraw liquidity
+        let withdraw_result = client
+            .withdraw_liquidity(&pool_id, lp_amount_uint)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        info!(
+            "Successfully withdrew liquidity from pool {} with tx hash: {}",
+            pool_id, withdraw_result.txhash
+        );
+
+        // Format the response
         Ok(serde_json::json!({
             "status": "success",
-            "operation": "withdraw_liquidity",
-            "pool_id": pool_id,
-            "lp_amount": lp_amount,
-            "timestamp": chrono::Utc::now().to_rfc3339()
+            "transaction_hash": withdraw_result.txhash,
+            "explorer_url": format!("https://explorer.mantrachain.io/mantra-dukong/tx/{}", withdraw_result.txhash),
+            "withdrawal_details": {
+                "pool_id": pool_id,
+                "lp_amount": lp_amount,
+                "gas_used": withdraw_result.gas_used,
+                "gas_wanted": withdraw_result.gas_wanted
+            },
+            "block_height": withdraw_result.height,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "events": withdraw_result.events
         }))
     }
 
