@@ -751,4 +751,702 @@ mod tests {
             panic!("Expected ExecuteSwap action");
         }
     }
+
+    #[test]
+    fn test_missing_script_name_header() {
+        let content = r#"
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Check wallet balance** for ATOM
+"#;
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::MissingSection(section)) = result {
+            assert_eq!(section, "name");
+        } else {
+            panic!("Expected MissingSection error for name");
+        }
+    }
+
+    #[test]
+    fn test_missing_setup_section() {
+        let content = r#"
+# Test Script: Missing Setup Test
+
+## Steps
+1. **Check wallet balance** for ATOM
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        // Should use default setup values
+        assert_eq!(script.setup.network, "mantra-dukong");
+        assert_eq!(script.setup.wallet.wallet_type, "test");
+    }
+
+    #[test]
+    fn test_missing_steps_section() {
+        let content = r#"
+# Test Script: Missing Steps Test
+
+## Setup
+- Network: mantra-dukong
+
+## Expected Results
+- Should have some steps
+"#;
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::MissingSection(section)) = result {
+            assert_eq!(section, "steps");
+        } else {
+            panic!("Expected MissingSection error for steps");
+        }
+    }
+
+    #[test]
+    fn test_empty_script_name() {
+        let content = r#"
+# 
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Check wallet balance** for ATOM
+"#;
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::MissingSection(section)) = result {
+            assert_eq!(section, "name");
+        } else {
+            panic!("Expected MissingSection error for empty name");
+        }
+    }
+
+    #[test]
+    fn test_malformed_markdown_wrong_heading_levels() {
+        let content = r#"
+# Test Script: Malformed Test
+
+#### Setup
+- Network: mantra-dukong
+
+##### Steps
+1. **Check wallet balance** for ATOM
+"#;
+
+        // Parser should still work but may not recognize sections correctly
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.name, "Malformed Test");
+        // The parser treats any heading starting with # as a potential section
+        assert_eq!(script.steps.len(), 1); // Steps are recognized even with wrong heading level
+    }
+
+    #[test]
+    fn test_malformed_markdown_missing_space_after_hash() {
+        let content = r#"
+#Test Script: No Space Test
+
+##Setup
+- Network: mantra-dukong
+
+##Steps
+1. **Check wallet balance** for ATOM
+"#;
+
+        // Parser may not recognize sections without proper spacing
+        let script = ScriptParser::parse_content(content).unwrap();
+        // Actually the parser does handle missing spaces, so steps will be recognized
+        assert_eq!(script.steps.len(), 1); // Steps are recognized
+    }
+
+    #[test]
+    fn test_malformed_markdown_inconsistent_formatting() {
+        let content = r#"
+# Test Script: Inconsistent Test
+
+## Setup
+- Network: mantra-dukong
+
+# Steps  
+1. **Check wallet balance** for ATOM
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.name, "Inconsistent Test");
+        // Steps section uses # instead of ## but parser should handle it
+        assert_eq!(script.steps.len(), 1);
+    }
+
+    #[test]
+    fn test_invalid_step_format_no_dot() {
+        let content = r#"
+# Test Script: Invalid Step Format Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1 **Check wallet balance** for ATOM
+2. **Execute swap** of 10 ATOM for USDC
+   pool_id: ATOM/USDC
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        // The parser recognizes both lines as steps because they both start with numbers
+        assert_eq!(script.steps.len(), 2); // Both steps are parsed
+    }
+
+    #[test]
+    fn test_empty_step_content() {
+        let content = r#"
+# Test Script: Empty Step Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1.
+
+2. **Check wallet balance** for ATOM
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        // Both steps are parsed - the first one is empty, the second has content
+        assert_eq!(script.steps.len(), 2);
+        assert_eq!(script.steps[0].description, "");
+        assert_eq!(script.steps[1].description, "Check wallet balance"); // Bold formatting is removed
+    }
+
+    #[test]
+    fn test_unknown_action_defaults_to_custom() {
+        let content = r#"
+# Test Script: Unknown Action Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Perform unknown action** that doesn't match any known pattern
+   param1: value1
+   param2: value2
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        
+        if let StepAction::Custom { tool_name, parameters } = &script.steps[0].action {
+            assert_eq!(tool_name, "unknown");
+            assert_eq!(parameters.get("param1"), Some(&"value1".to_string()));
+            assert_eq!(parameters.get("param2"), Some(&"value2".to_string()));
+        } else {
+            panic!("Expected Custom action for unknown action");
+        }
+    }
+
+    #[test]
+    fn test_swap_missing_pool_id() {
+        let content = r#"
+# Test Script: Missing Pool ID Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Execute swap** of 10 ATOM for USDC with 1% slippage
+   amount: 10
+   slippage: 1
+"#;
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::InvalidParameter(msg)) = result {
+            assert!(msg.contains("pool_id is required"));
+        } else {
+            panic!("Expected InvalidParameter error for missing pool_id");
+        }
+    }
+
+    #[test]
+    fn test_provide_liquidity_missing_pool_id() {
+        let content = r#"
+# Test Script: Missing Pool ID Liquidity Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Provide liquidity** to the pool
+   asset_a_amount: 100
+   asset_b_amount: 200
+"#;
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::InvalidParameter(msg)) = result {
+            assert!(msg.contains("pool_id is required"));
+        } else {
+            panic!("Expected InvalidParameter error for missing pool_id in liquidity");
+        }
+    }
+
+    #[test]
+    fn test_withdraw_liquidity_missing_pool_id() {
+        let content = r#"
+# Test Script: Missing Pool ID Withdrawal Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Withdraw liquidity** from the pool
+   lp_amount: 50
+"#;
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::InvalidParameter(msg)) = result {
+            assert!(msg.contains("pool_id is required"));
+        } else {
+            panic!("Expected InvalidParameter error for missing pool_id in withdrawal");
+        }
+    }
+
+    #[test]
+    fn test_empty_pool_id() {
+        let content = r#"
+# Test Script: Empty Pool ID Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Execute swap** of 10 ATOM for USDC
+   pool_id:
+   amount: 10
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        // Empty pool_id is parsed as empty string, validation occurs later
+        if let StepAction::ExecuteSwap { pool_id, .. } = &script.steps[0].action {
+            assert_eq!(pool_id, "");
+        } else {
+            panic!("Expected ExecuteSwap action");
+        }
+    }
+
+    #[test]
+    fn test_zero_amount_in_swap() {
+        let content = r#"
+# Test Script: Zero Amount Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Execute swap** of 0 ATOM for USDC
+   pool_id: ATOM/USDC
+   amount: 0
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        
+        if let StepAction::ExecuteSwap { amount, .. } = &script.steps[0].action {
+            assert_eq!(amount, "0");
+        } else {
+            panic!("Expected ExecuteSwap action");
+        }
+    }
+
+    #[test]
+    fn test_negative_amount_in_liquidity() {
+        let content = r#"
+# Test Script: Negative Amount Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Provide liquidity** to the pool
+   pool_id: ATOM/USDC
+   asset_a_amount: -100
+   asset_b_amount: 200
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        
+        if let StepAction::ProvideLiquidity { asset_a_amount, .. } = &script.steps[0].action {
+            assert_eq!(asset_a_amount, "-100");
+        } else {
+            panic!("Expected ProvideLiquidity action");
+        }
+    }
+
+    #[test]
+    fn test_empty_string_amounts() {
+        let content = r#"
+# Test Script: Empty String Amounts Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Provide liquidity** to the pool
+   pool_id: ATOM/USDC
+   asset_a_amount: 
+   asset_b_amount: 
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        
+        if let StepAction::ProvideLiquidity { asset_a_amount, asset_b_amount, .. } = &script.steps[0].action {
+            assert_eq!(asset_a_amount, "");
+            assert_eq!(asset_b_amount, "");
+        } else {
+            panic!("Expected ProvideLiquidity action");
+        }
+    }
+
+    #[test]
+    fn test_empty_network_in_setup() {
+        let content = r#"
+# Test Script: Empty Network Test
+
+## Setup
+- Network: 
+
+## Steps
+1. **Check wallet balance** for ATOM
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        // The parser maintains the default network value when empty is provided
+        assert_eq!(script.setup.network, "mantra-dukong");
+    }
+
+    #[test]
+    fn test_whitespace_only_pool_id() {
+        let content = r#"
+# Test Script: Whitespace Pool ID Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Execute swap** of 10 ATOM for USDC
+   pool_id:    
+   amount: 10
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        // Whitespace-only pool_id is trimmed to empty string
+        if let StepAction::ExecuteSwap { pool_id, .. } = &script.steps[0].action {
+            assert_eq!(pool_id, "");
+        } else {
+            panic!("Expected ExecuteSwap action");
+        }
+    }
+
+    #[test]
+    fn test_zero_lp_amount_in_withdrawal() {
+        let content = r#"
+# Test Script: Zero LP Amount Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Withdraw liquidity** from the pool
+   pool_id: ATOM/USDC
+   lp_amount: 0
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        
+        if let StepAction::WithdrawLiquidity { lp_amount, .. } = &script.steps[0].action {
+            assert_eq!(lp_amount, "0");
+        } else {
+            panic!("Expected WithdrawLiquidity action");
+        }
+    }
+
+    #[test]
+    fn test_negative_slippage() {
+        let content = r#"
+# Test Script: Negative Slippage Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Execute swap** of 10 ATOM for USDC
+   pool_id: ATOM/USDC
+   amount: 10
+   slippage: -5
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        
+        if let StepAction::ExecuteSwap { slippage, .. } = &script.steps[0].action {
+            assert_eq!(slippage, "-5");
+        } else {
+            panic!("Expected ExecuteSwap action");
+        }
+    }
+
+    #[test]
+    fn test_very_high_slippage() {
+        let content = r#"
+# Test Script: Very High Slippage Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Execute swap** of 10 ATOM for USDC
+   pool_id: ATOM/USDC
+   amount: 10
+   slippage: 150
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        
+        if let StepAction::ExecuteSwap { slippage, .. } = &script.steps[0].action {
+            assert_eq!(slippage, "150");
+        } else {
+            panic!("Expected ExecuteSwap action");
+        }
+    }
+
+    #[test]
+    fn test_non_numeric_slippage() {
+        let content = r#"
+# Test Script: Non-Numeric Slippage Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Execute swap** of 10 ATOM for USDC
+   pool_id: ATOM/USDC
+   amount: 10
+   slippage: abc
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        
+        if let StepAction::ExecuteSwap { slippage, .. } = &script.steps[0].action {
+            assert_eq!(slippage, "abc");
+        } else {
+            panic!("Expected ExecuteSwap action");
+        }
+    }
+
+    #[test]
+    fn test_empty_slippage() {
+        let content = r#"
+# Test Script: Empty Slippage Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Execute swap** of 10 ATOM for USDC
+   pool_id: ATOM/USDC
+   amount: 10
+   slippage: 
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.steps.len(), 1);
+        
+        if let StepAction::ExecuteSwap { slippage, .. } = &script.steps[0].action {
+            assert_eq!(slippage, "");
+        } else {
+            panic!("Expected ExecuteSwap action");
+        }
+    }
+
+    #[test]
+    fn test_empty_expected_results_section() {
+        let content = r#"
+# Test Script: Empty Expected Results Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Check wallet balance** for ATOM
+
+## Expected Results
+
+## Metadata
+author: test
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.expected_results.len(), 0);
+        assert_eq!(script.metadata.get("author"), Some(&"test".to_string()));
+    }
+
+    #[test]
+    fn test_malformed_expected_results() {
+        let content = r#"
+# Test Script: Malformed Expected Results Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Check wallet balance** for ATOM
+
+## Expected Results
+This is not a proper list item
+- This is a proper list item
+Another improper line
+- Another proper list item
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        // Should parse both proper and improper lines
+        assert_eq!(script.expected_results.len(), 4);
+        assert_eq!(script.expected_results[0], "This is not a proper list item");
+        assert_eq!(script.expected_results[1], "This is a proper list item");
+        assert_eq!(script.expected_results[2], "Another improper line");
+        assert_eq!(script.expected_results[3], "Another proper list item");
+    }
+
+    #[test]
+    fn test_missing_metadata_values() {
+        let content = r#"
+# Test Script: Missing Metadata Values Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Check wallet balance** for ATOM
+
+## Metadata
+author:
+version: 1.0
+description:
+tags: test, validation
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.metadata.get("author"), Some(&"".to_string()));
+        assert_eq!(script.metadata.get("version"), Some(&"1.0".to_string()));
+        assert_eq!(script.metadata.get("description"), Some(&"".to_string()));
+        assert_eq!(script.metadata.get("tags"), Some(&"test, validation".to_string()));
+    }
+
+    #[test]
+    fn test_malformed_metadata() {
+        let content = r#"
+# Test Script: Malformed Metadata Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+1. **Check wallet balance** for ATOM
+
+## Metadata
+author: test author
+no_colon_line_should_be_ignored
+version: 1.0
+: empty_key
+key_with_multiple: colons: should: work
+"#;
+
+        let script = ScriptParser::parse_content(content).unwrap();
+        assert_eq!(script.metadata.get("author"), Some(&"test author".to_string()));
+        assert_eq!(script.metadata.get("version"), Some(&"1.0".to_string()));
+        assert_eq!(script.metadata.get("key_with_multiple"), Some(&"colons: should: work".to_string()));
+        // Lines without colons should be ignored
+        assert!(!script.metadata.contains_key("no_colon_line_should_be_ignored"));
+    }
+
+    #[test]
+    fn test_completely_invalid_script_content() {
+        let content = "This is not markdown at all, just plain text with no structure";
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::MissingSection(section)) = result {
+            assert_eq!(section, "name");
+        } else {
+            panic!("Expected MissingSection error for invalid content");
+        }
+    }
+
+    #[test]
+    fn test_regex_compilation_failure() {
+        // This test verifies error handling, but since we use a simple regex,
+        // we'll test empty content which should trigger validation errors
+        let content = "";
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::MissingSection(section)) = result {
+            assert_eq!(section, "name");
+        } else {
+            panic!("Expected MissingSection error for empty content");
+        }
+    }
+
+    #[test]
+    fn test_invalid_step_empty_lines() {
+        let content = r#"
+# Test Script: Invalid Step Test
+
+## Setup
+- Network: mantra-dukong
+
+## Steps
+
+"#;
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::MissingSection(section)) = result {
+            assert_eq!(section, "steps");
+        } else {
+            panic!("Expected MissingSection error for no steps");
+        }
+    }
+
+    #[test]
+    fn test_script_with_only_invalid_sections() {
+        let content = r#"
+### This is not a valid main heading
+
+#### This is also not valid
+
+##### Still not valid
+
+Some random content that doesn't follow any structure
+"#;
+
+        let result = ScriptParser::parse_content(content);
+        assert!(result.is_err());
+        if let Err(ScriptParseError::MissingSection(section)) = result {
+            assert_eq!(section, "name");
+        } else {
+            panic!("Expected MissingSection error for invalid structure");
+        }
+    }
 }
