@@ -1,3 +1,4 @@
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -535,32 +536,334 @@ impl ScriptRunner {
         }
     }
 
-    /// Validate step outcome against expected result
+    /// Validate step outcome against expected result with enhanced logic
     fn validate_outcome(&self, expected: &str, actual: &Value) -> OutcomeValidation {
         let actual_str = actual.to_string();
-        let expected_lower = expected.to_lowercase();
-        let actual_lower = actual_str.to_lowercase();
-
-        // Simple validation logic - can be enhanced
-        let matches = if expected_lower.contains("success") {
-            actual_lower.contains("success") || actual_lower.contains("ok")
-        } else if expected_lower.contains("balance") {
-            actual_lower.contains("balance") || actual_lower.contains("amount")
-        } else if expected_lower.contains("pool") {
-            actual_lower.contains("pool")
-        } else if expected_lower.contains("swap") {
-            actual_lower.contains("swap") || actual_lower.contains("trade")
-        } else {
-            // Default: check if expected text is contained in actual
-            actual_lower.contains(&expected_lower)
-        };
-
+        let mut validation_notes = Vec::new();
+        
+        // Try different validation strategies in order of specificity
+        let (matches, strategy_used) = self.try_validation_strategies(expected, actual, &mut validation_notes);
+        
         OutcomeValidation {
             expected: expected.to_string(),
             actual: actual_str,
             matches,
-            notes: None,
+            notes: if validation_notes.is_empty() {
+                Some(format!("Validated using: {}", strategy_used))
+            } else {
+                Some(format!("{} | Notes: {}", strategy_used, validation_notes.join("; ")))
+            },
         }
+    }
+    
+    /// Try multiple validation strategies in order of sophistication
+    fn try_validation_strategies(&self, expected: &str, actual: &Value, notes: &mut Vec<String>) -> (bool, String) {
+        // Strategy 1: Regex pattern matching
+        if let Some(matches) = self.validate_with_regex(expected, actual, notes) {
+            return (matches, "regex pattern".to_string());
+        }
+        
+        // Strategy 2: Structured data validation (JSON comparison)
+        if let Some(matches) = self.validate_structured_data(expected, actual, notes) {
+            return (matches, "structured data".to_string());
+        }
+        
+        // Strategy 3: Numeric comparison
+        if let Some(matches) = self.validate_numeric_comparison(expected, actual, notes) {
+            return (matches, "numeric comparison".to_string());
+        }
+        
+        // Strategy 4: Domain-specific DEX validation
+        if let Some(matches) = self.validate_dex_specific(expected, actual, notes) {
+            return (matches, "DEX domain rules".to_string());
+        }
+        
+        // Strategy 5: Enhanced string matching (fallback)
+        let matches = self.validate_enhanced_string_matching(expected, actual, notes);
+        (matches, "enhanced string matching".to_string())
+    }
+    
+    /// Validate using regex patterns
+    fn validate_with_regex(&self, expected: &str, actual: &Value, notes: &mut Vec<String>) -> Option<bool> {
+        // Check if expected is a regex pattern (starts with regex: or /)
+        let pattern = if expected.starts_with("regex:") {
+            &expected[6..]
+        } else if expected.starts_with('/') && expected.ends_with('/') && expected.len() > 2 {
+            &expected[1..expected.len()-1]
+        } else {
+            return None;
+        };
+        
+        match Regex::new(pattern) {
+            Ok(re) => {
+                let actual_str = match actual {
+                    Value::String(s) => s.clone(),
+                    _ => actual.to_string(),
+                };
+                let matches = re.is_match(&actual_str);
+                notes.push(format!("regex pattern: {}", pattern));
+                Some(matches)
+            }
+            Err(e) => {
+                notes.push(format!("invalid regex pattern: {}", e));
+                None
+            }
+        }
+    }
+    
+    /// Validate structured data (JSON objects)
+    fn validate_structured_data(&self, expected: &str, actual: &Value, notes: &mut Vec<String>) -> Option<bool> {
+        // Try to parse expected as JSON
+        if let Ok(expected_json) = serde_json::from_str::<Value>(expected) {
+            let matches = match (&expected_json, actual) {
+                // Both are objects - check key-value pairs
+                (Value::Object(exp_obj), Value::Object(act_obj)) => {
+                    self.validate_json_objects(exp_obj, act_obj, notes)
+                }
+                // Both are arrays - check elements
+                (Value::Array(exp_arr), Value::Array(act_arr)) => {
+                    self.validate_json_arrays(exp_arr, act_arr, notes)
+                }
+                // Direct value comparison
+                (exp, act) => {
+                    let matches = exp == act;
+                    if !matches {
+                        notes.push(format!("JSON values differ: expected {:?}, got {:?}", exp, act));
+                    }
+                    matches
+                }
+            };
+            notes.push("JSON structure comparison".to_string());
+            Some(matches)
+        } else {
+            None
+        }
+    }
+    
+    /// Validate JSON objects by checking key-value pairs
+    fn validate_json_objects(&self, expected: &serde_json::Map<String, Value>, actual: &serde_json::Map<String, Value>, notes: &mut Vec<String>) -> bool {
+        let mut all_match = true;
+        
+        for (key, exp_value) in expected {
+            match actual.get(key) {
+                Some(act_value) => {
+                    if exp_value != act_value {
+                        notes.push(format!("key '{}' differs: expected {:?}, got {:?}", key, exp_value, act_value));
+                        all_match = false;
+                    }
+                }
+                None => {
+                    notes.push(format!("missing key: '{}'", key));
+                    all_match = false;
+                }
+            }
+        }
+        
+        all_match
+    }
+    
+    /// Validate JSON arrays
+    fn validate_json_arrays(&self, expected: &[Value], actual: &[Value], notes: &mut Vec<String>) -> bool {
+        if expected.len() != actual.len() {
+            notes.push(format!("array length differs: expected {}, got {}", expected.len(), actual.len()));
+            return false;
+        }
+        
+        for (i, (exp, act)) in expected.iter().zip(actual.iter()).enumerate() {
+            if exp != act {
+                notes.push(format!("array element {} differs: expected {:?}, got {:?}", i, exp, act));
+                return false;
+            }
+        }
+        
+        true
+    }
+    
+    /// Validate numeric comparisons
+    fn validate_numeric_comparison(&self, expected: &str, actual: &Value, notes: &mut Vec<String>) -> Option<bool> {
+        // Check for numeric comparison operators
+        let patterns = [
+            (r"^>=\s*(\d+(?:\.\d+)?)$", ">="),
+            (r"^<=\s*(\d+(?:\.\d+)?)$", "<="),
+            (r"^>\s*(\d+(?:\.\d+)?)$", ">"),
+            (r"^<\s*(\d+(?:\.\d+)?)$", "<"),
+            (r"^=\s*(\d+(?:\.\d+)?)$", "="),
+            (r"^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$", "range"),
+        ];
+        
+        for (pattern, op) in &patterns {
+            if let Ok(re) = Regex::new(pattern) {
+                if let Some(captures) = re.captures(expected) {
+                    return self.perform_numeric_comparison(op, &captures, actual, notes);
+                }
+            }
+        }
+        
+        None
+    }
+    
+    /// Perform the actual numeric comparison
+    fn perform_numeric_comparison(&self, operator: &str, captures: &regex::Captures, actual: &Value, notes: &mut Vec<String>) -> Option<bool> {
+        let actual_num = match actual {
+            Value::Number(n) => n.as_f64()?,
+            Value::String(s) => s.parse::<f64>().ok()?,
+            _ => return None,
+        };
+        
+        let result = match operator {
+            ">=" => {
+                let threshold = captures.get(1)?.as_str().parse::<f64>().ok()?;
+                actual_num >= threshold
+            }
+            "<=" => {
+                let threshold = captures.get(1)?.as_str().parse::<f64>().ok()?;
+                actual_num <= threshold
+            }
+            ">" => {
+                let threshold = captures.get(1)?.as_str().parse::<f64>().ok()?;
+                actual_num > threshold
+            }
+            "<" => {
+                let threshold = captures.get(1)?.as_str().parse::<f64>().ok()?;
+                actual_num < threshold
+            }
+            "=" => {
+                let threshold = captures.get(1)?.as_str().parse::<f64>().ok()?;
+                (actual_num - threshold).abs() < f64::EPSILON
+            }
+            "range" => {
+                let min = captures.get(1)?.as_str().parse::<f64>().ok()?;
+                let max = captures.get(2)?.as_str().parse::<f64>().ok()?;
+                actual_num >= min && actual_num <= max
+            }
+            _ => return None,
+        };
+        
+        notes.push(format!("numeric comparison: {} {} with actual value {}", operator, captures.get(0)?.as_str(), actual_num));
+        Some(result)
+    }
+    
+    /// Validate DEX-specific domain rules
+    fn validate_dex_specific(&self, expected: &str, actual: &Value, notes: &mut Vec<String>) -> Option<bool> {
+        let expected_lower = expected.to_lowercase();
+        let actual_str = actual.to_string().to_lowercase();
+        
+        // DEX operation success patterns
+        if expected_lower.contains("success") || expected_lower.contains("successful") {
+            let success_indicators = [
+                "success", "successful", "completed", "ok", "confirmed",
+                "transaction_hash", "tx_hash", "block_height"
+            ];
+            let matches = success_indicators.iter().any(|&indicator| actual_str.contains(indicator));
+            notes.push("DEX success validation".to_string());
+            return Some(matches);
+        }
+        
+        // Balance/amount validation
+        if expected_lower.contains("balance") || expected_lower.contains("amount") {
+            let balance_indicators = ["balance", "amount", "quantity", "value", "uom"];
+            let has_balance_field = balance_indicators.iter().any(|&indicator| actual_str.contains(indicator));
+            
+            // Also check for numeric values
+            let has_numeric = Regex::new(r"\d+").unwrap().is_match(&actual_str);
+            
+            let matches = has_balance_field || has_numeric;
+            notes.push("balance/amount validation".to_string());
+            return Some(matches);
+        }
+        
+        // Pool operation validation
+        if expected_lower.contains("pool") {
+            let pool_indicators = ["pool", "liquidity", "lp_token", "pool_id"];
+            let matches = pool_indicators.iter().any(|&indicator| actual_str.contains(indicator));
+            notes.push("pool operation validation".to_string());
+            return Some(matches);
+        }
+        
+        // Swap/trade validation
+        if expected_lower.contains("swap") || expected_lower.contains("trade") {
+            let swap_indicators = ["swap", "trade", "exchange", "from_token", "to_token", "slippage"];
+            let matches = swap_indicators.iter().any(|&indicator| actual_str.contains(indicator));
+            notes.push("swap/trade validation".to_string());
+            return Some(matches);
+        }
+        
+        // Address validation
+        if expected_lower.contains("address") {
+            let address_pattern = Regex::new(r"[a-z0-9]{39,}").unwrap();
+            let actual_check = match actual {
+                Value::String(s) => s.clone(),
+                _ => actual.to_string(),
+            };
+            let matches = address_pattern.is_match(&actual_check);
+            notes.push("address validation".to_string());
+            return Some(matches);
+        }
+        
+        None
+    }
+    
+    /// Enhanced string matching with fuzzy logic
+    fn validate_enhanced_string_matching(&self, expected: &str, actual: &Value, notes: &mut Vec<String>) -> bool {
+        let expected_lower = expected.to_lowercase();
+        
+        // Extract string value directly if it's a JSON string to avoid quotes
+        let actual_str = match actual {
+            Value::String(s) => s.clone(),
+            _ => actual.to_string(),
+        };
+        let actual_lower = actual_str.to_lowercase();
+        
+        // Exact match
+        if expected_lower == actual_lower {
+            notes.push("exact match".to_string());
+            return true;
+        }
+        
+        // Contains match
+        if actual_lower.contains(&expected_lower) {
+            notes.push("substring match".to_string());
+            return true;
+        }
+        
+        // Word boundary matching
+        let expected_words: Vec<&str> = expected_lower.split_whitespace().collect();
+        let actual_words: Vec<&str> = actual_lower.split_whitespace().collect();
+        
+        let word_matches = expected_words.iter()
+            .filter(|&word| actual_words.contains(word))
+            .count();
+        
+        let word_match_ratio = word_matches as f64 / expected_words.len() as f64;
+        
+        if word_match_ratio >= 0.5 {
+            notes.push(format!("word match ratio: {:.2}", word_match_ratio));
+            return true;
+        }
+        
+        // Fuzzy matching for common variations
+        let synonyms = [
+            ("ok", "success"),
+            ("successful", "success"),
+            ("completed", "success"),
+            ("confirmed", "success"),
+            ("amount", "balance"),
+            ("quantity", "balance"),
+            ("value", "balance"),
+            ("trade", "swap"),
+            ("exchange", "swap"),
+        ];
+        
+        for (syn1, syn2) in &synonyms {
+            if (expected_lower.contains(syn1) && actual_lower.contains(syn2)) ||
+               (expected_lower.contains(syn2) && actual_lower.contains(syn1)) {
+                notes.push(format!("synonym match: {} <-> {}", syn1, syn2));
+                return true;
+            }
+        }
+        
+        notes.push("no match found".to_string());
+        false
     }
 
     /// Create execution summary
@@ -637,5 +940,226 @@ mod tests {
         let script = ScriptParser::parse_content(script_content).unwrap();
         assert_eq!(script.name, "Simple Test");
         assert_eq!(script.steps.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_validation_regex_patterns() {
+        use super::*;
+        use crate::mcp::sdk_adapter::{ConnectionPoolConfig, McpSdkAdapter};
+        use std::sync::Arc;
+        
+        let config = ConnectionPoolConfig::default();
+        let adapter = Arc::new(McpSdkAdapter::new(config));
+        let runner = ScriptRunner::new(adapter);
+        
+        // Test regex validation
+        let expected = "regex:^[a-z]+$";
+        let actual = serde_json::Value::String("hello".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("regex pattern"));
+        
+        // Test regex with slash delimiters
+        let expected = "/^\\d+$/";
+        let actual = serde_json::Value::String("12345".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        
+        // Test failed regex match
+        let expected = "regex:^\\d+$";
+        let actual = serde_json::Value::String("abc".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(!result.matches);
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_validation_structured_data() {
+        use super::*;
+        use crate::mcp::sdk_adapter::{ConnectionPoolConfig, McpSdkAdapter};
+        use std::sync::Arc;
+        
+        let config = ConnectionPoolConfig::default();
+        let adapter = Arc::new(McpSdkAdapter::new(config));
+        let runner = ScriptRunner::new(adapter);
+        
+        // Test JSON object validation
+        let expected = r#"{"status": "success", "amount": "1000"}"#;
+        let actual = serde_json::json!({"status": "success", "amount": "1000", "extra": "field"});
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("JSON structure"));
+        
+        // Test JSON array validation
+        let expected = r#"["item1", "item2"]"#;
+        let actual = serde_json::json!(["item1", "item2"]);
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        
+        // Test JSON mismatch
+        let expected = r#"{"status": "failed"}"#;
+        let actual = serde_json::json!({"status": "success"});
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(!result.matches);
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_validation_numeric_comparison() {
+        use super::*;
+        use crate::mcp::sdk_adapter::{ConnectionPoolConfig, McpSdkAdapter};
+        use std::sync::Arc;
+        
+        let config = ConnectionPoolConfig::default();
+        let adapter = Arc::new(McpSdkAdapter::new(config));
+        let runner = ScriptRunner::new(adapter);
+        
+        // Test greater than
+        let expected = "> 100";
+        let actual = serde_json::Value::Number(serde_json::Number::from(150));
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("numeric comparison"));
+        
+        // Test range validation
+        let expected = "100 - 200";
+        let actual = serde_json::Value::Number(serde_json::Number::from(150));
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        
+        // Test less than equal
+        let expected = "<= 50";
+        let actual = serde_json::Value::Number(serde_json::Number::from(60));
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(!result.matches);
+        
+        // Test string numeric parsing
+        let expected = ">= 1000";
+        let actual = serde_json::Value::String("1500".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_validation_dex_specific() {
+        use super::*;
+        use crate::mcp::sdk_adapter::{ConnectionPoolConfig, McpSdkAdapter};
+        use std::sync::Arc;
+        
+        let config = ConnectionPoolConfig::default();
+        let adapter = Arc::new(McpSdkAdapter::new(config));
+        let runner = ScriptRunner::new(adapter);
+        
+        // Test DEX success validation
+        let expected = "successful swap";
+        let actual = serde_json::json!({"transaction_hash": "abc123", "status": "confirmed"});
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("DEX success"));
+        
+        // Test balance validation
+        let expected = "balance check";
+        let actual = serde_json::json!({"balance": "1000", "denom": "uom"});
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("balance/amount"));
+        
+        // Test pool validation
+        let expected = "pool operation";
+        let actual = serde_json::json!({"pool_id": "123", "liquidity": "5000"});
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("pool operation"));
+        
+        // Test swap validation
+        let expected = "swap executed";
+        let actual = serde_json::json!({"from_token": "uom", "to_token": "uatom", "slippage": "0.5"});
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("swap/trade"));
+        
+        // Test address validation
+        let expected = "valid address";
+        let actual = serde_json::json!("mantra1abcdefghijklmnopqrstuvwxyz1234567890abcdefg");
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("address validation"));
+    }
+
+    #[tokio::test]
+    async fn test_enhanced_validation_string_matching() {
+        use super::*;
+        use crate::mcp::sdk_adapter::{ConnectionPoolConfig, McpSdkAdapter};
+        use std::sync::Arc;
+        
+        let config = ConnectionPoolConfig::default();
+        let adapter = Arc::new(McpSdkAdapter::new(config));
+        let runner = ScriptRunner::new(adapter);
+        
+        // Test exact match
+        let expected = "exact match";
+        let actual = serde_json::Value::String("exact match".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("exact match"));
+        
+        // Test substring match - expected is contained in actual
+        let expected = "completed";
+        let actual = serde_json::Value::String("operation completed successfully".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("substring match"));
+        
+        // Test word ratio matching - different words but many matches
+        let expected = "swap operation completed";
+        let actual = serde_json::Value::String("trade operation was completed successfully".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        // Should match as DEX specific first due to "swap" keyword
+        assert!(result.notes.as_ref().unwrap().contains("DEX domain rules") || result.notes.as_ref().unwrap().contains("word match ratio"));
+        
+        // Test synonym matching
+        let expected = "ok";
+        let actual = serde_json::Value::String("operation was successful".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("synonym match"));
+        
+        // Test no match
+        let expected = "failure";
+        let actual = serde_json::Value::String("great success".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(!result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("no match found"));
+    }
+
+    #[tokio::test]
+    async fn test_validation_strategy_priority() {
+        use super::*;
+        use crate::mcp::sdk_adapter::{ConnectionPoolConfig, McpSdkAdapter};
+        use std::sync::Arc;
+        
+        let config = ConnectionPoolConfig::default();
+        let adapter = Arc::new(McpSdkAdapter::new(config));
+        let runner = ScriptRunner::new(adapter);
+        
+        // Test that regex takes priority over string matching
+        let expected = "regex:^success$";
+        let actual = serde_json::Value::String("success".to_string());
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("regex pattern"));
+        
+        // Test that structured data takes priority over string matching
+        let expected = r#"{"status": "ok"}"#;
+        let actual = serde_json::json!({"status": "ok"});
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("structured data"));
+        
+        // Test that numeric comparison takes priority over string matching
+        let expected = "> 0";
+        let actual = serde_json::Value::Number(serde_json::Number::from(42));
+        let result = runner.validate_outcome(expected, &actual);
+        assert!(result.matches);
+        assert!(result.notes.as_ref().unwrap().contains("numeric comparison"));
     }
 }
