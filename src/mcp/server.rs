@@ -4478,11 +4478,16 @@ impl MantraDexMcpServer {
         
         impl Drop for CleanupGuard {
             fn drop(&mut self) {
-                // Cleanup temporary files
-                for temp_file in &self.temp_files {
-                    if let Err(e) = std::fs::remove_file(temp_file) {
-                        warn!("Failed to cleanup temporary file {}: {}", temp_file.display(), e);
-                    }
+                // Cleanup temporary files using spawn_blocking to avoid blocking the async runtime
+                let temp_files = std::mem::take(&mut self.temp_files);
+                if !temp_files.is_empty() {
+                    tokio::task::spawn_blocking(move || {
+                        for temp_file in temp_files {
+                            if let Err(e) = std::fs::remove_file(&temp_file) {
+                                warn!("Failed to cleanup temporary file {}: {}", temp_file.display(), e);
+                            }
+                        }
+                    });
                 }
             }
         }
