@@ -2305,10 +2305,14 @@ impl MantraDexMcpServer {
                         // Create another wallet instance for the SDK adapter (since MantraWallet doesn't implement Clone)
                         match MantraWallet::from_mnemonic(&mnemonic, 0) {
                             Ok(adapter_wallet) => {
-                                // Store wallet instance in SDK adapter
+                                // Add wallet with derivation index for caching, then set as active
                                 self.state
                                     .sdk_adapter
-                                    .set_active_wallet_with_instance(adapter_wallet)
+                                    .add_wallet_with_derivation_index(adapter_wallet, 0)
+                                    .await?;
+                                self.state
+                                    .sdk_adapter
+                                    .switch_active_wallet(&address)
                                     .await?;
                             }
                             Err(e) => {
@@ -3591,8 +3595,8 @@ impl MantraDexMcpServer {
         let wallet_info = wallet.info();
         let wallet_address = wallet_info.address.clone();
 
-        // Add wallet using the SDK adapter
-        self.state.sdk_adapter.add_wallet(wallet).await?;
+        // Add wallet using the SDK adapter with derivation index for caching
+        self.state.sdk_adapter.add_wallet_with_derivation_index(wallet, derivation_index).await?;
 
         // Set as active wallet if requested
         if set_as_active {

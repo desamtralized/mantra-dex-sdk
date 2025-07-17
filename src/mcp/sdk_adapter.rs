@@ -39,6 +39,8 @@ pub struct ConnectionPoolConfig {
     pub max_idle_time_secs: u64,
     /// Health check interval in seconds
     pub health_check_interval_secs: u64,
+    /// Maximum derivation index to search when looking for wallets
+    pub max_wallet_derivation_index: u32,
 }
 
 impl Default for ConnectionPoolConfig {
@@ -51,6 +53,7 @@ impl Default for ConnectionPoolConfig {
             retry_base_delay_ms: 100,
             max_idle_time_secs: 60,         // 1 minute
             health_check_interval_secs: 30, // 30 seconds
+            max_wallet_derivation_index: 100, // Search up to index 100
         }
     }
 }
@@ -264,6 +267,8 @@ pub struct McpSdkAdapter {
     active_wallet: Arc<Mutex<Option<String>>>,
     /// Current active wallet instance (if available)
     active_wallet_instance: Arc<Mutex<Option<MantraWallet>>>,
+    /// Cache for wallet address to derivation index mappings
+    wallet_derivation_cache: Arc<RwLock<HashMap<String, u32>>>,
 }
 
 impl McpSdkAdapter {
@@ -278,6 +283,7 @@ impl McpSdkAdapter {
             wallets: Arc::new(RwLock::new(HashMap::new())),
             active_wallet: Arc::new(Mutex::new(None)),
             active_wallet_instance: Arc::new(Mutex::new(None)),
+            wallet_derivation_cache: Arc::new(RwLock::new(HashMap::new())),
         };
 
         adapter
@@ -456,16 +462,33 @@ impl McpSdkAdapter {
             return Ok(None);
         }
 
-        // Try to recreate wallet from environment mnemonic
+        // Try to recreate wallet from environment mnemonic using cached derivation index
         if let Ok(mnemonic) = env::var("WALLET_MNEMONIC") {
             if !mnemonic.trim().is_empty() {
-                match MantraWallet::from_mnemonic(&mnemonic, 0) {
-                    Ok(wallet) => {
-                        debug!("Recreated wallet instance from WALLET_MNEMONIC for transaction");
-                        return Ok(Some(wallet));
-                    }
-                    Err(e) => {
-                        error!("Failed to recreate wallet from WALLET_MNEMONIC: {}", e);
+                if let Some(active_addr) = &active_address {
+                    // Check cache for derivation index
+                    let cache = self.wallet_derivation_cache.read().await;
+                    if let Some(&derivation_index) = cache.get(active_addr) {
+                        match MantraWallet::from_mnemonic(&mnemonic, derivation_index) {
+                            Ok(wallet) => {
+                                debug!("Recreated active wallet instance from WALLET_MNEMONIC using cached index {}", derivation_index);
+                                return Ok(Some(wallet));
+                            }
+                            Err(e) => {
+                                error!("Failed to recreate active wallet from WALLET_MNEMONIC with cached index {}: {}", derivation_index, e);
+                            }
+                        }
+                    } else {
+                        // Fallback to index 0 for backward compatibility if no cache entry exists
+                        match MantraWallet::from_mnemonic(&mnemonic, 0) {
+                            Ok(wallet) => {
+                                debug!("Recreated active wallet instance from WALLET_MNEMONIC using fallback index 0");
+                                return Ok(Some(wallet));
+                            }
+                            Err(e) => {
+                                error!("Failed to recreate active wallet from WALLET_MNEMONIC with fallback index 0: {}", e);
+                            }
+                        }
                     }
                 }
             }
@@ -555,11 +578,35 @@ impl McpSdkAdapter {
         Ok(address)
     }
 
+    /// Add a new wallet to the collection with known derivation index for caching
+    pub async fn add_wallet_with_derivation_index(&self, wallet: MantraWallet, derivation_index: u32) -> McpResult<String> {
+        let wallet_info = wallet.info();
+        let address = wallet_info.address.clone();
+        
+        // Store the wallet info
+        self.wallets.write().await.insert(address.clone(), wallet_info);
+        
+        // Cache the derivation index for efficient wallet recreation
+        {
+            let mut cache = self.wallet_derivation_cache.write().await;
+            cache.insert(address.clone(), derivation_index);
+        }
+        
+        info!("Added new wallet: {} with derivation index: {}", address, derivation_index);
+        Ok(address)
+    }
+
     /// Remove a wallet from the collection
     pub async fn remove_wallet(&self, address: &str) -> McpResult<()> {
         let mut wallets = self.wallets.write().await;
         
         if wallets.remove(address).is_some() {
+            // Clear derivation cache entry
+            {
+                let mut cache = self.wallet_derivation_cache.write().await;
+                cache.remove(address);
+            }
+            
             // If this was the active wallet, clear the active wallet
             let mut active_wallet = self.active_wallet.lock().await;
             if active_wallet.as_ref() == Some(&address.to_string()) {
@@ -601,7 +648,7 @@ impl McpSdkAdapter {
     }
 
     /// Get a wallet instance by address
-    /// Note: This method tries to recreate the wallet from environment mnemonic
+    /// This method uses cached derivation indices for efficiency and falls back to a targeted search
     pub async fn get_wallet_by_address(&self, address: &str) -> McpResult<Option<MantraWallet>> {
         use crate::wallet::MantraWallet;
         use std::env;
@@ -611,28 +658,73 @@ impl McpSdkAdapter {
             return Ok(None);
         }
 
-        // Try to recreate wallet from environment mnemonic
-        if let Ok(mnemonic) = env::var("WALLET_MNEMONIC") {
-            if !mnemonic.trim().is_empty() {
-                // Try different derivation indices to find the matching wallet
-                for index in 0..10 {
-                    match MantraWallet::from_mnemonic(&mnemonic, index) {
-                        Ok(wallet) => {
-                            if wallet.info().address == address {
-                                debug!("Found wallet at index {} for address {}", index, address);
-                                return Ok(Some(wallet));
-                            }
+        // Get environment mnemonic
+        let mnemonic = match env::var("WALLET_MNEMONIC") {
+            Ok(m) if !m.trim().is_empty() => m,
+            _ => {
+                debug!("No valid WALLET_MNEMONIC found in environment for address: {}", address);
+                return Ok(None);
+            }
+        };
+
+        // Check cache first for known derivation index
+        {
+            let cache = self.wallet_derivation_cache.read().await;
+            if let Some(&derivation_index) = cache.get(address) {
+                match MantraWallet::from_mnemonic(&mnemonic, derivation_index) {
+                    Ok(wallet) => {
+                        if wallet.info().address == address {
+                            debug!("Retrieved wallet from cache at index {} for address {}", derivation_index, address);
+                            return Ok(Some(wallet));
+                        } else {
+                            // Cache is stale, wallet address doesn't match
+                            warn!("Cached derivation index {} for address {} is stale, clearing cache entry", derivation_index, address);
+                            drop(cache);
+                            let mut cache_mut = self.wallet_derivation_cache.write().await;
+                            cache_mut.remove(address);
                         }
-                        Err(e) => {
-                            debug!("Failed to create wallet at index {}: {}", index, e);
-                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to recreate wallet from cached index {} for address {}: {}", derivation_index, address, e);
+                        // Clear stale cache entry
+                        drop(cache);
+                        let mut cache_mut = self.wallet_derivation_cache.write().await;
+                        cache_mut.remove(address);
                     }
                 }
             }
         }
 
-        // If we can't recreate from mnemonic, return None
-        debug!("Could not recreate wallet instance for address: {}", address);
+        // Cache miss or stale cache - perform targeted search
+        debug!("Performing derivation search for address: {}", address);
+        
+        // Search with configurable upper bound to prevent infinite derivation
+        let max_index = self.config.max_wallet_derivation_index;
+        for index in 0..=max_index {
+            match MantraWallet::from_mnemonic(&mnemonic, index) {
+                Ok(wallet) => {
+                    if wallet.info().address == address {
+                        debug!("Found wallet at derivation index {} for address {}", index, address);
+                        
+                        // Cache the successful derivation index
+                        {
+                            let mut cache = self.wallet_derivation_cache.write().await;
+                            cache.insert(address.to_string(), index);
+                        }
+                        
+                        return Ok(Some(wallet));
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to create wallet at derivation index {}: {}", index, e);
+                    // Continue searching - derivation errors at specific indices don't necessarily
+                    // mean the wallet doesn't exist at a higher index
+                }
+            }
+        }
+
+        // If we reach here, the wallet was not found within the search bounds
+        warn!("Could not find wallet for address {} within derivation index range 0-{}", address, max_index);
         Ok(None)
     }
 
@@ -763,6 +855,12 @@ impl McpSdkAdapter {
 
         // Clear caches
         self.cache_clear().await;
+
+        // Clear wallet derivation cache
+        {
+            let mut derivation_cache = self.wallet_derivation_cache.write().await;
+            derivation_cache.clear();
+        }
 
         // Clear connection pools
         {
@@ -2534,6 +2632,7 @@ mod tests {
             retry_base_delay_ms: 200,
             max_idle_time_secs: 120,
             health_check_interval_secs: 45,
+            max_wallet_derivation_index: 100,
         };
 
         let adapter = McpSdkAdapter::new(config.clone());
