@@ -4116,22 +4116,8 @@ async fn handle_jsonrpc_request(
 
     // Convert HTTP JSON-RPC to MCP format and process
     let response = match process_mcp_request(&server, &request).await {
-        Ok(result) => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            result: Some(result),
-            error: None,
-            id: request.id.clone(),
-        },
-        Err(error) => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            result: None,
-            error: Some(JsonRpcError {
-                code: error.to_json_rpc_error_code(),
-                message: error.to_string(),
-                data: None,
-            }),
-            id: request.id.clone(),
-        },
+        Ok(result) => JsonRpcResponse::success(request.id.clone(), result),
+        Err(error) => JsonRpcResponse::error(request.id.clone(), error.to_json_rpc_error()),
     };
 
     debug!("HTTP JSON-RPC response: {:?}", response);
