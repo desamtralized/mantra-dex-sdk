@@ -4295,7 +4295,7 @@ impl MantraDexMcpServer {
         }
         
         // Check file extension for allowed script types
-        let allowed_extensions = ["txt", "json", "yaml", "yml", "toml"];
+        let allowed_extensions = ["txt", "json", "yaml", "yml", "toml", "md", "markdown"];
         let extension = canonical_path.extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.to_lowercase());

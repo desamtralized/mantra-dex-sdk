@@ -128,6 +128,18 @@ pub struct ScriptParser;
 impl ScriptParser {
     /// Parse a markdown script file
     pub fn parse_file<P: AsRef<Path>>(path: P) -> Result<TestScript, ScriptParseError> {
+        // Check file size before reading to prevent DoS attacks
+        const MAX_SCRIPT_FILE_SIZE: u64 = 1024 * 1024; // 1MB limit
+        
+        let metadata = fs::metadata(&path)?;
+        if metadata.len() > MAX_SCRIPT_FILE_SIZE {
+            return Err(ScriptParseError::InvalidFormat(format!(
+                "Script file is too large: {} bytes (max: {} bytes)",
+                metadata.len(),
+                MAX_SCRIPT_FILE_SIZE
+            )));
+        }
+        
         let content = fs::read_to_string(path)?;
         Self::parse_content(&content)
     }
@@ -683,8 +695,9 @@ impl ScriptParser {
         Ok((tx_hash, timeout))
     }
 
-    /// Validate parsed script
+    /// Basic validation for parsed script (called during parsing)
     fn validate_script(script: &TestScript) -> Result<(), ScriptParseError> {
+        // Basic structural validation only
         if script.name.is_empty() {
             return Err(ScriptParseError::MissingSection("name".to_string()));
         }
@@ -693,11 +706,199 @@ impl ScriptParser {
             return Err(ScriptParseError::MissingSection("steps".to_string()));
         }
 
-        // Validate network
+        // Script size validation to prevent DoS attacks (basic check only)
+        const MAX_SCRIPT_SIZE: usize = 100; // Maximum number of steps
+        const MAX_NAME_LENGTH: usize = 200;
+        const MAX_DESCRIPTION_LENGTH: usize = 1000;
+        
+        if script.steps.len() > MAX_SCRIPT_SIZE {
+            return Err(ScriptParseError::InvalidFormat(format!(
+                "Script has too many steps: {} (max: {})",
+                script.steps.len(),
+                MAX_SCRIPT_SIZE
+            )));
+        }
+        
+        if script.name.len() > MAX_NAME_LENGTH {
+            return Err(ScriptParseError::InvalidFormat(format!(
+                "Script name is too long: {} characters (max: {})",
+                script.name.len(),
+                MAX_NAME_LENGTH
+            )));
+        }
+        
+        if let Some(desc) = &script.description {
+            if desc.len() > MAX_DESCRIPTION_LENGTH {
+                return Err(ScriptParseError::InvalidFormat(format!(
+                    "Script description is too long: {} characters (max: {})",
+                    desc.len(),
+                    MAX_DESCRIPTION_LENGTH
+                )));
+            }
+        }
+
+        // Basic network validation - just check it's not empty
         if script.setup.network.is_empty() {
             return Err(ScriptParseError::InvalidFormat(
                 "Network must be specified".to_string(),
             ));
+        }
+
+        Ok(())
+    }
+
+    /// Comprehensive validation for script execution (call before executing)
+    pub fn validate_script_for_execution(script: &TestScript) -> Result<(), ScriptParseError> {
+        // First run basic validation
+        Self::validate_script(script)?;
+
+        // Validate network name against allowed values
+        let valid_networks = ["mantra-dukong", "mantra-hongbai", "mantra-mainnet", "testnet", "mainnet"];
+        if !valid_networks.contains(&script.setup.network.as_str()) {
+            return Err(ScriptParseError::InvalidFormat(format!(
+                "Invalid network '{}'. Valid networks: {:?}",
+                script.setup.network,
+                valid_networks
+            )));
+        }
+
+        // Validate setup parameters
+        for (key, value) in &script.setup.parameters {
+            if value.trim().is_empty() {
+                return Err(ScriptParseError::InvalidFormat(format!(
+                    "Setup parameter '{}' cannot be empty",
+                    key
+                )));
+            }
+            
+            // Validate timeout parameters
+            if key.contains("timeout") {
+                if let Ok(timeout_val) = value.parse::<u64>() {
+                    if timeout_val == 0 || timeout_val > 300 {
+                        return Err(ScriptParseError::InvalidFormat(format!(
+                            "Timeout parameter '{}' must be between 1 and 300 seconds, got: {}",
+                            key,
+                            timeout_val
+                        )));
+                    }
+                } else {
+                    return Err(ScriptParseError::InvalidFormat(format!(
+                        "Timeout parameter '{}' must be a valid number",
+                        key
+                    )));
+                }
+            }
+        }
+
+        // Validate each step comprehensively
+        for (index, step) in script.steps.iter().enumerate() {
+            // Validate step number sequence
+            if step.step_number != index + 1 {
+                return Err(ScriptParseError::InvalidFormat(format!(
+                    "Step number mismatch at position {}: expected {}, got {}",
+                    index + 1,
+                    index + 1,
+                    step.step_number
+                )));
+            }
+            
+            // Validate step description
+            if step.description.trim().is_empty() {
+                return Err(ScriptParseError::InvalidFormat(format!(
+                    "Step {} description cannot be empty",
+                    step.step_number
+                )));
+            }
+            
+            // Validate step parameters
+            for (param_key, param_value) in &step.parameters {
+                if param_value.trim().is_empty() {
+                    return Err(ScriptParseError::InvalidFormat(format!(
+                        "Step {} parameter '{}' cannot be empty",
+                        step.step_number,
+                        param_key
+                    )));
+                }
+                
+                // Validate asset names (should match expected patterns)
+                if param_key.contains("asset") && !param_value.starts_with("ibc/") && !param_value.starts_with("factory/") {
+                    let valid_asset_pattern = regex::Regex::new(r"^[a-zA-Z][a-zA-Z0-9]*$").unwrap();
+                    if !valid_asset_pattern.is_match(param_value) {
+                        return Err(ScriptParseError::InvalidFormat(format!(
+                            "Step {} asset parameter '{}' has invalid format: '{}'. Assets should start with a letter and contain only alphanumeric characters, or be IBC/factory tokens",
+                            step.step_number,
+                            param_key,
+                            param_value
+                        )));
+                    }
+                }
+                
+                // Validate amount parameters (should be numeric)
+                if param_key.contains("amount") {
+                    if param_value.parse::<f64>().is_err() {
+                        return Err(ScriptParseError::InvalidFormat(format!(
+                            "Step {} amount parameter '{}' must be a valid number: '{}'",
+                            step.step_number,
+                            param_key,
+                            param_value
+                        )));
+                    }
+                }
+                
+                // Validate slippage tolerance
+                if param_key.contains("slippage") {
+                    if let Ok(slippage_val) = param_value.parse::<f64>() {
+                        if slippage_val < 0.0 || slippage_val > 100.0 {
+                            return Err(ScriptParseError::InvalidFormat(format!(
+                                "Step {} slippage parameter '{}' must be between 0 and 100: '{}'",
+                                step.step_number,
+                                param_key,
+                                param_value
+                            )));
+                        }
+                    } else {
+                        return Err(ScriptParseError::InvalidFormat(format!(
+                            "Step {} slippage parameter '{}' must be a valid number: '{}'",
+                            step.step_number,
+                            param_key,
+                            param_value
+                        )));
+                    }
+                }
+                
+                // Validate timeout parameters
+                if param_key.contains("timeout") {
+                    if let Ok(timeout_val) = param_value.parse::<u64>() {
+                        if timeout_val == 0 || timeout_val > 300 {
+                            return Err(ScriptParseError::InvalidFormat(format!(
+                                "Step {} timeout parameter '{}' must be between 1 and 300 seconds: '{}'",
+                                step.step_number,
+                                param_key,
+                                param_value
+                            )));
+                        }
+                    } else {
+                        return Err(ScriptParseError::InvalidFormat(format!(
+                            "Step {} timeout parameter '{}' must be a valid number: '{}'",
+                            step.step_number,
+                            param_key,
+                            param_value
+                        )));
+                    }
+                }
+                
+                // Validate wallet addresses (should start with expected prefix)
+                if param_key.contains("address") || param_key.contains("wallet") {
+                    if !param_value.starts_with("mantra") && !param_value.is_empty() {
+                        return Err(ScriptParseError::InvalidFormat(format!(
+                            "Step {} address parameter '{}' should be a valid Mantra address (starts with 'mantra'): '{}'",
+                            step.step_number,
+                            param_key,
+                            param_value
+                        )));
+                    }
+                }
+            }
         }
 
         Ok(())

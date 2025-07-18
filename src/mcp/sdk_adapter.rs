@@ -1398,6 +1398,9 @@ impl McpSdkAdapter {
         }
         let args = Value::Object(json_params);
 
+        // Validate parameters before tool execution
+        Self::validate_tool_parameters(tool_name, parameters)?;
+
         // Route to appropriate tool based on tool_name
         match tool_name {
             "get_balances" => {
@@ -2577,6 +2580,155 @@ impl McpSdkAdapter {
             "timestamp": chrono::Utc::now().to_rfc3339(),
             "events": create_result.events
         }))
+    }
+
+    /// Validate tool parameters before execution
+    fn validate_tool_parameters(
+        tool_name: &str,
+        parameters: &HashMap<String, String>,
+    ) -> McpResult<()> {
+        match tool_name {
+            "get_pool" => {
+                if let Some(pool_id) = parameters.get("pool_id") {
+                    if pool_id.trim().is_empty() {
+                        return Err(McpServerError::InvalidArguments(
+                            "pool_id cannot be empty".to_string(),
+                        ));
+                    }
+                } else {
+                    return Err(McpServerError::InvalidArguments(
+                        "pool_id parameter is required".to_string(),
+                    ));
+                }
+            }
+            "monitor_transaction" => {
+                if let Some(tx_hash) = parameters.get("tx_hash") {
+                    if tx_hash.trim().is_empty() {
+                        return Err(McpServerError::InvalidArguments(
+                            "tx_hash cannot be empty".to_string(),
+                        ));
+                    }
+                    // Validate tx_hash format (should be hex)
+                    if !tx_hash.chars().all(|c| c.is_ascii_hexdigit() || c.is_ascii_uppercase()) {
+                        return Err(McpServerError::InvalidArguments(
+                            "tx_hash must contain only hexadecimal characters".to_string(),
+                        ));
+                    }
+                } else {
+                    return Err(McpServerError::InvalidArguments(
+                        "tx_hash parameter is required".to_string(),
+                    ));
+                }
+                
+                // Validate timeout if present
+                if let Some(timeout) = parameters.get("timeout") {
+                    if let Ok(timeout_val) = timeout.parse::<u64>() {
+                        if timeout_val == 0 || timeout_val > 300 {
+                            return Err(McpServerError::InvalidArguments(
+                                "timeout must be between 1 and 300 seconds".to_string(),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            "timeout must be a valid number".to_string(),
+                        ));
+                    }
+                }
+            }
+            "get_balances" => {
+                // Validate wallet_address if present
+                if let Some(wallet_addr) = parameters.get("wallet_address") {
+                    if !wallet_addr.trim().is_empty() && !wallet_addr.starts_with("mantra") {
+                        return Err(McpServerError::InvalidArguments(
+                            "wallet_address must be a valid Mantra address (starts with 'mantra')".to_string(),
+                        ));
+                    }
+                }
+            }
+            "swap" | "execute_swap" => {
+                // Validate required swap parameters
+                for required_param in &["asset_in", "asset_out", "amount_in"] {
+                    if let Some(value) = parameters.get(*required_param) {
+                        if value.trim().is_empty() {
+                            return Err(McpServerError::InvalidArguments(
+                                format!("{} cannot be empty", required_param),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            format!("{} parameter is required", required_param),
+                        ));
+                    }
+                }
+                
+                // Validate amount_in is numeric
+                if let Some(amount) = parameters.get("amount_in") {
+                    if amount.parse::<f64>().is_err() {
+                        return Err(McpServerError::InvalidArguments(
+                            "amount_in must be a valid number".to_string(),
+                        ));
+                    }
+                }
+                
+                // Validate slippage_tolerance if present
+                if let Some(slippage) = parameters.get("slippage_tolerance") {
+                    if let Ok(slippage_val) = slippage.parse::<f64>() {
+                        if slippage_val < 0.0 || slippage_val > 100.0 {
+                            return Err(McpServerError::InvalidArguments(
+                                "slippage_tolerance must be between 0 and 100".to_string(),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            "slippage_tolerance must be a valid number".to_string(),
+                        ));
+                    }
+                }
+            }
+            "provide_liquidity" | "withdraw_liquidity" => {
+                // Validate required liquidity parameters
+                for required_param in &["pool_id", "amount"] {
+                    if let Some(value) = parameters.get(*required_param) {
+                        if value.trim().is_empty() {
+                            return Err(McpServerError::InvalidArguments(
+                                format!("{} cannot be empty", required_param),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            format!("{} parameter is required", required_param),
+                        ));
+                    }
+                }
+            }
+            "create_pool" => {
+                // Validate required pool creation parameters
+                for required_param in &["asset_a", "asset_b", "amount_a", "amount_b"] {
+                    if let Some(value) = parameters.get(*required_param) {
+                        if value.trim().is_empty() {
+                            return Err(McpServerError::InvalidArguments(
+                                format!("{} cannot be empty", required_param),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            format!("{} parameter is required", required_param),
+                        ));
+                    }
+                }
+            }
+            _ => {
+                // For other tools, perform basic validation
+                for (key, value) in parameters {
+                    if value.trim().is_empty() {
+                        return Err(McpServerError::InvalidArguments(
+                            format!("Parameter '{}' cannot be empty", key),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
