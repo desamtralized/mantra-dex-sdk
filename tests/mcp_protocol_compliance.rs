@@ -892,9 +892,11 @@ async fn test_protocol_version_enforcement() {
 #[cfg(test)]
 mod integration_tests {
     use super::*;
+    #[cfg(feature = "mcp")]
     use mantra_dex_sdk::mcp::server::McpServerError;
     
     #[tokio::test]
+    #[cfg(feature = "mcp")]
     async fn test_mcp_server_error_serialization() {
         // Test that McpServerError can be properly serialized into JSON-RPC errors
         let server_errors = vec![

@@ -913,8 +913,28 @@ impl McpSdkAdapter {
         let offer_amount = Uint128::from_str(&amount)
             .map_err(|e| McpServerError::InvalidArguments(format!("Invalid amount: {}", e)))?;
 
-        // Parse slippage
-        let max_slippage = Decimal::from_str(&slippage).ok();
+        // Parse slippage with explicit error handling and validation
+        let max_slippage = match Decimal::from_str(&slippage) {
+            Ok(slippage_value) => {
+                // Validate slippage range (0.0 to 1.0)
+                if slippage_value < Decimal::zero() {
+                    return Err(McpServerError::InvalidArguments(
+                        format!("Invalid slippage: {} - slippage cannot be negative", slippage_value)
+                    ));
+                }
+                if slippage_value > Decimal::one() {
+                    return Err(McpServerError::InvalidArguments(
+                        format!("Invalid slippage: {} - slippage cannot be greater than 1.0 (100%)", slippage_value)
+                    ));
+                }
+                Some(slippage_value)
+            }
+            Err(e) => {
+                return Err(McpServerError::InvalidArguments(
+                    format!("Invalid slippage format: '{}' - {}", slippage, e)
+                ));
+            }
+        };
 
         // Create offer coin
         let offer_coin = Coin {

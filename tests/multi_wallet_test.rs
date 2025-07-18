@@ -1,7 +1,10 @@
+#[cfg(feature = "mcp")]
 use mantra_dex_sdk::mcp::sdk_adapter::McpSdkAdapter;
+#[cfg(feature = "mcp")]
 use mantra_dex_sdk::wallet::MantraWallet;
 
 #[tokio::test]
+#[cfg(feature = "mcp")]
 async fn test_multi_wallet_management() {
     let adapter = McpSdkAdapter::default();
     
@@ -71,6 +74,7 @@ async fn test_multi_wallet_management() {
 }
 
 #[tokio::test]
+#[cfg(feature = "mcp")]
 async fn test_multi_wallet_error_handling() {
     let adapter = McpSdkAdapter::default();
     
@@ -90,7 +94,8 @@ async fn test_multi_wallet_error_handling() {
     assert!(!adapter.wallet_exists("invalid_address").await);
 }
 
-#[tokio::test]  
+#[tokio::test]
+#[cfg(feature = "mcp")]
 async fn test_wallet_recreation_from_mnemonic() {
     let adapter = McpSdkAdapter::default();
     
