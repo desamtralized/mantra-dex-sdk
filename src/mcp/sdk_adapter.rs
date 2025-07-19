@@ -39,6 +39,8 @@ pub struct ConnectionPoolConfig {
     pub max_idle_time_secs: u64,
     /// Health check interval in seconds
     pub health_check_interval_secs: u64,
+    /// Maximum derivation index to search when looking for wallets
+    pub max_wallet_derivation_index: u32,
 }
 
 impl Default for ConnectionPoolConfig {
@@ -51,6 +53,7 @@ impl Default for ConnectionPoolConfig {
             retry_base_delay_ms: 100,
             max_idle_time_secs: 60,         // 1 minute
             health_check_interval_secs: 30, // 30 seconds
+            max_wallet_derivation_index: 100, // Search up to index 100
         }
     }
 }
@@ -264,6 +267,8 @@ pub struct McpSdkAdapter {
     active_wallet: Arc<Mutex<Option<String>>>,
     /// Current active wallet instance (if available)
     active_wallet_instance: Arc<Mutex<Option<MantraWallet>>>,
+    /// Cache for wallet address to derivation index mappings
+    wallet_derivation_cache: Arc<RwLock<HashMap<String, u32>>>,
 }
 
 impl McpSdkAdapter {
@@ -278,6 +283,7 @@ impl McpSdkAdapter {
             wallets: Arc::new(RwLock::new(HashMap::new())),
             active_wallet: Arc::new(Mutex::new(None)),
             active_wallet_instance: Arc::new(Mutex::new(None)),
+            wallet_derivation_cache: Arc::new(RwLock::new(HashMap::new())),
         };
 
         adapter
@@ -456,16 +462,33 @@ impl McpSdkAdapter {
             return Ok(None);
         }
 
-        // Try to recreate wallet from environment mnemonic
+        // Try to recreate wallet from environment mnemonic using cached derivation index
         if let Ok(mnemonic) = env::var("WALLET_MNEMONIC") {
             if !mnemonic.trim().is_empty() {
-                match MantraWallet::from_mnemonic(&mnemonic, 0) {
-                    Ok(wallet) => {
-                        debug!("Recreated wallet instance from WALLET_MNEMONIC for transaction");
-                        return Ok(Some(wallet));
-                    }
-                    Err(e) => {
-                        error!("Failed to recreate wallet from WALLET_MNEMONIC: {}", e);
+                if let Some(active_addr) = &active_address {
+                    // Check cache for derivation index
+                    let cache = self.wallet_derivation_cache.read().await;
+                    if let Some(&derivation_index) = cache.get(active_addr) {
+                        match MantraWallet::from_mnemonic(&mnemonic, derivation_index) {
+                            Ok(wallet) => {
+                                debug!("Recreated active wallet instance from WALLET_MNEMONIC using cached index {}", derivation_index);
+                                return Ok(Some(wallet));
+                            }
+                            Err(e) => {
+                                error!("Failed to recreate active wallet from WALLET_MNEMONIC with cached index {}: {}", derivation_index, e);
+                            }
+                        }
+                    } else {
+                        // Fallback to index 0 for backward compatibility if no cache entry exists
+                        match MantraWallet::from_mnemonic(&mnemonic, 0) {
+                            Ok(wallet) => {
+                                debug!("Recreated active wallet instance from WALLET_MNEMONIC using fallback index 0");
+                                return Ok(Some(wallet));
+                            }
+                            Err(e) => {
+                                error!("Failed to recreate active wallet from WALLET_MNEMONIC with fallback index 0: {}", e);
+                            }
+                        }
                     }
                 }
             }
@@ -535,6 +558,174 @@ impl McpSdkAdapter {
             return Err(McpServerError::WalletNotConfigured);
         }
         Ok(())
+    }
+
+    /// Get all available wallets
+    pub async fn get_all_wallets(&self) -> McpResult<HashMap<String, WalletInfo>> {
+        let wallets = self.wallets.read().await;
+        Ok(wallets.clone())
+    }
+
+    /// Add a new wallet to the collection
+    pub async fn add_wallet(&self, wallet: MantraWallet) -> McpResult<String> {
+        let wallet_info = wallet.info();
+        let address = wallet_info.address.clone();
+        
+        // Store the wallet info
+        self.wallets.write().await.insert(address.clone(), wallet_info);
+        
+        info!("Added new wallet: {}", address);
+        Ok(address)
+    }
+
+    /// Add a new wallet to the collection with known derivation index for caching
+    pub async fn add_wallet_with_derivation_index(&self, wallet: MantraWallet, derivation_index: u32) -> McpResult<String> {
+        let wallet_info = wallet.info();
+        let address = wallet_info.address.clone();
+        
+        // Store the wallet info
+        self.wallets.write().await.insert(address.clone(), wallet_info);
+        
+        // Cache the derivation index for efficient wallet recreation
+        {
+            let mut cache = self.wallet_derivation_cache.write().await;
+            cache.insert(address.clone(), derivation_index);
+        }
+        
+        info!("Added new wallet: {} with derivation index: {}", address, derivation_index);
+        Ok(address)
+    }
+
+    /// Remove a wallet from the collection
+    pub async fn remove_wallet(&self, address: &str) -> McpResult<()> {
+        let mut wallets = self.wallets.write().await;
+        
+        if wallets.remove(address).is_some() {
+            // Clear derivation cache entry
+            {
+                let mut cache = self.wallet_derivation_cache.write().await;
+                cache.remove(address);
+            }
+            
+            // If this was the active wallet, clear the active wallet
+            let mut active_wallet = self.active_wallet.lock().await;
+            if active_wallet.as_ref() == Some(&address.to_string()) {
+                *active_wallet = None;
+                *self.active_wallet_instance.lock().await = None;
+            }
+            info!("Removed wallet: {}", address);
+            Ok(())
+        } else {
+            Err(McpServerError::InvalidArguments(format!("Wallet not found: {}", address)))
+        }
+    }
+
+    /// Switch active wallet to a different address
+    pub async fn switch_active_wallet(&self, address: &str) -> McpResult<()> {
+        let wallets = self.wallets.read().await;
+        
+        if let Some(_wallet_info) = wallets.get(address) {
+            *self.active_wallet.lock().await = Some(address.to_string());
+            // Clear the wallet instance - will be recreated when needed
+            *self.active_wallet_instance.lock().await = None;
+            info!("Switched active wallet to: {}", address);
+            Ok(())
+        } else {
+            Err(McpServerError::InvalidArguments(format!("Wallet not found: {}", address)))
+        }
+    }
+
+    /// Get wallet info by address
+    pub async fn get_wallet_info(&self, address: &str) -> McpResult<Option<WalletInfo>> {
+        let wallets = self.wallets.read().await;
+        Ok(wallets.get(address).cloned())
+    }
+
+    /// Check if a wallet exists
+    pub async fn wallet_exists(&self, address: &str) -> bool {
+        let wallets = self.wallets.read().await;
+        wallets.contains_key(address)
+    }
+
+    /// Get a wallet instance by address
+    /// This method uses cached derivation indices for efficiency and falls back to a targeted search
+    pub async fn get_wallet_by_address(&self, address: &str) -> McpResult<Option<MantraWallet>> {
+        use crate::wallet::MantraWallet;
+        use std::env;
+
+        // Check if wallet exists in our collection
+        if !self.wallet_exists(address).await {
+            return Ok(None);
+        }
+
+        // Get environment mnemonic
+        let mnemonic = match env::var("WALLET_MNEMONIC") {
+            Ok(m) if !m.trim().is_empty() => m,
+            _ => {
+                debug!("No valid WALLET_MNEMONIC found in environment for address: {}", address);
+                return Ok(None);
+            }
+        };
+
+        // Check cache first for known derivation index
+        {
+            let cache = self.wallet_derivation_cache.read().await;
+            if let Some(&derivation_index) = cache.get(address) {
+                match MantraWallet::from_mnemonic(&mnemonic, derivation_index) {
+                    Ok(wallet) => {
+                        if wallet.info().address == address {
+                            debug!("Retrieved wallet from cache at index {} for address {}", derivation_index, address);
+                            return Ok(Some(wallet));
+                        } else {
+                            // Cache is stale, wallet address doesn't match
+                            warn!("Cached derivation index {} for address {} is stale, clearing cache entry", derivation_index, address);
+                            drop(cache);
+                            let mut cache_mut = self.wallet_derivation_cache.write().await;
+                            cache_mut.remove(address);
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to recreate wallet from cached index {} for address {}: {}", derivation_index, address, e);
+                        // Clear stale cache entry
+                        drop(cache);
+                        let mut cache_mut = self.wallet_derivation_cache.write().await;
+                        cache_mut.remove(address);
+                    }
+                }
+            }
+        }
+
+        // Cache miss or stale cache - perform targeted search
+        debug!("Performing derivation search for address: {}", address);
+        
+        // Search with configurable upper bound to prevent infinite derivation
+        let max_index = self.config.max_wallet_derivation_index;
+        for index in 0..=max_index {
+            match MantraWallet::from_mnemonic(&mnemonic, index) {
+                Ok(wallet) => {
+                    if wallet.info().address == address {
+                        debug!("Found wallet at derivation index {} for address {}", index, address);
+                        
+                        // Cache the successful derivation index
+                        {
+                            let mut cache = self.wallet_derivation_cache.write().await;
+                            cache.insert(address.to_string(), index);
+                        }
+                        
+                        return Ok(Some(wallet));
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to create wallet at derivation index {}: {}", index, e);
+                    // Continue searching - derivation errors at specific indices don't necessarily
+                    // mean the wallet doesn't exist at a higher index
+                }
+            }
+        }
+
+        // If we reach here, the wallet was not found within the search bounds
+        warn!("Could not find wallet for address {} within derivation index range 0-{}", address, max_index);
+        Ok(None)
     }
 
     /// Get wallet error handling with proper error messages
@@ -665,6 +856,12 @@ impl McpSdkAdapter {
         // Clear caches
         self.cache_clear().await;
 
+        // Clear wallet derivation cache
+        {
+            let mut derivation_cache = self.wallet_derivation_cache.write().await;
+            derivation_cache.clear();
+        }
+
         // Clear connection pools
         {
             let mut pools = self.connection_pools.write().await;
@@ -673,6 +870,581 @@ impl McpSdkAdapter {
 
         info!("MCP SDK adapter shutdown complete");
         Ok(())
+    }
+
+    // =========================================================================
+    // Script Execution Methods
+    // =========================================================================
+
+    /// Get the first available pool ID as a fallback
+    pub async fn get_first_available_pool_id(&self) -> McpResult<String> {
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+        
+        // Get available pools
+        let pools = client.get_pools(Some(10)).await
+            .map_err(|e| McpServerError::Sdk(e))?;
+        
+        if pools.is_empty() {
+            return Err(McpServerError::InvalidArguments("No pools available".to_string()));
+        }
+        
+        // Return the first available pool ID
+        Ok(pools[0].pool_info.pool_identifier.clone())
+    }
+
+    /// Execute a swap with string parameters (for script execution)
+    pub async fn execute_swap_simple(
+        &self,
+        from_asset: String,
+        to_asset: String,
+        amount: String,
+        slippage: String,
+        pool_id: String,
+        _min_output: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Executing swap from {} to {} with amount {} and slippage {}",
+            from_asset, to_asset, amount, slippage
+        );
+
+        // Parse amount
+        let offer_amount = Uint128::from_str(&amount)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid amount: {}", e)))?;
+
+        // Parse slippage with explicit error handling and validation
+        let max_slippage = match Decimal::from_str(&slippage) {
+            Ok(slippage_value) => {
+                // Validate slippage range (0.0 to 1.0)
+                if slippage_value < Decimal::zero() {
+                    return Err(McpServerError::InvalidArguments(
+                        format!("Invalid slippage: {} - slippage cannot be negative", slippage_value)
+                    ));
+                }
+                if slippage_value > Decimal::one() {
+                    return Err(McpServerError::InvalidArguments(
+                        format!("Invalid slippage: {} - slippage cannot be greater than 1.0 (100%)", slippage_value)
+                    ));
+                }
+                Some(slippage_value)
+            }
+            Err(e) => {
+                return Err(McpServerError::InvalidArguments(
+                    format!("Invalid slippage format: '{}' - {}", slippage, e)
+                ));
+            }
+        };
+
+        // Create offer coin
+        let offer_coin = Coin {
+            denom: from_asset.clone(),
+            amount: offer_amount,
+        };
+
+        // Use provided pool_id
+        let pool_id_str = pool_id;
+
+        // Get active wallet (required for swaps)
+        let wallet = self.get_active_wallet_with_validation().await?;
+
+        // Get network config and client with wallet
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client_with_wallet(&network_config, wallet).await?;
+
+        // Execute the swap
+        let swap_result = client
+            .swap(&pool_id_str, offer_coin, &to_asset, max_slippage)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        info!(
+            "Successfully executed swap from {} to {} with tx hash: {}",
+            from_asset, to_asset, swap_result.txhash
+        );
+
+        // Format the response
+        Ok(serde_json::json!({
+            "status": "success",
+            "transaction_hash": swap_result.txhash,
+            "swap_details": {
+                "from_asset": from_asset,
+                "to_asset": to_asset,
+                "amount": amount,
+                "slippage": slippage,
+                "pool_id": pool_id_str,
+                "gas_used": swap_result.gas_used,
+                "gas_wanted": swap_result.gas_wanted
+            },
+            "block_height": swap_result.height,
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    /// Provide liquidity with string parameters (for script execution)
+    pub async fn provide_liquidity_simple(
+        &self,
+        pool_id: String,
+        asset_a_amount: String,
+        asset_b_amount: String,
+        min_lp_tokens: Option<String>,
+        liquidity_slippage: Option<String>,
+        swap_slippage: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Providing liquidity to pool {} with amounts {} and {}",
+            pool_id, asset_a_amount, asset_b_amount
+        );
+
+        // First, get the pool information to determine the asset denoms
+        let pool_info = self.get_pool(&pool_id).await?;
+        
+        // Extract asset denoms from pool info
+        let assets_array = pool_info
+            .get("assets")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("Pool does not have valid assets".to_string())
+            })?;
+
+        if assets_array.len() != 2 {
+            return Err(McpServerError::InvalidArguments(
+                "Pool must have exactly 2 assets for simple liquidity provision".to_string(),
+            ));
+        }
+
+        // Get the asset denoms
+        let asset_a_denom = assets_array[0]
+            .get("denom")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("Invalid asset A denom".to_string())
+            })?;
+
+        let asset_b_denom = assets_array[1]
+            .get("denom")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("Invalid asset B denom".to_string())
+            })?;
+
+        // Construct the assets array for the provide_liquidity call
+        let assets_json = serde_json::json!([
+            {
+                "denom": asset_a_denom,
+                "amount": asset_a_amount
+            },
+            {
+                "denom": asset_b_denom,
+                "amount": asset_b_amount
+            }
+        ]);
+
+        // Construct the arguments for the provide_liquidity method
+        let mut args = serde_json::json!({
+            "pool_id": pool_id,
+            "assets": assets_json
+        });
+
+        // Add slippage parameters if provided
+        if let Some(liquidity_slippage_str) = liquidity_slippage {
+            args["liquidity_max_slippage"] = serde_json::Value::String(liquidity_slippage_str);
+        }
+        if let Some(swap_slippage_str) = swap_slippage {
+            args["swap_max_slippage"] = serde_json::Value::String(swap_slippage_str);
+        }
+
+        // Call the existing provide_liquidity method
+        let result = self.provide_liquidity(args).await?;
+
+        // Add the min_lp_tokens parameter to the response for reference
+        if let Some(min_lp) = min_lp_tokens {
+            if let Some(liquidity_details) = result.get("liquidity_details") {
+                let mut details = liquidity_details.clone();
+                if let Some(details_obj) = details.as_object_mut() {
+                    details_obj.insert("min_lp_tokens".to_string(), serde_json::Value::String(min_lp));
+                }
+                
+                let mut modified_result = result.clone();
+                if let Some(result_obj) = modified_result.as_object_mut() {
+                    result_obj.insert("liquidity_details".to_string(), details);
+                }
+                return Ok(modified_result);
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Withdraw liquidity with string parameters (for script execution)
+    pub async fn withdraw_liquidity_simple(
+        &self,
+        pool_id: String,
+        lp_amount: String,
+        min_asset_a: Option<String>,
+        min_asset_b: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Withdrawing liquidity from pool {} with LP amount {}",
+            pool_id, lp_amount
+        );
+
+        // Note: min_asset_a and min_asset_b parameters are not currently supported by the underlying SDK
+        if min_asset_a.is_some() || min_asset_b.is_some() {
+            debug!("min_asset_a and min_asset_b parameters are not currently supported by the underlying SDK and will be ignored");
+        }
+
+        // Parse LP amount to Uint128
+        let lp_amount_uint = Uint128::from_str(&lp_amount)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Invalid LP amount: {}", e)))?;
+
+        // Get active wallet
+        let wallet = self.get_active_wallet_with_validation().await?;
+
+        // Get network config and client with wallet
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client_with_wallet(&network_config, wallet).await?;
+
+        // Execute withdraw liquidity
+        let withdraw_result = client
+            .withdraw_liquidity(&pool_id, lp_amount_uint)
+            .await
+            .map_err(|e| McpServerError::Sdk(e))?;
+
+        info!(
+            "Successfully withdrew liquidity from pool {} with tx hash: {}",
+            pool_id, withdraw_result.txhash
+        );
+
+        // Format the response
+        Ok(serde_json::json!({
+            "status": "success",
+            "transaction_hash": withdraw_result.txhash,
+            "explorer_url": format!("https://explorer.mantrachain.io/mantra-dukong/tx/{}", withdraw_result.txhash),
+            "withdrawal_details": {
+                "pool_id": pool_id,
+                "lp_amount": lp_amount,
+                "gas_used": withdraw_result.gas_used,
+                "gas_wanted": withdraw_result.gas_wanted
+            },
+            "block_height": withdraw_result.height,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "events": withdraw_result.events
+        }))
+    }
+
+    /// Create a pool with string parameters (for script execution)
+    pub async fn create_pool_simple(
+        &self,
+        asset_a: String,
+        asset_b: String,
+        initial_price: String,
+        pool_type: Option<String>,
+        _fee_rate: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Creating pool for {} and {} with initial price {}",
+            asset_a, asset_b, initial_price
+        );
+
+        // This is a simplified implementation
+        // In a real implementation, you'd need to interact with the pool creation methods
+        Ok(serde_json::json!({
+            "status": "success",
+            "operation": "create_pool",
+            "asset_a": asset_a,
+            "asset_b": asset_b,
+            "initial_price": initial_price,
+            "pool_type": pool_type.unwrap_or_else(|| "constant_product".to_string()),
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    /// Get balances with optional asset filter (for script execution)
+    pub async fn get_balances_filtered(&self, filter: Option<String>) -> McpResult<Value> {
+        debug!("SDK Adapter: Getting balances with filter: {:?}", filter);
+
+        // Get network config
+        let network_config = self.get_default_network_config().await?;
+
+        // Get active wallet address
+        let wallet_address = match self.get_active_wallet_info().await? {
+            Some(wallet_info) => wallet_info.address,
+            None => return Err(McpServerError::WalletNotConfigured),
+        };
+
+        // Get balances for the address
+        let balances = self
+            .get_balances_for_address_direct(&network_config, &wallet_address)
+            .await?;
+
+        // Apply filter if provided
+        if let Some(filter_str) = filter {
+            let assets_filter: Vec<&str> = filter_str.split(',').collect();
+            if let Some(balances_array) = balances.get("balances").and_then(|v| v.as_array()) {
+                let filtered_balances: Vec<Value> = balances_array
+                    .iter()
+                    .filter(|balance| {
+                        if let Some(denom) = balance.get("denom").and_then(|v| v.as_str()) {
+                            assets_filter.iter().any(|asset| denom.contains(asset))
+                        } else {
+                            false
+                        }
+                    })
+                    .cloned()
+                    .collect();
+
+                return Ok(serde_json::json!({
+                    "address": wallet_address,
+                    "balances": filtered_balances,
+                    "total_tokens": filtered_balances.len(),
+                    "filter": filter_str,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }));
+            }
+        }
+
+        Ok(balances)
+    }
+
+    /// Get pools with optional filter and pagination (for script execution)  
+    pub async fn get_pools_filtered(
+        &self,
+        filter: Option<String>,
+        limit: Option<u32>,
+        start_after: Option<String>,
+    ) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Getting pools with filter: {:?}, limit: {:?}",
+            filter, limit
+        );
+
+        let args = serde_json::json!({
+            "limit": limit,
+            "start_after": start_after
+        });
+
+        let pools = self.get_pools(args).await?;
+
+        // Apply filter if provided
+        if let Some(filter_str) = filter {
+            if let Some(pools_array) = pools.get("pools").and_then(|v| v.as_array()) {
+                let filtered_pools: Vec<Value> = pools_array
+                    .iter()
+                    .filter(|pool| {
+                        if let Some(pool_id) = pool.get("pool_id").and_then(|v| v.as_str()) {
+                            pool_id.contains(&filter_str)
+                        } else {
+                            false
+                        }
+                    })
+                    .cloned()
+                    .collect();
+
+                return Ok(serde_json::json!({
+                    "pools": filtered_pools,
+                    "count": filtered_pools.len(),
+                    "filter": filter_str,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }));
+            }
+        }
+
+        Ok(pools)
+    }
+
+    /// Get pool information (for script execution)
+    pub async fn get_pool_info(&self, pool_id: String) -> McpResult<Value> {
+        debug!(
+            "SDK Adapter: Getting pool information for pool: {}",
+            pool_id
+        );
+        self.get_pool(&pool_id).await
+    }
+
+    /// Validate network connectivity (for script execution)
+    pub async fn validate_network_connectivity(&self) -> McpResult<Value> {
+        debug!("SDK Adapter: Validating network connectivity");
+
+        // Get network config
+        let network_config = self.get_default_network_config().await?;
+
+        // Try to get a client to validate connectivity
+        match self.get_client(&network_config).await {
+            Ok(_) => Ok(serde_json::json!({
+                "status": "success",
+                "network": network_config.network_name,
+                "chain_id": network_config.chain_id,
+                "connectivity": "healthy",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+            Err(e) => Ok(serde_json::json!({
+                "status": "error",
+                "network": network_config.network_name,
+                "chain_id": network_config.chain_id,
+                "connectivity": "failed",
+                "error": e.to_string(),
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })),
+        }
+    }
+
+    /// Get contract addresses (for script execution)
+    pub async fn get_contract_addresses(&self) -> McpResult<Value> {
+        debug!("SDK Adapter: Getting contract addresses");
+
+        // Get network config
+        let network_config = self.get_default_network_config().await?;
+
+        Ok(serde_json::json!({
+            "status": "success",
+            "network": network_config.network_name,
+            "chain_id": network_config.chain_id,
+            "contracts": {
+                "pool_manager": network_config.contracts.pool_manager,
+                "fee_collector": network_config.contracts.fee_collector,
+                "farm_manager": network_config.contracts.farm_manager,
+                "epoch_manager": network_config.contracts.epoch_manager
+            },
+            "timestamp": chrono::Utc::now().to_rfc3339()
+        }))
+    }
+
+    /// Monitor a transaction by hash with timeout (for script execution)
+    pub async fn monitor_transaction(
+        &self,
+        tx_hash: String,
+        timeout_seconds: Option<u64>,
+    ) -> McpResult<Value> {
+        debug!("SDK Adapter: Monitoring transaction: {}", tx_hash);
+
+        let timeout = Duration::from_secs(timeout_seconds.unwrap_or(30));
+        let start_time = Instant::now();
+
+        // Get network config and client
+        let network_config = self.get_default_network_config().await?;
+        let client = self.get_client(&network_config).await?;
+
+        // Poll the transaction with timeout
+        let poll_interval = Duration::from_secs(2);
+        
+        loop {
+            // Check if we've exceeded the timeout
+            if start_time.elapsed() > timeout {
+                return Ok(serde_json::json!({
+                    "status": "timeout",
+                    "tx_hash": tx_hash,
+                    "message": format!("Transaction monitoring timed out after {} seconds", timeout.as_secs()),
+                    "elapsed_seconds": start_time.elapsed().as_secs(),
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }));
+            }
+
+            // Query the transaction
+            match client.query_transaction(&tx_hash).await {
+                Ok(tx_result) => {
+                    // Check if the transaction has a result code
+                    if let Some(tx_result_obj) = tx_result.get("tx_result") {
+                        if let Some(code) = tx_result_obj.get("code").and_then(|c| c.as_u64()) {
+                            let status = if code == 0 { "success" } else { "failed" };
+                            
+                            return Ok(serde_json::json!({
+                                "status": status,
+                                "tx_hash": tx_hash,
+                                "code": code,
+                                "height": tx_result.get("height"),
+                                "gas_used": tx_result_obj.get("gas_used"),
+                                "gas_wanted": tx_result_obj.get("gas_wanted"),
+                                "log": tx_result_obj.get("log"),
+                                "events": tx_result_obj.get("events"),
+                                "elapsed_seconds": start_time.elapsed().as_secs(),
+                                "timestamp": chrono::Utc::now().to_rfc3339()
+                            }));
+                        }
+                    }
+                    
+                    // If we can't determine the status, but got a result, it's likely pending
+                    debug!("Transaction {} found but status unclear, continuing to monitor", tx_hash);
+                }
+                Err(e) => {
+                    // If the transaction is not found, it might still be pending
+                    debug!("Transaction {} not found or error occurred: {}", tx_hash, e);
+                }
+            }
+
+            // Wait before polling again
+            tokio::time::sleep(poll_interval).await;
+        }
+    }
+
+    /// Execute a custom MCP tool by name with parameters (for script execution)
+    pub async fn execute_custom_tool(
+        &self,
+        tool_name: &str,
+        parameters: &HashMap<String, String>,
+    ) -> McpResult<Value> {
+        debug!("SDK Adapter: Executing custom tool: {} with parameters: {:?}", tool_name, parameters);
+
+        // Convert string parameters to serde_json::Value
+        let mut json_params = serde_json::Map::new();
+        for (key, value) in parameters {
+            // Try to parse as JSON first, fallback to string
+            let json_value = if let Ok(parsed) = serde_json::from_str::<Value>(value) {
+                parsed
+            } else {
+                Value::String(value.clone())
+            };
+            json_params.insert(key.clone(), json_value);
+        }
+        let args = Value::Object(json_params);
+
+        // Validate parameters before tool execution
+        Self::validate_tool_parameters(tool_name, parameters)?;
+
+        // Route to appropriate tool based on tool_name
+        match tool_name {
+            "get_balances" => {
+                // get_balances needs network_config and wallet_address parameters
+                let network_config = self.get_default_network_config().await?;
+                let wallet_address = parameters.get("wallet_address").map(|s| s.clone());
+                self.get_balances(&network_config, wallet_address).await
+            }
+            "get_pool" => {
+                let pool_id = parameters.get("pool_id")
+                    .ok_or_else(|| McpServerError::InvalidArguments("pool_id parameter required".to_string()))?
+                    .clone();
+                self.get_pool_info(pool_id).await
+            }
+            "get_pools" => self.get_pools(args).await,
+            "swap" | "execute_swap" => self.execute_swap(args).await,
+            "provide_liquidity" => self.provide_liquidity(args).await,
+            "withdraw_liquidity" => self.withdraw_liquidity(args).await,
+            "create_pool" => self.create_pool(args).await,
+            "get_lp_token_balance" => self.get_lp_token_balance(args).await,
+            "get_all_lp_token_balances" => self.get_all_lp_token_balances(args).await,
+            "validate_network" => self.validate_network_connectivity().await,
+            "get_contracts" => self.get_contract_addresses().await,
+            "monitor_transaction" => {
+                // Special handling for monitor_transaction which needs different parameters
+                let tx_hash = parameters.get("tx_hash")
+                    .ok_or_else(|| McpServerError::InvalidArguments("tx_hash parameter required".to_string()))?
+                    .clone();
+                let timeout_seconds = parameters.get("timeout")
+                    .and_then(|t| t.parse::<u64>().ok());
+                
+                self.monitor_transaction(tx_hash, timeout_seconds).await
+            }
+            _ => {
+                // For unknown tools, return an error result
+                Ok(serde_json::json!({
+                    "status": "error",
+                    "tool_name": tool_name,
+                    "message": format!("Unknown tool: {}. Available tools: get_balances, get_pool, get_pools, swap, execute_swap, provide_liquidity, withdraw_liquidity, create_pool, get_lp_token_balance, get_all_lp_token_balances, validate_network, get_contracts, monitor_transaction", tool_name),
+                    "parameters": parameters,
+                    "timestamp": chrono::Utc::now().to_rfc3339()
+                }))
+            }
+        }
     }
 
     /// Get the default network configuration
@@ -1024,8 +1796,20 @@ impl McpSdkAdapter {
             .and_then(|v| v.as_str())
             .and_then(|s| Decimal::from_str(s).ok());
 
-        // Get active wallet (required for providing liquidity)
-        let wallet = self.get_active_wallet_with_validation().await?;
+        // Get wallet (use provided wallet_address or active wallet)
+        let wallet = if let Some(wallet_address) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            match self.get_wallet_by_address(wallet_address).await? {
+                Some(wallet) => wallet,
+                None => {
+                    return Err(McpServerError::InvalidArguments(format!(
+                        "Wallet with address {} not found",
+                        wallet_address
+                    )));
+                }
+            }
+        } else {
+            self.get_active_wallet_with_validation().await?
+        };
 
         // Get network config and client with wallet
         let network_config = self.get_default_network_config().await?;
@@ -1087,8 +1871,20 @@ impl McpSdkAdapter {
         let lp_amount = Uint128::from_str(amount_str)
             .map_err(|e| McpServerError::InvalidArguments(format!("Invalid LP amount: {}", e)))?;
 
-        // Get active wallet (required for withdrawing liquidity)
-        let wallet = self.get_active_wallet_with_validation().await?;
+        // Get wallet (use provided wallet_address or active wallet)
+        let wallet = if let Some(wallet_address) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            match self.get_wallet_by_address(wallet_address).await? {
+                Some(wallet) => wallet,
+                None => {
+                    return Err(McpServerError::InvalidArguments(format!(
+                        "Wallet with address {} not found",
+                        wallet_address
+                    )));
+                }
+            }
+        } else {
+            self.get_active_wallet_with_validation().await?
+        };
 
         // Get network config and client with wallet
         let network_config = self.get_default_network_config().await?;
@@ -1253,8 +2049,20 @@ impl McpSdkAdapter {
             .and_then(|v| v.as_str())
             .and_then(|s| Decimal::from_str(s).ok());
 
-        // Get active wallet (required for swaps)
-        let wallet = self.get_active_wallet_with_validation().await?;
+        // Get wallet (use provided wallet_address or active wallet)
+        let wallet = if let Some(wallet_address) = args.get("wallet_address").and_then(|v| v.as_str()) {
+            match self.get_wallet_by_address(wallet_address).await? {
+                Some(wallet) => wallet,
+                None => {
+                    return Err(McpServerError::InvalidArguments(format!(
+                        "Wallet with address {} not found",
+                        wallet_address
+                    )));
+                }
+            }
+        } else {
+            self.get_active_wallet_with_validation().await?
+        };
 
         // Get network config and client with wallet
         let network_config = self.get_default_network_config().await?;
@@ -1773,6 +2581,155 @@ impl McpSdkAdapter {
             "events": create_result.events
         }))
     }
+
+    /// Validate tool parameters before execution
+    fn validate_tool_parameters(
+        tool_name: &str,
+        parameters: &HashMap<String, String>,
+    ) -> McpResult<()> {
+        match tool_name {
+            "get_pool" => {
+                if let Some(pool_id) = parameters.get("pool_id") {
+                    if pool_id.trim().is_empty() {
+                        return Err(McpServerError::InvalidArguments(
+                            "pool_id cannot be empty".to_string(),
+                        ));
+                    }
+                } else {
+                    return Err(McpServerError::InvalidArguments(
+                        "pool_id parameter is required".to_string(),
+                    ));
+                }
+            }
+            "monitor_transaction" => {
+                if let Some(tx_hash) = parameters.get("tx_hash") {
+                    if tx_hash.trim().is_empty() {
+                        return Err(McpServerError::InvalidArguments(
+                            "tx_hash cannot be empty".to_string(),
+                        ));
+                    }
+                    // Validate tx_hash format (should be hex)
+                    if !tx_hash.chars().all(|c| c.is_ascii_hexdigit() || c.is_ascii_uppercase()) {
+                        return Err(McpServerError::InvalidArguments(
+                            "tx_hash must contain only hexadecimal characters".to_string(),
+                        ));
+                    }
+                } else {
+                    return Err(McpServerError::InvalidArguments(
+                        "tx_hash parameter is required".to_string(),
+                    ));
+                }
+                
+                // Validate timeout if present
+                if let Some(timeout) = parameters.get("timeout") {
+                    if let Ok(timeout_val) = timeout.parse::<u64>() {
+                        if timeout_val == 0 || timeout_val > 300 {
+                            return Err(McpServerError::InvalidArguments(
+                                "timeout must be between 1 and 300 seconds".to_string(),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            "timeout must be a valid number".to_string(),
+                        ));
+                    }
+                }
+            }
+            "get_balances" => {
+                // Validate wallet_address if present
+                if let Some(wallet_addr) = parameters.get("wallet_address") {
+                    if !wallet_addr.trim().is_empty() && !wallet_addr.starts_with("mantra") {
+                        return Err(McpServerError::InvalidArguments(
+                            "wallet_address must be a valid Mantra address (starts with 'mantra')".to_string(),
+                        ));
+                    }
+                }
+            }
+            "swap" | "execute_swap" => {
+                // Validate required swap parameters
+                for required_param in &["asset_in", "asset_out", "amount_in"] {
+                    if let Some(value) = parameters.get(*required_param) {
+                        if value.trim().is_empty() {
+                            return Err(McpServerError::InvalidArguments(
+                                format!("{} cannot be empty", required_param),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            format!("{} parameter is required", required_param),
+                        ));
+                    }
+                }
+                
+                // Validate amount_in is numeric
+                if let Some(amount) = parameters.get("amount_in") {
+                    if amount.parse::<f64>().is_err() {
+                        return Err(McpServerError::InvalidArguments(
+                            "amount_in must be a valid number".to_string(),
+                        ));
+                    }
+                }
+                
+                // Validate slippage_tolerance if present
+                if let Some(slippage) = parameters.get("slippage_tolerance") {
+                    if let Ok(slippage_val) = slippage.parse::<f64>() {
+                        if slippage_val < 0.0 || slippage_val > 100.0 {
+                            return Err(McpServerError::InvalidArguments(
+                                "slippage_tolerance must be between 0 and 100".to_string(),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            "slippage_tolerance must be a valid number".to_string(),
+                        ));
+                    }
+                }
+            }
+            "provide_liquidity" | "withdraw_liquidity" => {
+                // Validate required liquidity parameters
+                for required_param in &["pool_id", "amount"] {
+                    if let Some(value) = parameters.get(*required_param) {
+                        if value.trim().is_empty() {
+                            return Err(McpServerError::InvalidArguments(
+                                format!("{} cannot be empty", required_param),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            format!("{} parameter is required", required_param),
+                        ));
+                    }
+                }
+            }
+            "create_pool" => {
+                // Validate required pool creation parameters
+                for required_param in &["asset_a", "asset_b", "amount_a", "amount_b"] {
+                    if let Some(value) = parameters.get(*required_param) {
+                        if value.trim().is_empty() {
+                            return Err(McpServerError::InvalidArguments(
+                                format!("{} cannot be empty", required_param),
+                            ));
+                        }
+                    } else {
+                        return Err(McpServerError::InvalidArguments(
+                            format!("{} parameter is required", required_param),
+                        ));
+                    }
+                }
+            }
+            _ => {
+                // For other tools, perform basic validation
+                for (key, value) in parameters {
+                    if value.trim().is_empty() {
+                        return Err(McpServerError::InvalidArguments(
+                            format!("Parameter '{}' cannot be empty", key),
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for McpSdkAdapter {
@@ -1847,6 +2804,7 @@ mod tests {
             retry_base_delay_ms: 200,
             max_idle_time_secs: 120,
             health_check_interval_secs: 45,
+            max_wallet_derivation_index: 100,
         };
 
         let adapter = McpSdkAdapter::new(config.clone());

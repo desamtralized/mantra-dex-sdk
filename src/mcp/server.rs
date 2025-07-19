@@ -19,9 +19,10 @@ use uuid::Uuid;
 // Configuration support
 use config::{Config, ConfigError, Environment, File, FileFormat};
 
-// TODO: Import correct MCP types when API is finalized
+// Note: MCP SDK types not imported due to API instability
 // Current rust-mcp-sdk 0.4.2 has unstable APIs that don't match documentation
-// Using minimal imports for now until API stabilizes
+// The server implements MCP protocol manually using standard HTTP/JSON-RPC
+// until the rust-mcp-sdk API stabilizes in future versions
 
 use crate::client::MantraDexClient;
 use crate::config::{MantraNetworkConfig, NetworkConstants};
@@ -2239,9 +2240,10 @@ impl McpServerStateData {
 
 /// Mantra DEX MCP Server handler
 ///
-/// TODO: Implement ServerHandler trait when MCP API is stable
+/// Note: ServerHandler trait not implemented due to MCP API instability
 /// Current rust-mcp-sdk 0.4.2 has unstable APIs that are changing between versions
-/// This provides a solid foundation for implementing MCP functionality
+/// This implementation provides MCP functionality via direct HTTP/JSON-RPC handling
+/// and can be migrated to ServerHandler trait when the rust-mcp-sdk API stabilizes
 pub struct MantraDexMcpServer {
     /// Server state
     state: Arc<McpServerStateData>,
@@ -2303,10 +2305,14 @@ impl MantraDexMcpServer {
                         // Create another wallet instance for the SDK adapter (since MantraWallet doesn't implement Clone)
                         match MantraWallet::from_mnemonic(&mnemonic, 0) {
                             Ok(adapter_wallet) => {
-                                // Store wallet instance in SDK adapter
+                                // Add wallet with derivation index for caching, then set as active
                                 self.state
                                     .sdk_adapter
-                                    .set_active_wallet_with_instance(adapter_wallet)
+                                    .add_wallet_with_derivation_index(adapter_wallet, 0)
+                                    .await?;
+                                self.state
+                                    .sdk_adapter
+                                    .switch_active_wallet(&address)
                                     .await?;
                             }
                             Err(e) => {
@@ -2731,6 +2737,70 @@ impl McpToolProvider for MantraDexMcpServer {
                     }
                 }
             }),
+            serde_json::json!({
+                "name": "list_wallets",
+                "description": "List all available wallets with their addresses and information",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }),
+            serde_json::json!({
+                "name": "switch_wallet",
+                "description": "Switch to a different active wallet",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "wallet_address": {
+                            "type": "string",
+                            "description": "The wallet address to switch to"
+                        }
+                    },
+                    "required": ["wallet_address"]
+                }
+            }),
+            serde_json::json!({
+                "name": "get_active_wallet",
+                "description": "Get current active wallet information",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }),
+            serde_json::json!({
+                "name": "add_wallet_from_mnemonic",
+                "description": "Add a new wallet from mnemonic phrase",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "mnemonic": {
+                            "type": "string",
+                            "description": "The mnemonic phrase to import the wallet from"
+                        },
+                        "derivation_index": {
+                            "type": "integer",
+                            "description": "The derivation index for the wallet (default: 0)",
+                            "default": 0,
+                            "minimum": 0
+                        }
+                    },
+                    "required": ["mnemonic"]
+                }
+            }),
+            serde_json::json!({
+                "name": "remove_wallet",
+                "description": "Remove a wallet from the collection",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "wallet_address": {
+                            "type": "string",
+                            "description": "The wallet address to remove"
+                        }
+                    },
+                    "required": ["wallet_address"]
+                }
+            }),
             // Pool Query Tools
             serde_json::json!({
                 "name": "get_pools",
@@ -2767,7 +2837,8 @@ impl McpToolProvider for MantraDexMcpServer {
                             "required": ["denom", "amount"]
                         },
                         "ask_asset_denom": { "type": "string", "description": "The denomination of the asset to receive." },
-                        "max_slippage": { "type": "string", "description": "Maximum allowed slippage percentage (e.g., '1.5'). Defaults to 1%." }
+                        "max_slippage": { "type": "string", "description": "Maximum allowed slippage percentage (e.g., '1.5'). Defaults to 1%." },
+                        "wallet_address": { "type": "string", "description": "Wallet address to use for the swap (optional, uses active wallet if not provided)" }
                     },
                     "required": ["pool_id", "offer_asset", "ask_asset_denom"]
                 }
@@ -2791,7 +2862,8 @@ impl McpToolProvider for MantraDexMcpServer {
                             },
                             "description": "The assets to provide."
                         },
-                        "max_slippage": { "type": "string", "description": "Maximum allowed slippage percentage. Defaults to 1%." }
+                        "max_slippage": { "type": "string", "description": "Maximum allowed slippage percentage. Defaults to 1%." },
+                        "wallet_address": { "type": "string", "description": "Wallet address to use for providing liquidity (optional, uses active wallet if not provided)" }
                     },
                     "required": ["pool_id", "assets"]
                 }
@@ -2803,7 +2875,8 @@ impl McpToolProvider for MantraDexMcpServer {
                     "type": "object",
                     "properties": {
                         "pool_id": { "type": "string", "description": "The ID of the pool to withdraw from." },
-                        "amount": { "type": "string", "description": "The amount of LP tokens to withdraw." }
+                        "amount": { "type": "string", "description": "The amount of LP tokens to withdraw." },
+                        "wallet_address": { "type": "string", "description": "Wallet address to use for withdrawing liquidity (optional, uses active wallet if not provided)" }
                     },
                     "required": ["pool_id", "amount"]
                 }
@@ -2923,6 +2996,11 @@ impl McpToolProvider for MantraDexMcpServer {
                 self.handle_validate_network_connectivity(arguments).await
             }
             "get_balances" => self.handle_get_balances(arguments).await,
+            "list_wallets" => self.handle_list_wallets(arguments).await,
+            "switch_wallet" => self.handle_switch_wallet(arguments).await,
+            "get_active_wallet" => self.handle_get_active_wallet(arguments).await,
+            "add_wallet_from_mnemonic" => self.handle_add_wallet_from_mnemonic(arguments).await,
+            "remove_wallet" => self.handle_remove_wallet(arguments).await,
             "get_pools" => self.handle_get_pools(arguments).await,
             "execute_swap" => self.handle_execute_swap(arguments).await,
             "provide_liquidity" => self.handle_provide_liquidity(arguments).await,
@@ -3301,6 +3379,235 @@ impl MantraDexMcpServer {
             }
         } else {
             response_text.push_str("No tokens found in wallet.\n");
+        }
+
+        // Return proper MCP response format
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ]
+        }))
+    }
+
+    /// Handle list_wallets tool
+    async fn handle_list_wallets(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling list_wallets tool call");
+
+        // Get all wallets using the SDK adapter
+        let wallets = self.state.sdk_adapter.get_all_wallets().await?;
+
+        // Get active wallet address
+        let active_address = match self.state.sdk_adapter.get_active_wallet_info().await? {
+            Some(wallet_info) => Some(wallet_info.address),
+            None => None,
+        };
+
+        // Create formatted response text
+        let mut response_text = format!("📱 **Wallet Management**\n\n");
+        
+        if wallets.is_empty() {
+            response_text.push_str("No wallets found in collection.\n");
+        } else {
+            response_text.push_str(&format!("**Total Wallets:** {}\n", wallets.len()));
+            
+            if let Some(active_addr) = &active_address {
+                response_text.push_str(&format!("**Active Wallet:** `{}`\n\n", active_addr));
+            } else {
+                response_text.push_str("**Active Wallet:** None\n\n");
+            }
+
+            response_text.push_str("### 💼 Available Wallets:\n\n");
+            
+            for (address, wallet_info) in wallets.iter() {
+                let is_active = active_address.as_ref().map_or(false, |addr| addr == address);
+                let active_indicator = if is_active { " (ACTIVE)" } else { "" };
+                
+                response_text.push_str(&format!("- **Address:** `{}`{}\n", address, active_indicator));
+                response_text.push_str(&format!("  - **Public Key:** `{}`\n", wallet_info.public_key));
+                response_text.push_str("\n");
+            }
+        }
+
+        // Return proper MCP response format
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ]
+        }))
+    }
+
+    /// Handle switch_wallet tool
+    async fn handle_switch_wallet(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling switch_wallet tool call");
+
+        // Parse arguments
+        let wallet_address = arguments
+            .get("wallet_address")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("wallet_address is required".to_string()))?;
+
+        // Switch wallet using the SDK adapter
+        self.state.sdk_adapter.switch_active_wallet(wallet_address).await?;
+
+        // Get updated wallet info
+        let wallet_info = self.state.sdk_adapter.get_wallet_info(wallet_address).await?
+            .ok_or_else(|| McpServerError::InvalidArguments("Wallet not found after switch".to_string()))?;
+
+        // Create formatted response text
+        let mut response_text = format!("✅ **Wallet Switched Successfully**\n\n");
+        response_text.push_str(&format!("**New Active Wallet:** `{}`\n", wallet_address));
+        response_text.push_str(&format!("**Public Key:** `{}`\n", wallet_info.public_key));
+
+        // Return proper MCP response format
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ]
+        }))
+    }
+
+    /// Handle get_active_wallet tool
+    async fn handle_get_active_wallet(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling get_active_wallet tool call");
+
+        // Get active wallet info using the SDK adapter
+        let active_wallet = self.state.sdk_adapter.get_active_wallet_info().await?;
+
+        // Create formatted response text
+        let mut response_text = format!("🔍 **Active Wallet Information**\n\n");
+        
+        match active_wallet {
+            Some(wallet_info) => {
+                response_text.push_str(&format!("**Address:** `{}`\n", wallet_info.address));
+                response_text.push_str(&format!("**Public Key:** `{}`\n", wallet_info.public_key));
+                response_text.push_str("\n**Status:** Active and ready for use\n");
+            }
+            None => {
+                response_text.push_str("**Status:** No active wallet configured\n");
+                response_text.push_str("Please add a wallet using `add_wallet_from_mnemonic` or switch to an existing wallet.\n");
+            }
+        }
+
+        // Return proper MCP response format
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ]
+        }))
+    }
+
+    /// Handle add_wallet_from_mnemonic tool
+    async fn handle_add_wallet_from_mnemonic(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling add_wallet_from_mnemonic tool call");
+
+        // Parse arguments
+        let mnemonic = arguments
+            .get("mnemonic")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("mnemonic is required".to_string()))?;
+
+        let derivation_index = arguments
+            .get("derivation_index")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+
+        let set_as_active = arguments
+            .get("set_as_active")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+
+        // Create wallet from mnemonic
+        let wallet = crate::wallet::MantraWallet::from_mnemonic(mnemonic, derivation_index)
+            .map_err(|e| McpServerError::InvalidArguments(format!("Failed to create wallet from mnemonic: {}", e)))?;
+
+        let wallet_info = wallet.info();
+        let wallet_address = wallet_info.address.clone();
+
+        // Add wallet using the SDK adapter with derivation index for caching
+        self.state.sdk_adapter.add_wallet_with_derivation_index(wallet, derivation_index).await?;
+
+        // Set as active wallet if requested
+        if set_as_active {
+            self.state.sdk_adapter.switch_active_wallet(&wallet_address).await?;
+        }
+
+        // Create formatted response text
+        let mut response_text = format!("✅ **Wallet Added Successfully**\n\n");
+        response_text.push_str(&format!("**Address:** `{}`\n", wallet_address));
+        response_text.push_str(&format!("**Public Key:** `{}`\n", wallet_info.public_key));
+        response_text.push_str(&format!("**Derivation Index:** {}\n", derivation_index));
+        response_text.push_str(&format!("**Set as Active:** {}\n", if set_as_active { "Yes" } else { "No" }));
+
+        // Return proper MCP response format
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": response_text
+                }
+            ]
+        }))
+    }
+
+    /// Handle remove_wallet tool
+    async fn handle_remove_wallet(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling remove_wallet tool call");
+
+        // Parse arguments
+        let wallet_address = arguments
+            .get("wallet_address")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpServerError::InvalidArguments("wallet_address is required".to_string()))?;
+
+        // Get wallet info before removal
+        let wallet_info = self.state.sdk_adapter.get_wallet_info(wallet_address).await?;
+
+        // Check if this is the active wallet
+        let was_active = match self.state.sdk_adapter.get_active_wallet_info().await? {
+            Some(active_info) => active_info.address == wallet_address,
+            None => false,
+        };
+
+        // Remove wallet using the SDK adapter
+        self.state.sdk_adapter.remove_wallet(wallet_address).await?;
+
+        // Create formatted response text
+        let mut response_text = format!("✅ **Wallet Removed Successfully**\n\n");
+        response_text.push_str(&format!("**Removed Address:** `{}`\n", wallet_address));
+        
+        if let Some(info) = wallet_info {
+            response_text.push_str(&format!("**Public Key:** `{}`\n", info.public_key));
+        }
+
+        if was_active {
+            response_text.push_str("\n**Note:** This was the active wallet. You'll need to switch to another wallet or add a new one.\n");
         }
 
         // Return proper MCP response format
@@ -3765,22 +4072,8 @@ async fn handle_jsonrpc_request(
 
     // Convert HTTP JSON-RPC to MCP format and process
     let response = match process_mcp_request(&server, &request).await {
-        Ok(result) => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            result: Some(result),
-            error: None,
-            id: request.id.clone(),
-        },
-        Err(error) => JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            result: None,
-            error: Some(JsonRpcError {
-                code: error.to_json_rpc_error_code(),
-                message: error.to_string(),
-                data: None,
-            }),
-            id: request.id.clone(),
-        },
+        Ok(result) => JsonRpcResponse::success(request.id.clone(), result),
+        Err(error) => JsonRpcResponse::error(request.id.clone(), error.to_json_rpc_error()),
     };
 
     debug!("HTTP JSON-RPC response: {:?}", response);
@@ -3841,6 +4134,7 @@ pub async fn create_http_server(config: McpServerConfig) -> McpResult<MantraDexM
 // =============================================================================
 
 impl MantraDexMcpServer {
+
     // Resource handler methods for MCP resources
 
     // LP Token Management Tool Handlers
@@ -3970,6 +4264,7 @@ impl MantraDexMcpServer {
 
         Ok(balances_result)
     }
+
 }
 
 /// Start the stdio transport layer for MCP communication
