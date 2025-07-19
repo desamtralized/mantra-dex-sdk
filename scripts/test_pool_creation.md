@@ -8,9 +8,11 @@
 1. **Validate network** connectivity
 2. **Get contract addresses** for verification
 3. **Create pool** for new asset pair and capture returned pool_id
-   - asset_a: ATOM
-   - asset_b: NEWTOKEN
-   - initial_price: 1.0
+   - pool_type: constant_product
+   - asset_a_denom: uom
+   - asset_a_amount: 1000000000 (1000 OM)
+   - asset_b_denom: factory/mantra1qwm8p82w0ygaz3duf0y56gjf8pwh5ykmgnqmtm/uUSDY
+   - asset_b_amount: 1000000000 (1000 USDY)
    - Store returned pool_id as `created_pool_id`
 4. **Verify pool creation** was successful
 5. **Get pool information** using the stored `created_pool_id`

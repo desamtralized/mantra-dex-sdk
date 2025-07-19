@@ -48,11 +48,6 @@ pub mod sdk_adapter;
 // MCP client wrapper
 pub mod client_wrapper;
 
-// Script parser for natural language test scripts
-pub mod script_parser;
-
-// Script runner for executing parsed scripts
-pub mod script_runner;
 
 // Re-export main types for easy access
 pub use server::{
@@ -66,11 +61,6 @@ pub use sdk_adapter::{ConnectionPoolConfig, McpSdkAdapter};
 // Re-export client wrapper types
 pub use client_wrapper::McpClientWrapper;
 
-// Re-export script types
-pub use script_parser::{ScriptParseError, ScriptParser, StepAction, TestScript, TestStep};
-pub use script_runner::{
-    ScriptExecutionConfig, ScriptExecutionError, ScriptExecutionResult, ScriptRunner,
-};
 
 // TODO: Add these modules as they are implemented in subsequent tasks
 // pub mod tools;

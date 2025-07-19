@@ -5,13 +5,16 @@
 - Wallet: use test wallet with sufficient balance for both assets
 
 ## Steps
-1. **Check wallet balance** for ATOM and USDC
-2. **Get pool information** for ATOM/USDC pair
-   - pool_id: 1
+1. **Check wallet balance** for OM and USDC
+2. **Get pool information** for OM/USDC pair
+   - pool_id: o.uom.usdc.pool
 3. **Fetch current pool liquidity** and store as `pool_liquidity_before`
 4. **Provide liquidity** to the pool
-   - asset_a_amount: 100
-   - asset_b_amount: 100
+   - pool_id: o.uom.usdc.pool
+   - asset_a_denom: uom
+   - asset_a_amount: 1000000
+   - asset_b_denom: factory/mantra1qwm8p82w0ygaz3duf0y56gjf8pwh5ykmgnqmtm/uUSDC
+   - asset_b_amount: 1000
 5. **Fetch updated pool liquidity** and store as `pool_liquidity_after`
 6. **Get LP token balance** for the pool
 7. **Verify liquidity** was added successfully
