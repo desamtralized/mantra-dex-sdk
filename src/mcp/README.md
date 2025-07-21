@@ -1,369 +1,424 @@
-# Mantra DEX SDK MCP Server
+# MANTRA DEX MCP Server
 
-A comprehensive Model Context Protocol (MCP) server that provides AI agents and other MCP clients with full access to the Mantra DEX on the Mantra Blockchain. This server exposes all DEX functionality through a standardized MCP interface, enabling AI-powered DeFi operations.
+A Model Context Protocol (MCP) server implementation that provides AI agents with comprehensive access to the MANTRA blockchain DEX. Built in Rust with full JSON-RPC 2.0 compliance and async operation support.
 
-## 📖 Overview
+## Architecture Overview
 
-The Mantra DEX SDK MCP Server bridges the gap between AI agents and the Mantra DEX, allowing for:
+### Core Components
 
-- **Wallet Management**: Create, import, and manage HD wallets with mnemonic phrases
-- **DEX Trading Operations**: Execute swaps, provide liquidity, and manage positions
-- **Pool Management**: Query pools, create new pools (admin), and manage pool features
-- **Rewards System**: Query and claim rewards from liquidity provision
-- **Transaction Monitoring**: Track transaction status and validate results
-- **Analytics & Reporting**: Generate trading reports and performance analysis
+The MCP server is organized into three main modules in `src/mcp/`:
 
-## 🚀 Features
+- **`server.rs`** - Core MCP server with JSON-RPC 2.0 handling
+- **`sdk_adapter.rs`** - Adapter layer between MCP protocol and SDK operations
+- **`client_wrapper.rs`** - MCP client wrapper and request processing
 
-### Core Capabilities
+### Design Philosophy
 
-#### 🔑 Wallet Operations
-- Generate new HD wallets with BIP39 mnemonic phrases
-- Import existing wallets from mnemonic
-- Switch between multiple wallets
-- Query wallet balances and information
+The server follows a clean separation of concerns:
 
-#### 🏊‍♂️ DEX Operations
-- **Swapping**: Single-hop and multi-hop token swaps with slippage protection
-- **Liquidity**: Provide and withdraw liquidity from pools
-- **Rewards**: Query pending rewards and claim accumulated rewards
-- **Pool Management**: Create pools, update features, and query pool status
+1. **Protocol Layer** (`server.rs`) - Handles MCP protocol specifics, JSON-RPC, transport
+2. **Adapter Layer** (`sdk_adapter.rs`) - Translates MCP calls to SDK operations
+3. **Core SDK** (`../client.rs`) - Business logic and blockchain interactions
 
-#### 📊 Advanced Features
-- Real-time transaction monitoring with status updates
-- Comprehensive swap validation and analysis
-- Trading history and performance analytics
-- Impermanent loss calculations for liquidity positions
-- LP token balance queries and withdrawal estimations
+This architecture ensures the MCP server is a thin protocol adapter over the robust SDK core.
 
-### 🛠 Available Tools
+## Development Setup
 
-The MCP server provides 40+ tools organized into categories:
+### Prerequisites
 
-**Wallet Management:**
-- `generate_wallet` - Create new HD wallets
-- `import_wallet` - Import from mnemonic phrase
-- `get_wallet_info` - Get active wallet details
-- `get_wallet_balance` - Query token balances
+```bash
+# Rust toolchain (1.70+)
+rustup update stable
 
-**Pool Operations:**
-- `get_pool` - Query specific pool information
-- `get_pools` - List all available pools
-- `validate_pool_status` - Check pool availability
-- `create_pool` - Create new liquidity pools (admin)
+# Build dependencies
+cargo check --features mcp
+```
 
-**Trading Operations:**
-- `simulate_swap` - Preview swap outcomes
-- `execute_swap` - Perform token swaps
+### Build Commands
+
+```bash
+# Development build
+cargo build --features mcp
+
+# Release build
+cargo build --release --features mcp --bin mcp-server
+
+# Run tests
+cargo test --features mcp
+```
+
+## Code Structure
+
+### Tool Implementation
+
+Tools are implemented in `sdk_adapter.rs` using the adapter pattern:
+
+```rust
+// Tool definition
+fn create_tool_def(name: &str, description: &str) -> Tool {
+    Tool {
+        name: name.to_string(),
+        description: Some(description.to_string()),
+        input_schema: create_input_schema(),
+    }
+}
+
+// Tool execution
+async fn handle_tool_call(&self, name: &str, arguments: &Value) -> Result<Vec<TextContent>, McpError> {
+    match name {
+        "execute_swap" => self.execute_swap(arguments).await,
+        "get_pools" => self.get_pools(arguments).await,
+        // ... other tools
+        _ => Err(McpError::InvalidRequest(format!("Unknown tool: {}", name))),
+    }
+}
+```
+
+### Resource Implementation
+
+Resources provide read-only access to data:
+
+```rust
+// Resource definition
+fn create_resource(uri: &str, name: &str, description: &str) -> Resource {
+    Resource {
+        uri: uri.to_string(),
+        name: Some(name.to_string()),
+        description: Some(description.to_string()),
+        mime_type: Some("application/json".to_string()),
+    }
+}
+
+// Resource reading
+async fn read_resource(&self, uri: &str) -> Result<Vec<ResourceContents>, McpError> {
+    match uri {
+        "network://status" => self.get_network_status().await,
+        "trades://history" => self.get_trade_history().await,
+        // ... other resources
+    }
+}
+```
+
+### Error Handling
+
+The server implements comprehensive error handling with specific error codes:
+
+```rust
+#[derive(Debug)]
+pub enum McpError {
+    InvalidRequest(String),           // -32600
+    MethodNotFound(String),           // -32601
+    InvalidParams(String),            // -32602
+    InternalError(String),            // -32603
+    WalletNotConfigured(String),      // -1001
+    NetworkError(String),             // -1002
+}
+```
+
+## Available Tools
+
+### Wallet Management
+- `get_active_wallet` - Get current wallet information
+- `list_wallets` - List all available wallets
+- `switch_wallet` - Switch to different wallet
+- `add_wallet_from_mnemonic` - Import wallet from mnemonic
+- `remove_wallet` - Remove wallet from collection
+- `get_balances` - Get wallet token balances
+
+### Pool Operations
+- `get_pools` - List all liquidity pools
+- `get_contract_addresses` - Get contract addresses
+- `validate_network_connectivity` - Check network status
+
+### Trading Operations
+- `execute_swap` - Execute token swaps with slippage protection
 - `provide_liquidity` - Add liquidity to pools
-- `withdraw_liquidity` - Remove liquidity positions
+- `withdraw_liquidity` - Remove liquidity from pools
+- `create_pool` - Create new pools (admin only)
 
-**Transaction Monitoring:**
-- `monitor_swap_transaction` - Track swap execution
-- `get_transaction_monitor_status` - Check monitoring status
-- `validate_swap_result` - Validate swap outcomes
+### LP Token Management
+- `get_lp_token_balance` - Get LP balance for specific pool
+- `get_all_lp_token_balances` - Get all LP balances
+- `estimate_lp_withdrawal_amounts` - Estimate withdrawal amounts
 
-**Analytics & Reporting:**
-- `get_swap_history` - Query trading history
-- `generate_trading_report` - Create performance reports
-- `calculate_impermanent_loss` - Analyze LP position performance
+## Available Resources
 
-### 📡 Available Resources
-
-**Trading Resources:**
-- `trades://history` - Access trading history data
-- `trades://pending` - View pending transactions
-- `liquidity://positions` - Query liquidity positions
-
-**Network Resources:**
-- `network://status` - Network health and connectivity
+### Network Information
+- `network://status` - Network health and connectivity status
 - `network://config` - Current network configuration
-- `contracts://addresses` - Contract addresses for current network
+- `contracts://addresses` - Smart contract addresses
 
-## 📋 Prerequisites
+## Development Workflow
 
-- **Rust**: Version 1.70.0 or higher
-- **Operating System**: Linux, macOS, or Windows
-- **Network Access**: Internet connection for blockchain operations
-- **MCP Client**: Cursor or other MCP-compatible client
+### Adding New Tools
 
-## ⚡ Quick Start
-
-### 1. Build the Server
-
-```bash
-# Clone the repository (if not already done)
-cd /path/to/mantra-dex-sdk
-
-# Build the MCP server binary
-cargo build --release --bin mcp-server --features mcp
-
-# The binary will be available at: target/release/mcp-server
+1. **Define the tool** in `sdk_adapter.rs`:
+```rust
+fn create_my_tool() -> Tool {
+    Tool {
+        name: "my_new_tool".to_string(),
+        description: Some("Description of what this tool does".to_string()),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "param1": {"type": "string", "description": "Parameter description"}
+            },
+            "required": ["param1"]
+        }),
+    }
+}
 ```
 
-### 2. Run the Server
+2. **Implement the handler**:
+```rust
+async fn handle_my_tool(&self, arguments: &Value) -> Result<Vec<TextContent>, McpError> {
+    let param1 = arguments["param1"].as_str()
+        .ok_or_else(|| McpError::InvalidParams("param1 is required".to_string()))?;
 
-**For Cursor Integration (stdio transport):**
-```bash
-# Run with stdio transport (recommended for Cursor)
-./target/release/mcp-server --transport stdio --network testnet --debug
+    // Use SDK client for actual operation
+    let result = self.client.my_operation(param1).await
+        .map_err(|e| McpError::InternalError(format!("Operation failed: {}", e)))?;
 
-# Or using cargo run
-cargo run --bin mcp-server --features mcp -- --transport stdio --network testnet --debug
+    Ok(vec![TextContent::text(serde_json::to_string_pretty(&result)?)])
+}
 ```
 
-**For HTTP API (http transport):**
-```bash
-# Run HTTP server on localhost:8080
-./target/release/mcp-server --transport http --host 127.0.0.1 --port 8080 --network testnet
+3. **Register in tool list** and **add to handler match**:
+```rust
+// In list_tools()
+tools.push(self.create_my_tool());
 
-# Access at: http://127.0.0.1:8080
+// In call_tool()
+"my_new_tool" => self.handle_my_tool(arguments).await,
 ```
 
-### 3. Test Connection
+### Adding New Resources
 
-```bash
-# Test basic functionality
-echo '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}' | ./target/release/mcp-server --transport stdio
+1. **Define resource**:
+```rust
+fn create_my_resource() -> Resource {
+    Resource {
+        uri: "my://resource".to_string(),
+        name: Some("My Resource".to_string()),
+        description: Some("Resource description".to_string()),
+        mime_type: Some("application/json".to_string()),
+    }
+}
 ```
 
-## 🔧 Configuration
+2. **Implement reader**:
+```rust
+async fn read_my_resource(&self) -> Result<Vec<ResourceContents>, McpError> {
+    let data = self.client.get_my_data().await?;
 
-### Command Line Options
-
-```bash
-./target/release/mcp-server [OPTIONS]
-
-Options:
-  -t, --transport <TYPE>      Transport type: stdio or http [default: stdio]
-  -n, --network <NETWORK>     Network: mainnet, testnet, mantra-dukong [default: mantra-dukong]
-  -p, --port <PORT>           Port for HTTP server [default: 8080]
-      --host <HOST>           Host for HTTP server [default: 127.0.0.1]
-  -d, --debug                 Enable debug logging
-      --log-format <FORMAT>   Log format: json, compact, pretty [default: compact]
-      --log-file <FILE>       Log to file instead of stderr
-      --disable-colors        Disable colored output
-  -h, --help                  Print help
-  -V, --version               Print version
+    Ok(vec![ResourceContents::text(
+        serde_json::to_string_pretty(&data)?,
+    )])
+}
 ```
 
-### Environment Variables
-
-```bash
-# Network configuration
-export MANTRA_NETWORK=testnet
-export MANTRA_RPC_URL=https://rpc.testnet.mantra.com
-
-# Logging configuration
-export RUST_LOG=debug
-export MCP_LOG_LEVEL=debug
-export MCP_LOG_FORMAT=json
-
-# Server configuration
-export MCP_SERVER_PORT=8080
-export MCP_SERVER_HOST=0.0.0.0
-```
-
-### Configuration File
-
-Create `config/mcp.toml`:
-
-```toml
-[server]
-name = "Mantra DEX MCP Server"
-version = "0.1.0"
-debug = true
-max_concurrent_ops = 10
-request_timeout_secs = 30
-cache_ttl_secs = 300
-
-[network]
-name = "testnet"
-rpc_url = "https://rpc.testnet.mantra.com"
-chain_id = "mantra-dukong"
-
-[transport]
-type = "stdio"
-http_host = "127.0.0.1"
-http_port = 8080
-
-[logging]
-level = "info"
-format = "compact"
-enable_colors = true
-```
-
-## 🧪 Testing
+## Testing
 
 ### Unit Tests
+
 ```bash
-# Run all tests
-cargo test --lib
+# Test specific module
+cargo test --features mcp sdk_adapter
 
-# Run MCP-specific tests
-cargo test --lib mcp
+# Test with output
+cargo test --features mcp -- --nocapture
 
-# Run with debug output
-cargo test --lib mcp -- --nocapture
+# Test specific function
+cargo test --features mcp test_wallet_operations
 ```
 
 ### Integration Testing
+
 ```bash
 # Test against testnet
-cargo test --test integration_test --features testnet
+MANTRA_NETWORK=testnet cargo test --features mcp,integration
 
-# Test specific functionality
-cargo test --test integration_test test_wallet_operations
+# Test MCP protocol compliance
+cargo test --features mcp test_mcp_protocol
 ```
 
 ### Manual Testing
 
-**Test tool listing:**
+Test tool execution:
 ```bash
-echo '{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}' | \
-  ./target/release/mcp-server --transport stdio --network testnet
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_pools","arguments":{}}}' | \
+  cargo run --features mcp --bin mcp-server -- --transport stdio --network testnet
 ```
 
-**Test wallet generation:**
+Test resource reading:
 ```bash
-echo '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "generate_wallet", "arguments": {}}}' | \
-  ./target/release/mcp-server --transport stdio --network testnet
+echo '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"network://status"}}' | \
+  cargo run --features mcp --bin mcp-server -- --transport stdio
 ```
 
-## 🔍 Usage Examples
+## Configuration
 
-### Wallet Management
-
-```bash
-# Generate a new wallet
-echo '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "generate_wallet", "arguments": {}}}' | ./target/release/mcp-server --transport stdio
-
-# Import existing wallet
-echo '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "import_wallet", "arguments": {"mnemonic": "your twelve word mnemonic phrase here example test case", "account_index": 0}}}' | ./target/release/mcp-server --transport stdio
-
-# Get wallet info
-echo '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "get_wallet_info", "arguments": {}}}' | ./target/release/mcp-server --transport stdio
-```
-
-### Pool Operations
+### Environment Variables
 
 ```bash
-# List all pools
-echo '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_pools", "arguments": {"limit": 10}}}' | ./target/release/mcp-server --transport stdio
+# Network selection
+export MANTRA_NETWORK=testnet  # or mainnet, mantra-dukong
 
-# Get specific pool
-echo '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "get_pool", "arguments": {"pool_id": "1"}}}' | ./target/release/mcp-server --transport stdio
+# Custom RPC endpoint
+export MANTRA_RPC_URL=https://rpc.testnet.mantrachain.io
 
-# Validate pool status
-echo '{"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "validate_pool_status", "arguments": {"pool_id": "1"}}}' | ./target/release/mcp-server --transport stdio
+# Wallet configuration (for automation/testing)
+export WALLET_MNEMONIC="your twelve word mnemonic phrase here example test case development automation"
+
+# Logging
+export RUST_LOG=debug
+export MCP_DEBUG=true
 ```
 
-### Trading Operations
+### Command Line Options
 
 ```bash
-# Simulate a swap
-echo '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "simulate_swap", "arguments": {"pool_id": "1", "offer_asset_denom": "uom", "offer_asset_amount": "1000000", "ask_asset_denom": "factory/mantra1x5nk33zpglp4ge6q9a8xx3zceqf4g8nvaggjmc/aUSDY"}}}' | ./target/release/mcp-server --transport stdio
+# Basic usage
+cargo run --features mcp --bin mcp-server -- \
+  --transport stdio \
+  --network testnet \
+  --debug
 
-# Execute a swap
-echo '{"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "execute_swap", "arguments": {"pool_id": "1", "offer_asset_denom": "uom", "offer_asset_amount": "1000000", "ask_asset_denom": "factory/mantra1x5nk33zpglp4ge6q9a8xx3zceqf4g8nvaggjmc/aUSDY", "max_slippage": "0.05"}}}' | ./target/release/mcp-server --transport stdio
+# Automated setup with pre-configured wallet
+export WALLET_MNEMONIC="abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about"
+export MANTRA_NETWORK=testnet
+cargo run --features mcp --bin mcp-server -- \
+  --transport stdio \
+  --debug
 ```
 
-## 🚨 Error Handling
+## Transport Protocols
 
-The server provides comprehensive error handling with detailed error codes:
+### STDIO Transport
+Primary transport for AI integrations (Cursor, etc.):
+```bash
+# Start server
+cargo run --features mcp --bin mcp-server -- --transport stdio
 
-### Common Error Codes
-- `1001` - Wallet not configured
-- `1002` - Invalid tool arguments
-- `1003` - Network connection error
-- `1004` - Transaction validation error
-- `1005` - Pool not found
-- `1006` - Insufficient balance
-- `1007` - Slippage tolerance exceeded
+# Send JSON-RPC request via stdin
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | ./mcp-server
+```
 
-### Error Response Format
+### HTTP Transport
+For web integrations and debugging:
+```bash
+# Start HTTP server
+cargo run --features mcp --bin mcp-server -- --transport http --port 8080
+
+# Make HTTP request
+curl -X POST http://localhost:8080 \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+## Error Handling
+
+All operations return structured errors with specific codes:
+
 ```json
 {
   "jsonrpc": "2.0",
   "id": 1,
   "error": {
-    "code": 1001,
+    "code": -1001,
     "message": "Wallet not configured",
     "data": {
       "error_type": "WalletNotConfigured",
-      "suggestions": ["Import or generate a wallet first"],
-      "severity": "error"
+      "suggestions": ["Use add_wallet_from_mnemonic to import a wallet"]
     }
   }
 }
 ```
 
-## 🔒 Security Considerations
+## Performance Considerations
 
-### Private Key Security
-- **Never expose private keys**: The server never returns private keys in responses
-- **Mnemonic handling**: Store mnemonics securely and never log them
-- **Memory safety**: Private keys are cleared from memory after use
+### Async Operations
+All blockchain operations are async to prevent blocking:
 
-### Network Security
-- **RPC endpoints**: Use trusted RPC endpoints
-- **TLS/SSL**: Use HTTPS endpoints for mainnet operations
-- **Rate limiting**: Built-in rate limiting to prevent abuse
+```rust
+// Non-blocking pool queries
+let pools = tokio::spawn(async move {
+    client.get_pools(None, None).await
+});
 
-### Validation
-- **Input validation**: All inputs are validated before processing
-- **Transaction validation**: Comprehensive transaction result validation
-- **Slippage protection**: Built-in slippage protection for trades
+// Concurrent balance checks
+let futures = wallets.iter().map(|w| client.get_balances(&w.address));
+let balances = futures::future::join_all(futures).await;
+```
 
-## 📊 Monitoring and Logging
+### Caching Strategy
+The server implements smart caching for expensive operations:
 
-### Log Levels
-- `ERROR` - Critical errors requiring attention
-- `WARN` - Warnings and recoverable errors
-- `INFO` - General operational information
-- `DEBUG` - Detailed debugging information
-- `TRACE` - Very detailed trace information
+- Pool information cached for 5 minutes
+- Balance queries cached for 30 seconds
+- Network status cached for 60 seconds
 
-### Log Formats
-- `compact` - Human-readable compact format
-- `pretty` - Pretty-printed format with colors
-- `json` - Structured JSON format for log aggregation
+## Security
 
-### Metrics
-The server tracks various metrics:
-- Request count and response times
-- Transaction success/failure rates
-- Active wallet count
-- Pool query statistics
-- Error rate by category
+### Private Key Management
+- Private keys never exposed in MCP responses
+- Mnemonics handled securely in memory
+- Wallet encryption when persisted
 
-## 🤝 Contributing
+### Environment Variable Security
+When using `WALLET_MNEMONIC` for automation:
+- **Development/Testing Only** - Never use in production environments
+- **Secure Storage** - Store in secure environment variable systems (e.g., GitHub Secrets, HashiCorp Vault)
+- **Process Isolation** - Ensure environment is not shared with untrusted processes
+- **Cleanup** - Unset the variable after use: `unset WALLET_MNEMONIC`
+- **CI/CD Security** - Use encrypted secrets in CI/CD pipelines, never commit to repositories
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/new-tool`
-3. Make your changes and add tests
-4. Run the test suite: `cargo test`
-5. Commit your changes: `git commit -m "Add new tool"`
-6. Push to the branch: `git push origin feature/new-tool`
-7. Submit a pull request
+### Input Validation
+All tool parameters validated before SDK calls:
 
-## 📄 License
+```rust
+fn validate_amount(amount: &str) -> Result<u128, McpError> {
+    amount.parse::<u128>()
+        .map_err(|_| McpError::InvalidParams("Invalid amount format".to_string()))
+}
+```
 
-This project is licensed under the MIT License - see the [LICENSE](../../LICENSE) file for details.
+## Contributing
 
-## 🆘 Support
+1. Implement new features in SDK core first (`../client.rs`)
+2. Add MCP wrapper in `sdk_adapter.rs`
+3. Add comprehensive tests
+4. Update documentation
+5. Ensure error handling follows existing patterns
 
-- **Documentation**: Check the [User Guide](MCP_USER_GUIDE.md) and [Cursor Integration Guide](CURSOR_INTEGRATION_GUIDE.md)
-- **Issues**: Report issues on the GitHub repository
-- **Discord**: Join the Mantra community Discord for support
+## Debugging
 
-## 🔗 Links
+Enable debug logging:
+```bash
+RUST_LOG=debug cargo run --features mcp --bin mcp-server -- --debug
+```
 
-- [Mantra Blockchain](https://mantrachain.io/)
-- [Model Context Protocol](https://modelcontextprotocol.io/)
-- [Cursor IDE](https://cursor.com/)
-- [Mantra DEX Documentation](https://docs.mantrachain.io/)
+Use JSON logging for structured output:
+```bash
+MCP_LOG_FORMAT=json cargo run --features mcp --bin mcp-server
+```
 
----
+## Integration with AI Tools
 
-**Built with ❤️ for the Mantra ecosystem** 
+The server works with any MCP-compatible client. For Claude Code integration, add to your MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "mantra-dex": {
+      "command": "/path/to/mantra-dex-sdk/target/release/mcp-server",
+        "args": ["--transport", "stdio", "--network", "mantra-dukong"],
+        "env": {
+          "RUST_LOG": "info",
+          "MCP_LOG_LEVEL": "debug",
+          "WALLET_MNEMONIC": "your twelve or twenty four words mnemonic"
+        }
+    }
+  }
+}
+```
