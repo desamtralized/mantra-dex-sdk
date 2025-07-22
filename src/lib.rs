@@ -1,6 +1,7 @@
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod skip_adapter;
 pub mod wallet;
 
 // TUI module - optional via "tui" feature
@@ -16,6 +17,11 @@ pub use mantra_dex_std;
 pub use client::MantraDexClient;
 pub use config::{MantraNetworkConfig, NetworkConstants};
 pub use error::Error;
+pub use skip_adapter::{
+    SkipAction, SkipAffiliate, SkipAsset, SkipIbcInfo, SkipRoute, SkipSwap, SkipSwapExactAssetIn, 
+    SkipSwapExactAssetOut, SkipSwapOperation, SimulateSwapExactAssetInResponse, 
+    SimulateSwapExactAssetOutResponse, SimulateSmartSwapExactAssetInResponse
+};
 pub use wallet::MantraWallet;
 
 // Re-export TUI entry point when feature is enabled

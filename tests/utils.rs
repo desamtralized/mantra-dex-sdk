@@ -63,6 +63,9 @@ pub mod test_utils {
             farm_manager: farm_manager.ok(),
             fee_collector: fee_collector.ok(),
             epoch_manager: epoch_manager.ok(),
+            skip_entry_point: None,
+            skip_ibc_hooks_adapter: None,
+            skip_mantra_dex_adapter: None,
         }
     }
 

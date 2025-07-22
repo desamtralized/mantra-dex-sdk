@@ -1426,4 +1426,292 @@ impl MantraDexClient {
 
         Ok(pool_fees)
     }
+
+    // =========================
+    // Skip Adapter Functionality
+    // =========================
+
+    /// Execute a swap through Skip Adapter
+    ///
+    /// This method enables cross-chain and advanced routing functionality through Skip's adapter system.
+    /// The swap is routed through the Skip entry point contract which manages multi-hop operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `operations` - Vector of skip swap operations defining the swap path
+    /// * `offer_coin` - The coin to offer for the swap
+    /// * `min_receive_amount` - Minimum amount to receive (for slippage protection)
+    /// * `receiver` - Optional receiver address (defaults to sender if None)
+    ///
+    /// # Returns
+    ///
+    /// Transaction response containing the swap result
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if Skip adapter contracts are not configured
+    /// * Returns error if the swap transaction fails
+    /// * Returns error if no wallet is configured
+    pub async fn execute_skip_swap(
+        &self,
+        operations: Vec<crate::skip_adapter::SkipSwapOperation>,
+        offer_coin: Coin,
+        min_receive_amount: Option<Uint128>,
+        receiver: Option<String>,
+    ) -> Result<TxResponse, Error> {
+        let skip_entry_point = self
+            .config
+            .contracts
+            .skip_entry_point
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other("Skip entry point contract address not configured".to_string())
+            })?;
+
+        // Get the output denom from the last operation
+        let output_denom = operations
+            .last()
+            .map(|op| op.denom_out.clone())
+            .ok_or_else(|| Error::Other("No swap operations provided".to_string()))?;
+
+        // Calculate minimum receive amount (default to 95% of input for basic slippage protection)
+        let min_amount = min_receive_amount.unwrap_or_else(|| {
+            // Basic slippage protection: expect at least 95% of input value
+            let slippage_factor = Decimal::from_str("0.95").unwrap_or(Decimal::percent(95));
+            offer_coin.amount.multiply_ratio(slippage_factor.atomics(), Decimal::one().atomics())
+        });
+
+        // Create the swap structure
+        let swap = crate::skip_adapter::SkipSwap::SwapExactAssetIn(
+            crate::skip_adapter::SkipSwapExactAssetIn {
+                swap_venue_name: "mantra-dex".to_string(),
+                operations,
+            }
+        );
+
+        // Create assets
+        let remaining_asset = crate::skip_adapter::SkipAsset::Native(offer_coin.clone());
+        let min_asset = crate::skip_adapter::SkipAsset::Native(Coin {
+            denom: output_denom,
+            amount: min_amount,
+        });
+
+        // Get receiver address
+        let _receiver_addr = match receiver {
+            Some(addr) => addr,
+            None => {
+                let wallet = self.wallet.as_ref().ok_or_else(|| {
+                    Error::Other("No wallet configured for Skip swap".to_string())
+                })?;
+                wallet.address()?.to_string()
+            }
+        };
+
+        let msg = crate::skip_adapter::SkipEntryPointExecuteMsg::UserSwap {
+            swap,
+            min_asset,
+            remaining_asset,
+            affiliates: vec![], // No affiliates for basic swap
+        };
+
+        self.execute(skip_entry_point, &msg, vec![offer_coin])
+            .await
+    }
+
+    /// Execute a swap with cross-chain action through Skip Adapter
+    ///
+    /// This method combines a swap with a subsequent action like IBC transfer.
+    ///
+    /// # Arguments
+    ///
+    /// * `operations` - Vector of skip swap operations
+    /// * `offer_coin` - The coin to offer for the swap
+    /// * `min_receive_amount` - Minimum amount to receive
+    /// * `action` - Post-swap action to execute
+    /// * `affiliates` - Optional affiliate addresses for fee sharing
+    ///
+    /// # Returns
+    ///
+    /// Transaction response containing the swap and action result
+    pub async fn execute_skip_swap_and_action(
+        &self,
+        operations: Vec<crate::skip_adapter::SkipSwapOperation>,
+        offer_coin: Coin,
+        min_receive_amount: Uint128,
+        action: crate::skip_adapter::SkipAction,
+        affiliates: Option<Vec<crate::skip_adapter::SkipAffiliate>>,
+    ) -> Result<TxResponse, Error> {
+        let skip_entry_point = self
+            .config
+            .contracts
+            .skip_entry_point
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other("Skip entry point contract address not configured".to_string())
+            })?;
+
+        let output_denom = operations
+            .last()
+            .map(|op| op.denom_out.clone())
+            .ok_or_else(|| Error::Other("No swap operations provided".to_string()))?;
+
+        let swap = crate::skip_adapter::SkipSwap::SwapExactAssetIn(
+            crate::skip_adapter::SkipSwapExactAssetIn {
+                swap_venue_name: "mantra-dex".to_string(),
+                operations,
+            }
+        );
+
+        let remaining_asset = crate::skip_adapter::SkipAsset::Native(offer_coin.clone());
+        let min_asset = crate::skip_adapter::SkipAsset::Native(Coin {
+            denom: output_denom,
+            amount: min_receive_amount,
+        });
+
+        let msg = crate::skip_adapter::SkipEntryPointExecuteMsg::SwapAndAction {
+            swap,
+            min_asset,
+            remaining_asset,
+            post_swap_action: action,
+            affiliates: affiliates.unwrap_or_default(),
+        };
+
+        self.execute(skip_entry_point, &msg, vec![offer_coin])
+            .await
+    }
+
+    /// Simulate a swap exact asset in through Skip Adapter
+    ///
+    /// This method simulates a swap through the Skip adapter system without executing it.
+    /// Useful for getting expected output amounts and fees before executing the actual swap.
+    ///
+    /// # Arguments
+    ///
+    /// * `asset_in` - The asset to swap in
+    /// * `swap_operations` - Vector of swap operations to perform
+    ///
+    /// # Returns
+    ///
+    /// Simulation response containing expected output and spot price information
+    pub async fn simulate_skip_swap_exact_asset_in(
+        &self,
+        asset_in: crate::skip_adapter::SkipAsset,
+        swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
+    ) -> Result<crate::skip_adapter::SimulateSwapExactAssetInResponse, Error> {
+        let skip_mantra_dex_adapter = self
+            .config
+            .contracts
+            .skip_mantra_dex_adapter
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
+            })?;
+
+        let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSwapExactAssetIn {
+            asset_in,
+            swap_operations,
+        };
+
+        self.query(skip_mantra_dex_adapter, &query).await
+    }
+
+    /// Simulate a swap exact asset out through Skip Adapter
+    ///
+    /// This method simulates a reverse swap through the Skip adapter system.
+    /// It calculates how much input asset is needed to get a specific output amount.
+    ///
+    /// # Arguments
+    ///
+    /// * `asset_out` - The desired output asset and amount
+    /// * `swap_operations` - Vector of swap operations to perform
+    ///
+    /// # Returns
+    ///
+    /// Simulation response containing required input and spot price information
+    pub async fn simulate_skip_swap_exact_asset_out(
+        &self,
+        asset_out: crate::skip_adapter::SkipAsset,
+        swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
+    ) -> Result<crate::skip_adapter::SimulateSwapExactAssetOutResponse, Error> {
+        let skip_mantra_dex_adapter = self
+            .config
+            .contracts
+            .skip_mantra_dex_adapter
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
+            })?;
+
+        let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSwapExactAssetOut {
+            asset_out,
+            swap_operations,
+        };
+
+        self.query(skip_mantra_dex_adapter, &query).await
+    }
+
+    /// Simulate a smart swap exact asset in through Skip Adapter
+    ///
+    /// This method simulates an intelligent multi-route swap that can split the input
+    /// across multiple paths for optimal execution through the Skip adapter system.
+    ///
+    /// # Arguments
+    ///
+    /// * `asset_in` - The asset to swap in
+    /// * `routes` - Vector of possible routes to consider for the swap
+    ///
+    /// # Returns
+    ///
+    /// Simulation response containing expected output and spot price information
+    pub async fn simulate_skip_smart_swap_exact_asset_in(
+        &self,
+        asset_in: crate::skip_adapter::SkipAsset,
+        routes: Vec<crate::skip_adapter::SkipRoute>,
+    ) -> Result<crate::skip_adapter::SimulateSmartSwapExactAssetInResponse, Error> {
+        let skip_mantra_dex_adapter = self
+            .config
+            .contracts
+            .skip_mantra_dex_adapter
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
+            })?;
+
+        let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSmartSwapExactAssetIn {
+            asset_in,
+            routes,
+        };
+
+        self.query(skip_mantra_dex_adapter, &query).await
+    }
+
+    /// Check if Skip Adapter functionality is available
+    ///
+    /// This method checks if all required Skip adapter contract addresses are configured.
+    ///
+    /// # Returns
+    ///
+    /// `true` if Skip adapter contracts are configured, `false` otherwise
+    pub fn is_skip_adapter_available(&self) -> bool {
+        self.config.contracts.skip_entry_point.is_some()
+            && self.config.contracts.skip_ibc_hooks_adapter.is_some()
+            && self.config.contracts.skip_mantra_dex_adapter.is_some()
+    }
+
+    /// Get Skip adapter contract addresses
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing (entry_point, ibc_hooks_adapter, mantra_dex_adapter) addresses if available
+    pub fn get_skip_adapter_addresses(&self) -> Option<(String, String, String)> {
+        if let (Some(entry_point), Some(ibc_hooks), Some(mantra_dex)) = (
+            self.config.contracts.skip_entry_point.as_ref(),
+            self.config.contracts.skip_ibc_hooks_adapter.as_ref(),
+            self.config.contracts.skip_mantra_dex_adapter.as_ref(),
+        ) {
+            Some((entry_point.clone(), ibc_hooks.clone(), mantra_dex.clone()))
+        } else {
+            None
+        }
+    }
 }

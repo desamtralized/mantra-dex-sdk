@@ -18,6 +18,10 @@ name = "mcp-server"
 path = "src/bin/mcp.rs"
 required-features = ["mcp"]
 
+[[bin]]
+name = "get-wallet-address"
+path = "src/bin/get_wallet_address.rs"
+
 
 [package.metadata.commands]
 mcp = "cargo run --bin mcp-server --features mcp"

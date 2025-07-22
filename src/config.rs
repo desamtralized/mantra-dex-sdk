@@ -82,6 +82,10 @@ pub struct ContractAddresses {
     pub fee_collector: Option<String>,
     /// Epoch manager contract address
     pub epoch_manager: Option<String>,
+    /// Skip Adapter contracts
+    pub skip_entry_point: Option<String>,
+    pub skip_ibc_hooks_adapter: Option<String>,
+    pub skip_mantra_dex_adapter: Option<String>,
 }
 
 impl Default for ContractAddresses {
@@ -91,6 +95,9 @@ impl Default for ContractAddresses {
             farm_manager: None,
             fee_collector: None,
             epoch_manager: None,
+            skip_entry_point: None,
+            skip_ibc_hooks_adapter: None,
+            skip_mantra_dex_adapter: None,
         }
     }
 }
@@ -155,6 +162,9 @@ impl MantraNetworkConfig {
                 let farm_manager_key = format!("{}.farm_manager.address", network);
                 let fee_collector_key = format!("{}.fee_collector.address", network);
                 let epoch_manager_key = format!("{}.epoch_manager.address", network);
+                let skip_entry_point_key = format!("{}.skip_entry_point.address", network);
+                let skip_ibc_hooks_adapter_key = format!("{}.skip_ibc_hooks_adapter.address", network);
+                let skip_mantra_dex_adapter_key = format!("{}.skip_mantra_dex_adapter.address", network);
 
                 if let Ok(pool_manager) = settings.get::<String>(&pool_manager_key) {
                     return ContractAddresses {
@@ -162,6 +172,9 @@ impl MantraNetworkConfig {
                         farm_manager: settings.get::<String>(&farm_manager_key).ok(),
                         fee_collector: settings.get::<String>(&fee_collector_key).ok(),
                         epoch_manager: settings.get::<String>(&epoch_manager_key).ok(),
+                        skip_entry_point: settings.get::<String>(&skip_entry_point_key).ok(),
+                        skip_ibc_hooks_adapter: settings.get::<String>(&skip_ibc_hooks_adapter_key).ok(),
+                        skip_mantra_dex_adapter: settings.get::<String>(&skip_mantra_dex_adapter_key).ok(),
                     };
                 }
             }
@@ -176,10 +189,19 @@ impl MantraNetworkConfig {
                     "mantra1h3ypj6fhpn4tegj0flhx42j5c4jejq45dypyjy7wdpr268amh5ssa4nnzf".to_string(),
                 ),
                 fee_collector: Some(
-                    "mantra1ze9rccntuvd37gs5fv8ddtjtay4944zn3mksdnne8zyntjmgsg9syav".to_string(),
+                    "mantra1ze9rccntuvd37gs5fv8ddtjtaytaj4944zn3mksdnne8zyntjmgsg9syav".to_string(),
                 ),
                 epoch_manager: Some(
                     "mantra1kz0gcs8n0qa9rje5zdrlwqccxlwu8zttzmdtxhdq0jpk3efjs37qr4s2sv".to_string(),
+                ),
+                skip_entry_point: Some(
+                    "mantra1tvzd32qxkez6yh8km9y466mfgvyt5hfsuvnkpw7egugqf34q9rasz97yqm".to_string(),
+                ),
+                skip_ibc_hooks_adapter: Some(
+                    "mantra1lhp5e4pj6a8su7vt0u8fyztuvds8a7972w2j907c5yt06x62pf9scwwsgd".to_string(),
+                ),
+                skip_mantra_dex_adapter: Some(
+                    "mantra16lgyy3g30tjvtlks7804xd54ldgfdfgqc92kx2u4t7zyax38flcqc7ypnr".to_string(),
                 ),
             },
             _ => ContractAddresses::default(),
