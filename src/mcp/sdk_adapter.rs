@@ -1458,7 +1458,10 @@ impl McpSdkAdapter {
             McpServerError::Internal(format!("Failed to load network constants: {}", e))
         })?;
 
-        Ok(MantraNetworkConfig::from_constants(&network_constants))
+        let network_config = MantraNetworkConfig::from_constants(&network_constants).map_err(|e| {
+            McpServerError::Internal(format!("Failed to create network config: {}", e))
+        })?;
+        Ok(network_config)
     }
 
     // =========================================================================

@@ -94,7 +94,19 @@ pub mod test_utils {
             NetworkConstants::load(network).expect("Failed to load network constants");
 
         // Create network config from constants
-        let mut network_config = MantraNetworkConfig::from_constants(&network_constants);
+        let mut network_config = MantraNetworkConfig::from_constants(&network_constants)
+            .unwrap_or_else(|_| {
+                // Fallback to using the network constants with default contract addresses
+                MantraNetworkConfig {
+                    network_name: network_constants.network_name.clone(),
+                    chain_id: network_constants.chain_id.clone(),
+                    rpc_url: network_constants.default_rpc.clone(),
+                    gas_price: network_constants.default_gas_price,
+                    gas_adjustment: network_constants.default_gas_adjustment,
+                    native_denom: network_constants.native_denom.clone(),
+                    contracts: Default::default(),
+                }
+            });
 
         // Load contract addresses
         network_config.contracts = load_contract_addresses(network);

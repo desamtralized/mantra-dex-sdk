@@ -18,11 +18,6 @@ name = "mcp-server"
 path = "src/bin/mcp.rs"
 required-features = ["mcp"]
 
-[[bin]]
-name = "get-wallet-address"
-path = "src/bin/get_wallet_address.rs"
-
-
 [package.metadata.commands]
 mcp = "cargo run --bin mcp-server --features mcp"
 tui = "cargo run --bin mantra-dex-tui --features tui"
@@ -115,7 +110,7 @@ tempfile = "3.8"
 # Note: Use cargo run --bin mantra-dex-tui --features tui to start the TUI
 # Examples:
 #   cargo run --bin mantra-dex-tui --features tui --help
-#   cargo run --bin mantra-dex-tui --features tui --network testnet  
+#   cargo run --bin mantra-dex-tui --features tui --network testnet
 #   cargo run --bin mantra-dex-tui --features tui --network mainnet
 #
 # MCP Server Development:
