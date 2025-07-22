@@ -2,6 +2,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use base64::{engine::general_purpose, Engine};
+use chrono;
 use cosmos_sdk_proto::{
     cosmos::auth::v1beta1::{BaseAccount, QueryAccountRequest, QueryAccountResponse},
     cosmos::bank::v1beta1::{QueryAllBalancesRequest, QueryAllBalancesResponse},
@@ -1507,11 +1508,15 @@ impl MantraDexClient {
             }
         };
 
-        let msg = crate::skip_adapter::SkipEntryPointExecuteMsg::UserSwap {
-            swap,
+        let msg = crate::skip_adapter::SkipEntryPointExecuteMsg::SwapAndAction {
+            sent_asset: Some(remaining_asset),
+            user_swap: swap,
             min_asset,
-            remaining_asset,
-            affiliates: vec![], // No affiliates for basic swap
+            timeout_timestamp: (chrono::Utc::now().timestamp() as u64 + 3600) * 1_000_000_000,
+            post_swap_action: crate::skip_adapter::SkipAction::Transfer {
+                to_address: _receiver_addr,
+            },
+            affiliates: vec![],
         };
 
         self.execute(skip_entry_point, &msg, vec![offer_coin])
@@ -1569,9 +1574,10 @@ impl MantraDexClient {
         });
 
         let msg = crate::skip_adapter::SkipEntryPointExecuteMsg::SwapAndAction {
-            swap,
+            sent_asset: Some(remaining_asset),
+            user_swap: swap,
             min_asset,
-            remaining_asset,
+            timeout_timestamp: (chrono::Utc::now().timestamp() as u64 + 3600) * 1_000_000_000,
             post_swap_action: action,
             affiliates: affiliates.unwrap_or_default(),
         };
@@ -1592,12 +1598,12 @@ impl MantraDexClient {
     ///
     /// # Returns
     ///
-    /// Simulation response containing expected output and spot price information
+    /// The expected output asset from the simulation
     pub async fn simulate_skip_swap_exact_asset_in(
         &self,
         asset_in: crate::skip_adapter::SkipAsset,
         swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
-    ) -> Result<crate::skip_adapter::SimulateSwapExactAssetInResponse, Error> {
+    ) -> Result<crate::skip_adapter::SkipAsset, Error> {
         let skip_mantra_dex_adapter = self
             .config
             .contracts
@@ -1612,6 +1618,7 @@ impl MantraDexClient {
             swap_operations,
         };
 
+        // Contract returns the output asset directly
         self.query(skip_mantra_dex_adapter, &query).await
     }
 
@@ -1627,12 +1634,12 @@ impl MantraDexClient {
     ///
     /// # Returns
     ///
-    /// Simulation response containing required input and spot price information
+    /// The required input asset for the simulation
     pub async fn simulate_skip_swap_exact_asset_out(
         &self,
         asset_out: crate::skip_adapter::SkipAsset,
         swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
-    ) -> Result<crate::skip_adapter::SimulateSwapExactAssetOutResponse, Error> {
+    ) -> Result<crate::skip_adapter::SkipAsset, Error> {
         let skip_mantra_dex_adapter = self
             .config
             .contracts
@@ -1647,6 +1654,7 @@ impl MantraDexClient {
             swap_operations,
         };
 
+        // Contract returns the required input asset directly
         self.query(skip_mantra_dex_adapter, &query).await
     }
 
@@ -1662,12 +1670,12 @@ impl MantraDexClient {
     ///
     /// # Returns
     ///
-    /// Simulation response containing expected output and spot price information
+    /// The expected output asset from the optimal route simulation
     pub async fn simulate_skip_smart_swap_exact_asset_in(
         &self,
         asset_in: crate::skip_adapter::SkipAsset,
         routes: Vec<crate::skip_adapter::SkipRoute>,
-    ) -> Result<crate::skip_adapter::SimulateSmartSwapExactAssetInResponse, Error> {
+    ) -> Result<crate::skip_adapter::SkipAsset, Error> {
         let skip_mantra_dex_adapter = self
             .config
             .contracts
@@ -1680,6 +1688,120 @@ impl MantraDexClient {
         let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSmartSwapExactAssetIn {
             asset_in,
             routes,
+        };
+
+        self.query(skip_mantra_dex_adapter, &query).await
+    }
+
+    /// Simulate a swap operation with exact asset in and metadata through Skip Adapter
+    ///
+    /// This method provides additional metadata like spot price information
+    /// in addition to the basic simulation results.
+    ///
+    /// # Arguments
+    ///
+    /// * `asset_in` - The asset to be swapped in
+    /// * `swap_operations` - Vector of swap operations to perform  
+    /// * `include_spot_price` - Whether to include spot price calculation
+    ///
+    /// # Returns
+    ///
+    /// Response containing the output asset and optional spot price metadata
+    pub async fn simulate_skip_swap_exact_asset_in_with_metadata(
+        &self,
+        asset_in: crate::skip_adapter::SkipAsset,
+        swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
+        include_spot_price: bool,
+    ) -> Result<crate::skip_adapter::SimulateSwapExactAssetInResponse, Error> {
+        let skip_mantra_dex_adapter = self
+            .config
+            .contracts
+            .skip_mantra_dex_adapter
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
+            })?;
+
+        let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSwapExactAssetInWithMetadata {
+            asset_in,
+            swap_operations,
+            include_spot_price,
+        };
+
+        self.query(skip_mantra_dex_adapter, &query).await
+    }
+
+    /// Simulate a swap operation with exact asset out and metadata through Skip Adapter
+    ///
+    /// This method provides additional metadata like spot price information
+    /// in addition to the basic simulation results.
+    ///
+    /// # Arguments
+    ///
+    /// * `asset_out` - The desired output asset amount
+    /// * `swap_operations` - Vector of swap operations to perform
+    /// * `include_spot_price` - Whether to include spot price calculation
+    ///
+    /// # Returns
+    ///
+    /// Response containing the required input asset and optional spot price metadata
+    pub async fn simulate_skip_swap_exact_asset_out_with_metadata(
+        &self,
+        asset_out: crate::skip_adapter::SkipAsset,
+        swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
+        include_spot_price: bool,
+    ) -> Result<crate::skip_adapter::SimulateSwapExactAssetOutResponse, Error> {
+        let skip_mantra_dex_adapter = self
+            .config
+            .contracts
+            .skip_mantra_dex_adapter
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
+            })?;
+
+        let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSwapExactAssetOutWithMetadata {
+            asset_out,
+            swap_operations,
+            include_spot_price,
+        };
+
+        self.query(skip_mantra_dex_adapter, &query).await
+    }
+
+    /// Simulate a smart swap operation with exact asset in and metadata through Skip Adapter
+    ///
+    /// This method provides additional metadata like spot price information
+    /// for multi-route smart swap operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `asset_in` - The asset to be swapped in
+    /// * `routes` - Vector of routes for smart swap optimization
+    /// * `include_spot_price` - Whether to include spot price calculation
+    ///
+    /// # Returns
+    ///
+    /// Response containing the output asset and optional spot price metadata
+    pub async fn simulate_skip_smart_swap_exact_asset_in_with_metadata(
+        &self,
+        asset_in: crate::skip_adapter::SkipAsset,
+        routes: Vec<crate::skip_adapter::SkipRoute>,
+        include_spot_price: bool,
+    ) -> Result<crate::skip_adapter::SimulateSmartSwapExactAssetInResponse, Error> {
+        let skip_mantra_dex_adapter = self
+            .config
+            .contracts
+            .skip_mantra_dex_adapter
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
+            })?;
+
+        let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSmartSwapExactAssetInWithMetadata {
+            asset_in,
+            routes,
+            include_spot_price,
         };
 
         self.query(skip_mantra_dex_adapter, &query).await

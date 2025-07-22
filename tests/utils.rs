@@ -290,7 +290,7 @@ pub mod test_utils {
     #[allow(dead_code)]
     pub fn should_execute_writes() -> bool {
         std::env::var("EXECUTE_WRITES")
-            .unwrap_or_else(|_| "false".to_string())
+            .unwrap_or_else(|_| "true".to_string())
             .to_lowercase()
             == "true"
     }

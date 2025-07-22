@@ -88,12 +88,14 @@ pub enum SkipEntryPointExecuteMsg {
     },
     /// Swap and action combined
     SwapAndAction {
-        /// The swap to execute
-        swap: SkipSwap,
+        /// The asset being sent (optional)
+        sent_asset: Option<SkipAsset>,
+        /// The user swap to execute
+        user_swap: SkipSwap,
         /// Minimum asset to receive
         min_asset: SkipAsset,
-        /// Remaining asset info  
-        remaining_asset: SkipAsset,
+        /// Timeout timestamp in nanoseconds
+        timeout_timestamp: u64,
         /// Action to execute after swap
         post_swap_action: SkipAction,
         /// Affiliate addresses for fee sharing
@@ -203,6 +205,33 @@ pub enum SkipEntryPointQueryMsg {
         /// Routes to consider
         routes: Vec<SkipRoute>,
     },
+    /// Simulate a swap exact asset in with metadata
+    SimulateSwapExactAssetInWithMetadata {
+        /// Asset to swap in
+        asset_in: SkipAsset,
+        /// Swap operations to perform
+        swap_operations: Vec<SkipSwapOperation>,
+        /// Whether to include spot price in response
+        include_spot_price: bool,
+    },
+    /// Simulate a swap exact asset out with metadata
+    SimulateSwapExactAssetOutWithMetadata {
+        /// Asset to get out
+        asset_out: SkipAsset,
+        /// Swap operations to perform
+        swap_operations: Vec<SkipSwapOperation>,
+        /// Whether to include spot price in response
+        include_spot_price: bool,
+    },
+    /// Simulate a smart swap exact asset in with metadata
+    SimulateSmartSwapExactAssetInWithMetadata {
+        /// Asset to swap in
+        asset_in: SkipAsset,
+        /// Routes to consider
+        routes: Vec<SkipRoute>,
+        /// Whether to include spot price in response
+        include_spot_price: bool,
+    },
 }
 
 /// Simulate swap exact asset in response
@@ -213,6 +242,9 @@ pub struct SimulateSwapExactAssetInResponse {
     /// Optional spot price
     pub spot_price: Option<Decimal>,
 }
+
+/// Alternative response format that matches actual contract response
+pub type SimulateSwapExactAssetInDirectResponse = SkipAsset;
 
 /// Simulate swap exact asset out response
 #[derive(Debug, Clone, Serialize, Deserialize)]
