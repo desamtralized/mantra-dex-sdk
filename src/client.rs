@@ -1446,6 +1446,59 @@ impl MantraDexClient {
     // Skip Adapter Functionality
     // =========================
 
+    /// Internal helper method for executing Skip swaps with common logic
+    async fn execute_skip_swap_internal(
+        &self,
+        operations: Vec<crate::skip_adapter::SkipSwapOperation>,
+        offer_coin: Coin,
+        min_receive_amount: Uint128,
+        post_swap_action: crate::skip_adapter::SkipAction,
+        affiliates: Vec<crate::skip_adapter::SkipAffiliate>,
+    ) -> Result<TxResponse, Error> {
+        let skip_entry_point = self
+            .config
+            .contracts
+            .skip_entry_point
+            .as_ref()
+            .ok_or_else(|| {
+                Error::Other("Skip entry point contract address not configured".to_string())
+            })?;
+
+        // Get the output denom from the last operation
+        let output_denom = operations
+            .last()
+            .map(|op| op.denom_out.clone())
+            .ok_or_else(|| Error::Other("No swap operations provided".to_string()))?;
+
+        // Create the swap structure
+        let swap = crate::skip_adapter::SkipSwap::SwapExactAssetIn(
+            crate::skip_adapter::SkipSwapExactAssetIn {
+                swap_venue_name: "mantra-dex".to_string(),
+                operations,
+            }
+        );
+
+        // Create assets
+        let remaining_asset = crate::skip_adapter::SkipAsset::Native(offer_coin.clone());
+        let min_asset = crate::skip_adapter::SkipAsset::Native(Coin {
+            denom: output_denom,
+            amount: min_receive_amount,
+        });
+
+        let msg = crate::skip_adapter::SkipEntryPointExecuteMsg::SwapAndAction {
+            sent_asset: Some(remaining_asset),
+            user_swap: swap,
+            min_asset,
+            // Timeout: current time + 15 minutes, converted to nanoseconds (improved UX)
+            timeout_timestamp: (chrono::Utc::now().timestamp() as u64 + 900) * 1_000_000_000,
+            post_swap_action,
+            affiliates,
+        };
+
+        self.execute(skip_entry_point, &msg, vec![offer_coin])
+            .await
+    }
+
     /// Execute a swap through Skip Adapter
     ///
     /// This method enables cross-chain and advanced routing functionality through Skip's adapter system.
@@ -1485,41 +1538,11 @@ impl MantraDexClient {
             return Err(Error::Other("Offer coin denom cannot be empty".to_string()));
         }
 
-        let skip_entry_point = self
-            .config
-            .contracts
-            .skip_entry_point
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Other("Skip entry point contract address not configured".to_string())
-            })?;
-
-        // Get the output denom from the last operation
-        let output_denom = operations
-            .last()
-            .map(|op| op.denom_out.clone())
-            .ok_or_else(|| Error::Other("No swap operations provided".to_string()))?;
-
         // Calculate minimum receive amount (default to 95% of input for basic slippage protection)
         let min_amount = min_receive_amount.unwrap_or_else(|| {
             // Basic slippage protection: expect at least 95% of input value
             let slippage_factor = Decimal::from_str("0.95").unwrap_or(Decimal::percent(95));
             offer_coin.amount.multiply_ratio(slippage_factor.atomics(), Decimal::one().atomics())
-        });
-
-        // Create the swap structure
-        let swap = crate::skip_adapter::SkipSwap::SwapExactAssetIn(
-            crate::skip_adapter::SkipSwapExactAssetIn {
-                swap_venue_name: "mantra-dex".to_string(),
-                operations,
-            }
-        );
-
-        // Create assets
-        let remaining_asset = crate::skip_adapter::SkipAsset::Native(offer_coin.clone());
-        let min_asset = crate::skip_adapter::SkipAsset::Native(Coin {
-            denom: output_denom,
-            amount: min_amount,
         });
 
         // Get receiver address
@@ -1533,20 +1556,17 @@ impl MantraDexClient {
             }
         };
 
-        let msg = crate::skip_adapter::SkipEntryPointExecuteMsg::SwapAndAction {
-            sent_asset: Some(remaining_asset),
-            user_swap: swap,
-            min_asset,
-            // Timeout: current time + 15 minutes, converted to nanoseconds (improved UX)
-            timeout_timestamp: (chrono::Utc::now().timestamp() as u64 + 900) * 1_000_000_000,
-            post_swap_action: crate::skip_adapter::SkipAction::Transfer {
-                to_address: receiver_addr,
-            },
-            affiliates: vec![],
+        let post_swap_action = crate::skip_adapter::SkipAction::Transfer {
+            to_address: receiver_addr,
         };
 
-        self.execute(skip_entry_point, &msg, vec![offer_coin])
-            .await
+        self.execute_skip_swap_internal(
+            operations,
+            offer_coin,
+            min_amount,
+            post_swap_action,
+            vec![],
+        ).await
     }
 
     /// Execute a swap with cross-chain action through Skip Adapter
@@ -1572,45 +1592,13 @@ impl MantraDexClient {
         action: crate::skip_adapter::SkipAction,
         affiliates: Option<Vec<crate::skip_adapter::SkipAffiliate>>,
     ) -> Result<TxResponse, Error> {
-        let skip_entry_point = self
-            .config
-            .contracts
-            .skip_entry_point
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Other("Skip entry point contract address not configured".to_string())
-            })?;
-
-        let output_denom = operations
-            .last()
-            .map(|op| op.denom_out.clone())
-            .ok_or_else(|| Error::Other("No swap operations provided".to_string()))?;
-
-        let swap = crate::skip_adapter::SkipSwap::SwapExactAssetIn(
-            crate::skip_adapter::SkipSwapExactAssetIn {
-                swap_venue_name: "mantra-dex".to_string(),
-                operations,
-            }
-        );
-
-        let remaining_asset = crate::skip_adapter::SkipAsset::Native(offer_coin.clone());
-        let min_asset = crate::skip_adapter::SkipAsset::Native(Coin {
-            denom: output_denom,
-            amount: min_receive_amount,
-        });
-
-        let msg = crate::skip_adapter::SkipEntryPointExecuteMsg::SwapAndAction {
-            sent_asset: Some(remaining_asset),
-            user_swap: swap,
-            min_asset,
-            // Timeout: current time + 15 minutes, converted to nanoseconds (improved UX)
-            timeout_timestamp: (chrono::Utc::now().timestamp() as u64 + 900) * 1_000_000_000,
-            post_swap_action: action,
-            affiliates: affiliates.unwrap_or_default(),
-        };
-
-        self.execute(skip_entry_point, &msg, vec![offer_coin])
-            .await
+        self.execute_skip_swap_internal(
+            operations,
+            offer_coin,
+            min_receive_amount,
+            action,
+            affiliates.unwrap_or_default(),
+        ).await
     }
 
     /// Simulate a swap exact asset in through Skip Adapter
