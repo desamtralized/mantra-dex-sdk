@@ -1446,6 +1446,18 @@ impl MantraDexClient {
     // Skip Adapter Functionality
     // =========================
 
+    /// Get the Skip Mantra DEX adapter contract address
+    fn get_skip_mantra_dex_adapter(&self) -> Result<&str, Error> {
+        self.config
+            .contracts
+            .skip_mantra_dex_adapter
+            .as_ref()
+            .map(|s| s.as_str())
+            .ok_or_else(|| {
+                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
+            })
+    }
+
     /// Internal helper method for executing Skip swaps with common logic
     async fn execute_skip_swap_internal(
         &self,
@@ -1619,14 +1631,7 @@ impl MantraDexClient {
         asset_in: crate::skip_adapter::SkipAsset,
         swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
     ) -> Result<crate::skip_adapter::SkipAsset, Error> {
-        let skip_mantra_dex_adapter = self
-            .config
-            .contracts
-            .skip_mantra_dex_adapter
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
-            })?;
+        let skip_mantra_dex_adapter = self.get_skip_mantra_dex_adapter()?;
 
         let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSwapExactAssetIn {
             asset_in,
@@ -1655,14 +1660,7 @@ impl MantraDexClient {
         asset_out: crate::skip_adapter::SkipAsset,
         swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
     ) -> Result<crate::skip_adapter::SkipAsset, Error> {
-        let skip_mantra_dex_adapter = self
-            .config
-            .contracts
-            .skip_mantra_dex_adapter
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
-            })?;
+        let skip_mantra_dex_adapter = self.get_skip_mantra_dex_adapter()?;
 
         let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSwapExactAssetOut {
             asset_out,
@@ -1691,14 +1689,7 @@ impl MantraDexClient {
         asset_in: crate::skip_adapter::SkipAsset,
         routes: Vec<crate::skip_adapter::SkipRoute>,
     ) -> Result<crate::skip_adapter::SkipAsset, Error> {
-        let skip_mantra_dex_adapter = self
-            .config
-            .contracts
-            .skip_mantra_dex_adapter
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
-            })?;
+        let skip_mantra_dex_adapter = self.get_skip_mantra_dex_adapter()?;
 
         let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSmartSwapExactAssetIn {
             asset_in,
@@ -1728,14 +1719,7 @@ impl MantraDexClient {
         swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
         include_spot_price: bool,
     ) -> Result<crate::skip_adapter::SimulateSwapExactAssetInResponse, Error> {
-        let skip_mantra_dex_adapter = self
-            .config
-            .contracts
-            .skip_mantra_dex_adapter
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
-            })?;
+        let skip_mantra_dex_adapter = self.get_skip_mantra_dex_adapter()?;
 
         let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSwapExactAssetInWithMetadata {
             asset_in,
@@ -1766,14 +1750,7 @@ impl MantraDexClient {
         swap_operations: Vec<crate::skip_adapter::SkipSwapOperation>,
         include_spot_price: bool,
     ) -> Result<crate::skip_adapter::SimulateSwapExactAssetOutResponse, Error> {
-        let skip_mantra_dex_adapter = self
-            .config
-            .contracts
-            .skip_mantra_dex_adapter
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
-            })?;
+        let skip_mantra_dex_adapter = self.get_skip_mantra_dex_adapter()?;
 
         let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSwapExactAssetOutWithMetadata {
             asset_out,
@@ -1804,14 +1781,7 @@ impl MantraDexClient {
         routes: Vec<crate::skip_adapter::SkipRoute>,
         include_spot_price: bool,
     ) -> Result<crate::skip_adapter::SimulateSmartSwapExactAssetInResponse, Error> {
-        let skip_mantra_dex_adapter = self
-            .config
-            .contracts
-            .skip_mantra_dex_adapter
-            .as_ref()
-            .ok_or_else(|| {
-                Error::Other("Skip Mantra DEX adapter contract address not configured".to_string())
-            })?;
+        let skip_mantra_dex_adapter = self.get_skip_mantra_dex_adapter()?;
 
         let query = crate::skip_adapter::SkipEntryPointQueryMsg::SimulateSmartSwapExactAssetInWithMetadata {
             asset_in,
