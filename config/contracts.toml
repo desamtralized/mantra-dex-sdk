@@ -28,3 +28,18 @@ code_id = 825
 version = "1.3.0"
 address = "mantra1vwj600jud78djej7ttq44dktu4wr3t2yrrsjgmld8v3jq8mud68q5w7455"
 # address = "mantra1us7rryvauhpe82fff0t6gjthdraqmtm5gw8c808f6eqzuxmulacqzkzdal"
+
+[mantra-dukong.skip_entry_point]
+code_id = 939
+version = "1.0.0"
+address = "mantra1w3t8gsj3wlsrhjzd5khx7ttwzmp378l7wwd4qglscvvas8kqzjus07gr2m"
+
+[mantra-dukong.skip_ibc_hooks_adapter]
+code_id = 940
+version = "1.0.0"
+address = "mantra1ssle6amdeaw69cuktnuyf9kfsemetmsaypgkuvq399gnscj0vz0s9w7cc3"
+
+[mantra-dukong.skip_mantra_dex_adapter]
+code_id = 941
+version = "1.0.0"
+address = "mantra1jme9j7qskgsg2xc3lk2344mljw3fh8447x6ac0ugkkqk9e9tajfs850ny6"

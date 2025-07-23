@@ -82,6 +82,10 @@ pub struct ContractAddresses {
     pub fee_collector: Option<String>,
     /// Epoch manager contract address
     pub epoch_manager: Option<String>,
+    /// Skip Adapter contracts
+    pub skip_entry_point: Option<String>,
+    pub skip_ibc_hooks_adapter: Option<String>,
+    pub skip_mantra_dex_adapter: Option<String>,
 }
 
 impl Default for ContractAddresses {
@@ -91,6 +95,9 @@ impl Default for ContractAddresses {
             farm_manager: None,
             fee_collector: None,
             epoch_manager: None,
+            skip_entry_point: None,
+            skip_ibc_hooks_adapter: None,
+            skip_mantra_dex_adapter: None,
         }
     }
 }
@@ -116,11 +123,11 @@ pub struct MantraNetworkConfig {
 
 impl MantraNetworkConfig {
     /// Create a new network config from network constants
-    pub fn from_constants(constants: &NetworkConstants) -> Self {
+    pub fn from_constants(constants: &NetworkConstants) -> Result<Self, Error> {
         // Attempt to load contract addresses for this network from `config/contracts.toml`
-        let contracts = Self::load_contract_addresses(&constants.network_name);
+        let contracts = Self::load_contract_addresses(&constants.network_name)?;
 
-        Self {
+        Ok(Self {
             network_name: constants.network_name.clone(),
             chain_id: constants.chain_id.clone(),
             rpc_url: constants.default_rpc.clone(),
@@ -128,13 +135,12 @@ impl MantraNetworkConfig {
             gas_adjustment: constants.default_gas_adjustment,
             native_denom: constants.native_denom.clone(),
             contracts,
-        }
+        })
     }
 
     /// Load contract addresses for the given network from the contracts configuration file.
-    /// If the file or the specific addresses cannot be read, this will return default (empty) addresses
-    /// so the caller can still proceed without panicking.
-    fn load_contract_addresses(network: &str) -> ContractAddresses {
+    /// Returns an error if the contract addresses cannot be loaded.
+    fn load_contract_addresses(network: &str) -> Result<ContractAddresses, Error> {
         // Determine configuration directory – fall back to local `config` directory inside the project
         let config_dir = env::var("MANTRA_CONFIG_DIR").unwrap_or_else(|_| "config".to_string());
 
@@ -155,42 +161,49 @@ impl MantraNetworkConfig {
                 let farm_manager_key = format!("{}.farm_manager.address", network);
                 let fee_collector_key = format!("{}.fee_collector.address", network);
                 let epoch_manager_key = format!("{}.epoch_manager.address", network);
+                let skip_entry_point_key = format!("{}.skip_entry_point.address", network);
+                let skip_ibc_hooks_adapter_key =
+                    format!("{}.skip_ibc_hooks_adapter.address", network);
+                let skip_mantra_dex_adapter_key =
+                    format!("{}.skip_mantra_dex_adapter.address", network);
 
                 if let Ok(pool_manager) = settings.get::<String>(&pool_manager_key) {
-                    return ContractAddresses {
+                    return Ok(ContractAddresses {
                         pool_manager,
                         farm_manager: settings.get::<String>(&farm_manager_key).ok(),
                         fee_collector: settings.get::<String>(&fee_collector_key).ok(),
                         epoch_manager: settings.get::<String>(&epoch_manager_key).ok(),
-                    };
+                        skip_entry_point: settings.get::<String>(&skip_entry_point_key).ok(),
+                        skip_ibc_hooks_adapter: settings
+                            .get::<String>(&skip_ibc_hooks_adapter_key)
+                            .ok(),
+                        skip_mantra_dex_adapter: settings
+                            .get::<String>(&skip_mantra_dex_adapter_key)
+                            .ok(),
+                    });
                 }
             }
         }
 
-        // If we can't load from config, return hardcoded testnet addresses as fallback
-        match network {
-            "mantra-dukong" => ContractAddresses {
-                pool_manager: "mantra1vwj600jud78djej7ttq44dktu4wr3t2yrrsjgmld8v3jq8mud68q5w7455"
-                    .to_string(),
-                farm_manager: Some(
-                    "mantra1h3ypj6fhpn4tegj0flhx42j5c4jejq45dypyjy7wdpr268amh5ssa4nnzf".to_string(),
-                ),
-                fee_collector: Some(
-                    "mantra1ze9rccntuvd37gs5fv8ddtjtay4944zn3mksdnne8zyntjmgsg9syav".to_string(),
-                ),
-                epoch_manager: Some(
-                    "mantra1kz0gcs8n0qa9rje5zdrlwqccxlwu8zttzmdtxhdq0jpk3efjs37qr4s2sv".to_string(),
-                ),
-            },
-            _ => ContractAddresses::default(),
-        }
+        Err(Error::Config(format!(
+            "Contract addresses for network '{}' not found in configuration",
+            network
+        )))
     }
 }
 
 impl Default for MantraNetworkConfig {
     fn default() -> Self {
         match NetworkConstants::default_dukong() {
-            Ok(constants) => Self::from_constants(&constants),
+            Ok(constants) => Self::from_constants(&constants).unwrap_or_else(|_| Self {
+                network_name: constants.network_name,
+                chain_id: constants.chain_id,
+                rpc_url: constants.default_rpc,
+                gas_price: constants.default_gas_price,
+                gas_adjustment: constants.default_gas_adjustment,
+                native_denom: constants.native_denom,
+                contracts: ContractAddresses::default(),
+            }),
             Err(_) => Self {
                 network_name: "mantra-dukong".to_string(),
                 chain_id: "mantra-dukong-1".to_string(),

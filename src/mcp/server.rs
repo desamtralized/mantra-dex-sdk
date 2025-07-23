@@ -1294,7 +1294,14 @@ impl McpServerConfig {
             match network_name.as_str() {
                 "mantra-dukong" => {
                     if let Ok(constants) = NetworkConstants::load("mantra-dukong") {
-                        config.network_config = MantraNetworkConfig::from_constants(&constants);
+                        match MantraNetworkConfig::from_constants(&constants) {
+                            Ok(network_config) => {
+                                config.network_config = network_config;
+                            }
+                            Err(e) => {
+                                warn!("Failed to create network config: {}, using default", e);
+                            }
+                        }
                     } else {
                         warn!("Could not load mantra-dukong constants, using default");
                     }
@@ -1366,7 +1373,16 @@ impl McpServerConfig {
         match network {
             "mantra-dukong" => {
                 if let Ok(constants) = NetworkConstants::load("mantra-dukong") {
-                    config.network_config = MantraNetworkConfig::from_constants(&constants);
+                    match MantraNetworkConfig::from_constants(&constants) {
+                        Ok(network_config) => {
+                            config.network_config = network_config;
+                        }
+                        Err(e) => {
+                            return Err(McpServerError::Network(format!(
+                                "Failed to create network config: {}", e
+                            )));
+                        }
+                    }
                 } else {
                     return Err(McpServerError::Network(
                         "Could not load mantra-dukong network constants".to_string(),
@@ -1708,8 +1724,15 @@ thread_keep_alive = 10
         match network_name {
             "mantra-dukong" => {
                 if let Ok(constants) = NetworkConstants::load("mantra-dukong") {
-                    config.network_config = MantraNetworkConfig::from_constants(&constants);
-                    info!("Applied mantra-dukong network configuration");
+                    match MantraNetworkConfig::from_constants(&constants) {
+                        Ok(network_config) => {
+                            config.network_config = network_config;
+                            info!("Applied mantra-dukong network configuration");
+                        }
+                        Err(e) => {
+                            warn!("Failed to create network config: {}, using default", e);
+                        }
+                    }
                 } else {
                     warn!("Could not load mantra-dukong constants, using default");
                 }
@@ -1853,7 +1876,9 @@ impl McpServerStateData {
         })?;
 
         // Create new network config
-        let _new_network_config = MantraNetworkConfig::from_constants(&constants);
+        let _new_network_config = MantraNetworkConfig::from_constants(&constants).map_err(|e| {
+            McpServerError::Network(format!("Failed to create network config: {}", e))
+        })?;
 
         // Clear existing client and cache
         {
