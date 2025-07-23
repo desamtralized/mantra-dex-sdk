@@ -84,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let disable_colors = matches.get_flag("disable-colors");
 
     // Set up comprehensive logging infrastructure
-    let mut logging_config = LoggingConfig::from_env();
+    let mut logging_config = LoggingConfig::default();
 
     // Override with CLI arguments
     if debug_mode {
