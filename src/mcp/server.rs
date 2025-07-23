@@ -10,7 +10,6 @@ use axum::{extract::State, http::StatusCode, response::Json, routing::post, Rout
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::net::TcpListener;
-use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
@@ -579,339 +578,13 @@ const FEE_VALIDATION_FAILED: i32 = -32110;
 const TIMEOUT_ERROR: i32 = -32111;
 const IO_ERROR: i32 = -32112;
 
-// =============================================================================
-// Async Runtime Configuration and Management
-// =============================================================================
 
-/// Configuration for the async runtime
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AsyncRuntimeConfig {
-    /// Runtime flavor (single-threaded or multi-threaded)
-    pub flavor: RuntimeFlavor,
-    /// Number of worker threads (for multi-threaded runtime)
-    pub worker_threads: Option<usize>,
-    /// Whether to enable I/O operations
-    pub enable_io: bool,
-    /// Whether to enable time operations
-    pub enable_time: bool,
-    /// Maximum blocking threads for blocking operations
-    pub max_blocking_threads: Option<usize>,
-    /// Thread keep alive duration
-    pub thread_keep_alive: Option<Duration>,
-    /// Thread stack size
-    pub thread_stack_size: Option<usize>,
-    /// Global queue interval for work stealing
-    pub global_queue_interval: Option<u32>,
-    /// Event interval for work stealing
-    pub event_interval: Option<u32>,
-}
 
-/// Runtime flavor options
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum RuntimeFlavor {
-    /// Single-threaded current thread runtime
-    CurrentThread,
-    /// Multi-threaded runtime with work stealing
-    MultiThread,
-}
 
-impl Default for AsyncRuntimeConfig {
-    fn default() -> Self {
-        Self {
-            flavor: RuntimeFlavor::MultiThread,
-            worker_threads: None, // Use system default (number of CPUs)
-            enable_io: true,
-            enable_time: true,
-            max_blocking_threads: Some(512), // Reasonable default for blocking operations
-            thread_keep_alive: Some(Duration::from_secs(10)),
-            thread_stack_size: None,         // Use system default
-            global_queue_interval: Some(31), // Default Tokio value
-            event_interval: Some(61),        // Default Tokio value
-        }
-    }
-}
 
-impl AsyncRuntimeConfig {
-    /// Create configuration from environment variables
-    pub fn from_env() -> Self {
-        let mut config = Self::default();
 
-        // Runtime flavor
-        if let Ok(flavor) = env::var("MCP_RUNTIME_FLAVOR") {
-            match flavor.to_lowercase().as_str() {
-                "current_thread" | "single" => config.flavor = RuntimeFlavor::CurrentThread,
-                "multi_thread" | "multi" => config.flavor = RuntimeFlavor::MultiThread,
-                _ => warn!("Invalid runtime flavor '{}', using default", flavor),
-            }
-        }
 
-        // Worker threads
-        if let Ok(threads) = env::var("MCP_WORKER_THREADS") {
-            if let Ok(count) = threads.parse::<usize>() {
-                if count > 0 {
-                    config.worker_threads = Some(count);
-                } else {
-                    warn!("Invalid worker thread count '{}', using default", threads);
-                }
-            }
-        }
 
-        // Max blocking threads
-        if let Ok(blocking) = env::var("MCP_MAX_BLOCKING_THREADS") {
-            if let Ok(count) = blocking.parse::<usize>() {
-                config.max_blocking_threads = Some(count);
-            }
-        }
-
-        // Thread keep alive
-        if let Ok(keep_alive) = env::var("MCP_THREAD_KEEP_ALIVE_SECS") {
-            if let Ok(secs) = keep_alive.parse::<u64>() {
-                config.thread_keep_alive = Some(Duration::from_secs(secs));
-            }
-        }
-
-        // Thread stack size
-        if let Ok(stack_size) = env::var("MCP_THREAD_STACK_SIZE") {
-            if let Ok(size) = stack_size.parse::<usize>() {
-                config.thread_stack_size = Some(size);
-            }
-        }
-
-        config
-    }
-
-    /// Build a Tokio runtime with this configuration
-    pub fn build_runtime(&self) -> Result<Runtime, std::io::Error> {
-        let mut builder = match self.flavor {
-            RuntimeFlavor::CurrentThread => Builder::new_current_thread(),
-            RuntimeFlavor::MultiThread => Builder::new_multi_thread(),
-        };
-
-        // Configure I/O and time
-        if self.enable_io {
-            builder.enable_io();
-        }
-        if self.enable_time {
-            builder.enable_time();
-        }
-
-        // Configure worker threads (multi-threaded only)
-        if self.flavor == RuntimeFlavor::MultiThread {
-            if let Some(threads) = self.worker_threads {
-                builder.worker_threads(threads);
-            }
-        }
-
-        // Configure blocking threads
-        if let Some(max_blocking) = self.max_blocking_threads {
-            builder.max_blocking_threads(max_blocking);
-        }
-
-        // Configure thread settings
-        if let Some(keep_alive) = self.thread_keep_alive {
-            builder.thread_keep_alive(keep_alive);
-        }
-
-        if let Some(stack_size) = self.thread_stack_size {
-            builder.thread_stack_size(stack_size);
-        }
-
-        // Configure work stealing parameters (multi-threaded only)
-        if self.flavor == RuntimeFlavor::MultiThread {
-            if let Some(interval) = self.global_queue_interval {
-                builder.global_queue_interval(interval);
-            }
-            if let Some(interval) = self.event_interval {
-                builder.event_interval(interval);
-            }
-        }
-
-        // Set thread name
-        builder.thread_name("mcp-tokio-worker");
-
-        builder.build()
-    }
-
-    /// Validate the configuration
-    pub fn validate(&self) -> Result<(), String> {
-        if let Some(threads) = self.worker_threads {
-            if threads == 0 {
-                return Err("Worker thread count must be greater than 0".to_string());
-            }
-            if threads > 1024 {
-                return Err("Worker thread count too high (max 1024)".to_string());
-            }
-        }
-
-        if let Some(blocking) = self.max_blocking_threads {
-            if blocking == 0 {
-                return Err("Max blocking threads must be greater than 0".to_string());
-            }
-            if blocking > 10000 {
-                return Err("Max blocking threads too high (max 10000)".to_string());
-            }
-        }
-
-        if let Some(stack_size) = self.thread_stack_size {
-            if stack_size < 1024 * 1024 {
-                return Err("Thread stack size too small (min 1MB)".to_string());
-            }
-        }
-
-        Ok(())
-    }
-}
-
-/// Runtime metrics and monitoring
-#[derive(Debug, Clone)]
-pub struct RuntimeMetrics {
-    /// Runtime start time
-    pub start_time: Instant,
-    /// Number of active tasks
-    pub active_tasks: usize,
-    /// Number of worker threads
-    pub worker_threads: usize,
-    /// Number of blocking threads
-    pub blocking_threads: usize,
-    /// Runtime flavor
-    pub flavor: RuntimeFlavor,
-}
-
-impl RuntimeMetrics {
-    /// Create new runtime metrics
-    pub fn new(config: &AsyncRuntimeConfig) -> Self {
-        Self {
-            start_time: Instant::now(),
-            active_tasks: 0,
-            worker_threads: config.worker_threads.unwrap_or_else(num_cpus::get),
-            blocking_threads: config.max_blocking_threads.unwrap_or(512),
-            flavor: config.flavor.clone(),
-        }
-    }
-
-    /// Get runtime uptime
-    pub fn uptime(&self) -> Duration {
-        self.start_time.elapsed()
-    }
-
-    /// Get runtime metrics as JSON
-    pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "uptime_secs": self.uptime().as_secs(),
-            "active_tasks": self.active_tasks,
-            "worker_threads": self.worker_threads,
-            "blocking_threads": self.blocking_threads,
-            "flavor": match self.flavor {
-                RuntimeFlavor::CurrentThread => "current_thread",
-                RuntimeFlavor::MultiThread => "multi_thread",
-            },
-            "start_time": self.start_time.elapsed().as_secs()
-        })
-    }
-}
-
-/// Async runtime manager for the MCP server
-pub struct AsyncRuntimeManager {
-    /// Runtime configuration
-    config: AsyncRuntimeConfig,
-    /// Runtime metrics
-    metrics: Arc<RwLock<RuntimeMetrics>>,
-    /// Runtime handle (if running in existing runtime)
-    handle: Option<Handle>,
-}
-
-impl AsyncRuntimeManager {
-    /// Create a new runtime manager
-    pub fn new(config: AsyncRuntimeConfig) -> Self {
-        let metrics = RuntimeMetrics::new(&config);
-        Self {
-            config: config.clone(),
-            metrics: Arc::new(RwLock::new(metrics)),
-            handle: None,
-        }
-    }
-
-    /// Initialize the runtime manager with current handle
-    pub fn with_current_handle() -> Self {
-        let config = AsyncRuntimeConfig::from_env();
-        let mut manager = Self::new(config);
-        manager.handle = Some(Handle::current());
-        manager
-    }
-
-    /// Get runtime configuration
-    pub fn config(&self) -> &AsyncRuntimeConfig {
-        &self.config
-    }
-
-    /// Get runtime metrics
-    pub async fn metrics(&self) -> RuntimeMetrics {
-        self.metrics.read().await.clone()
-    }
-
-    /// Update active task count
-    pub async fn update_active_tasks(&self, count: usize) {
-        let mut metrics = self.metrics.write().await;
-        metrics.active_tasks = count;
-    }
-
-    /// Get runtime handle
-    pub fn handle(&self) -> Option<&Handle> {
-        self.handle.as_ref()
-    }
-
-    /// Spawn a task with monitoring
-    pub fn spawn_monitored<T>(&self, future: T) -> tokio::task::JoinHandle<T::Output>
-    where
-        T: std::future::Future + Send + 'static,
-        T::Output: Send + 'static,
-    {
-        let metrics = self.metrics.clone();
-
-        tokio::spawn(async move {
-            // Increment active tasks
-            {
-                let mut m = metrics.write().await;
-                m.active_tasks += 1;
-            }
-
-            let result = future.await;
-
-            // Decrement active tasks
-            {
-                let mut m = metrics.write().await;
-                m.active_tasks = m.active_tasks.saturating_sub(1);
-            }
-
-            result
-        })
-    }
-
-    /// Spawn a blocking task with monitoring
-    pub fn spawn_blocking_monitored<F, R>(&self, f: F) -> tokio::task::JoinHandle<R>
-    where
-        F: FnOnce() -> R + Send + 'static,
-        R: Send + 'static,
-    {
-        let _metrics = self.metrics.clone();
-
-        tokio::task::spawn_blocking(move || {
-            // Note: We don't track blocking tasks in active_tasks as they run on separate thread pool
-            let result = f();
-            result
-        })
-    }
-
-    /// Get runtime health status
-    pub async fn health_status(&self) -> serde_json::Value {
-        let metrics = self.metrics().await;
-        serde_json::json!({
-            "status": "healthy",
-            "runtime": metrics.to_json(),
-            "timestamp": chrono::Utc::now().to_rfc3339()
-        })
-    }
-}
 
 // =============================================================================
 // MCP Server Trait Definitions
@@ -1530,8 +1203,6 @@ pub struct McpServerConfig {
     pub cache_ttl_secs: u64,
     /// Whether to auto-load .env file
     pub auto_load_env: bool,
-    /// Async runtime configuration
-    pub runtime_config: AsyncRuntimeConfig,
 }
 
 impl Default for McpServerConfig {
@@ -1547,7 +1218,6 @@ impl Default for McpServerConfig {
             request_timeout_secs: 30,
             cache_ttl_secs: 300,
             auto_load_env: true,
-            runtime_config: AsyncRuntimeConfig::default(),
         }
     }
 }
@@ -1619,9 +1289,6 @@ impl McpServerConfig {
 
         config.auto_load_env = auto_load_env;
 
-        // Load runtime configuration from environment
-        config.runtime_config = AsyncRuntimeConfig::from_env();
-
         // Load network configuration
         if let Ok(network_name) = env::var("MANTRA_NETWORK") {
             match network_name.as_str() {
@@ -1688,13 +1355,6 @@ impl McpServerConfig {
             ));
         }
 
-        // Validate runtime configuration
-        if let Err(e) = self.runtime_config.validate() {
-            return Err(McpServerError::Validation(format!(
-                "Runtime configuration error: {}",
-                e
-            )));
-        }
 
         Ok(())
     }
@@ -2081,8 +1741,6 @@ pub struct McpServerStateData {
     pub sdk_adapter: Arc<McpSdkAdapter>,
     /// High-level client wrapper for MCP operations
     pub client_wrapper: Arc<Mutex<Option<McpClientWrapper>>>,
-    /// Async runtime manager
-    pub runtime_manager: Arc<AsyncRuntimeManager>,
     /// Logging infrastructure
     pub logger: Arc<McpLogger>,
     /// Transaction monitor manager
@@ -2092,12 +1750,9 @@ pub struct McpServerStateData {
 impl McpServerStateData {
     pub fn new(config: McpServerConfig) -> Self {
         let sdk_adapter = Arc::new(McpSdkAdapter::default());
-        let mut runtime_manager = AsyncRuntimeManager::new(config.runtime_config.clone());
-        runtime_manager.handle = Some(tokio::runtime::Handle::current());
-        let runtime_manager = Arc::new(runtime_manager);
 
         // Initialize logging infrastructure
-        let logging_config = LoggingConfig::from_env();
+        let logging_config = LoggingConfig::default();
         let logger = Arc::new(McpLogger::new(logging_config).expect("Failed to create MCP logger"));
 
         // Initialize transaction monitor manager
@@ -2111,7 +1766,6 @@ impl McpServerStateData {
             cache: Arc::new(RwLock::new(HashMap::new())),
             sdk_adapter,
             client_wrapper: Arc::new(Mutex::new(None)),
-            runtime_manager,
             logger,
             transaction_monitor_manager,
         }
@@ -2343,16 +1997,6 @@ impl MantraDexMcpServer {
             debug!("No WALLET_MNEMONIC environment variable found, skipping auto-load");
         }
 
-        // Check for wallet address override (optional)
-        if let Ok(wallet_address) = env::var("WALLET_ADDRESS") {
-            if !wallet_address.trim().is_empty() {
-                debug!(
-                    "WALLET_ADDRESS environment variable found: {}",
-                    wallet_address
-                );
-                // This could be used for validation or override, but mnemonic takes precedence
-            }
-        }
 
         Ok(())
     }
@@ -2566,10 +2210,6 @@ impl McpServerStateManager for MantraDexMcpServer {
                 "max_concurrent_ops": self.state.config.max_concurrent_ops,
                 "request_timeout_secs": self.state.config.request_timeout_secs,
                 "cache_ttl_secs": self.state.config.cache_ttl_secs
-            },
-            "runtime": {
-                "flavor": format!("{:?}", self.state.runtime_manager.config().flavor),
-                "worker_threads": self.state.runtime_manager.config().worker_threads
             }
         })
     }
@@ -2633,7 +2273,6 @@ impl McpServerStateManager for MantraDexMcpServer {
             .await
             .len();
 
-        let runtime_metrics = self.state.runtime_manager.metrics().await;
 
         serde_json::json!({
             "status": "healthy",
@@ -2652,11 +2291,6 @@ impl McpServerStateManager for MantraDexMcpServer {
                 },
                 "transaction_monitoring": {
                     "active_monitors": active_monitors
-                },
-                "runtime": {
-                    "uptime_secs": runtime_metrics.uptime().as_secs(),
-                    "active_tasks": runtime_metrics.active_tasks,
-                    "worker_threads": runtime_metrics.worker_threads
                 }
             }
         })

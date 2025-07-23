@@ -11,7 +11,6 @@
 //! - Error tracking and categorization
 //! - Environment-based configuration
 
-use std::env;
 use std::fs::OpenOptions;
 
 use std::path::PathBuf;
@@ -92,96 +91,6 @@ impl Default for LoggingConfig {
 }
 
 impl LoggingConfig {
-    /// Create logging configuration from environment variables
-    pub fn from_env() -> Self {
-        let mut config = Self::default();
-
-        // Log level
-        if let Ok(level) = env::var("MCP_LOG_LEVEL") {
-            config.level = level.parse().unwrap_or(LogLevel::Info);
-        }
-
-        // Log format
-        if let Ok(format) = env::var("MCP_LOG_FORMAT") {
-            config.format = format.parse().unwrap_or(LogFormat::Compact);
-        }
-
-        // Enable colors
-        if let Ok(colors) = env::var("MCP_LOG_COLORS") {
-            config.enable_colors = colors.parse().unwrap_or(true);
-        }
-
-        // Timestamps
-        if let Ok(timestamps) = env::var("MCP_LOG_TIMESTAMPS") {
-            config.include_timestamps = timestamps.parse().unwrap_or(true);
-        }
-
-        // Thread IDs
-        if let Ok(thread_ids) = env::var("MCP_LOG_THREAD_IDS") {
-            config.include_thread_ids = thread_ids.parse().unwrap_or(false);
-        }
-
-        // Spans
-        if let Ok(spans) = env::var("MCP_LOG_SPANS") {
-            config.include_spans = spans.parse().unwrap_or(true);
-        }
-
-        // File/line info
-        if let Ok(file_line) = env::var("MCP_LOG_FILE_LINE") {
-            config.include_file_line = file_line.parse().unwrap_or(false);
-        }
-
-        // Output target
-        if let Ok(target) = env::var("MCP_LOG_TARGET") {
-            config.output_target = target.parse().unwrap_or(LogTarget::Stderr);
-        }
-
-        // Log file path
-        if let Ok(path) = env::var("MCP_LOG_FILE") {
-            config.log_file_path = Some(PathBuf::from(path));
-        }
-
-        // Max file size
-        if let Ok(size) = env::var("MCP_LOG_MAX_SIZE_MB") {
-            config.max_file_size_mb = size.parse().unwrap_or(100);
-        }
-
-        // Max log files
-        if let Ok(files) = env::var("MCP_LOG_MAX_FILES") {
-            config.max_log_files = files.parse().unwrap_or(5);
-        }
-
-        // Request tracing
-        if let Ok(tracing) = env::var("MCP_LOG_REQUEST_TRACING") {
-            config.enable_request_tracing = tracing.parse().unwrap_or(true);
-        }
-
-        // Performance monitoring
-        if let Ok(perf) = env::var("MCP_LOG_PERFORMANCE") {
-            config.enable_performance_monitoring = perf.parse().unwrap_or(true);
-        }
-
-        // Custom filter
-        if let Ok(filter) = env::var("MCP_LOG_FILTER") {
-            config.custom_filter = Some(filter);
-        }
-
-        // Metrics
-        if let Ok(metrics) = env::var("MCP_LOG_METRICS") {
-            config.enable_metrics = metrics.parse().unwrap_or(true);
-        }
-
-        // Sampling rate
-        if let Ok(rate) = env::var("MCP_LOG_SAMPLING_RATE") {
-            if let Ok(rate_f) = rate.parse::<f64>() {
-                if rate_f >= 0.0 && rate_f <= 1.0 {
-                    config.sampling_rate = rate_f;
-                }
-            }
-        }
-
-        config
-    }
 
     /// Validate the configuration
     pub fn validate(&self) -> Result<(), String> {
@@ -961,17 +870,4 @@ mod tests {
         assert_eq!(metrics.total_messages, 0);
     }
 
-    #[test]
-    fn test_config_from_env() {
-        std::env::set_var("MCP_LOG_LEVEL", "debug");
-        std::env::set_var("MCP_LOG_FORMAT", "json");
-
-        let config = LoggingConfig::from_env();
-        assert_eq!(config.level, LogLevel::Debug);
-        assert_eq!(config.format, LogFormat::Json);
-
-        // Clean up
-        std::env::remove_var("MCP_LOG_LEVEL");
-        std::env::remove_var("MCP_LOG_FORMAT");
-    }
 }
