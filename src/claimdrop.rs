@@ -1,4 +1,4 @@
-use cosmwasm_std::{Coin, Timestamp, Uint128};
+use cosmwasm_std::{Timestamp, Uint128};
 use serde::{Deserialize, Serialize};
 
 /// Execute messages for the claimdrop contract

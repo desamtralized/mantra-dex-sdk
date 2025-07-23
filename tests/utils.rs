@@ -66,6 +66,7 @@ pub mod test_utils {
             skip_entry_point: None,
             skip_ibc_hooks_adapter: None,
             skip_mantra_dex_adapter: None,
+            claimdrop_manager: None,
         }
     }
 
