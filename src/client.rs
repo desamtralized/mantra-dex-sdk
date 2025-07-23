@@ -686,6 +686,20 @@ impl MantraDexClient {
         ask_asset_denom: &str,
         max_slippage: Option<Decimal>,
     ) -> Result<TxResponse, Error> {
+        // Input validation
+        if pool_id.trim().is_empty() {
+            return Err(Error::Other("Pool ID cannot be empty".to_string()));
+        }
+        if offer_asset.amount.is_zero() {
+            return Err(Error::Other("Offer amount must be greater than zero".to_string()));
+        }
+        if offer_asset.denom.trim().is_empty() {
+            return Err(Error::Other("Offer asset denom cannot be empty".to_string()));
+        }
+        if ask_asset_denom.trim().is_empty() {
+            return Err(Error::Other("Ask asset denom cannot be empty".to_string()));
+        }
+
         // Validate pool status before executing swap
         self.validate_pool_status(pool_id).await?;
 
@@ -1460,6 +1474,17 @@ impl MantraDexClient {
         min_receive_amount: Option<Uint128>,
         receiver: Option<String>,
     ) -> Result<TxResponse, Error> {
+        // Input validation
+        if operations.is_empty() {
+            return Err(Error::Other("Swap operations cannot be empty".to_string()));
+        }
+        if offer_coin.amount.is_zero() {
+            return Err(Error::Other("Offer amount must be greater than zero".to_string()));
+        }
+        if offer_coin.denom.trim().is_empty() {
+            return Err(Error::Other("Offer coin denom cannot be empty".to_string()));
+        }
+
         let skip_entry_point = self
             .config
             .contracts
@@ -1498,7 +1523,7 @@ impl MantraDexClient {
         });
 
         // Get receiver address
-        let _receiver_addr = match receiver {
+        let receiver_addr = match receiver {
             Some(addr) => addr,
             None => {
                 let wallet = self.wallet.as_ref().ok_or_else(|| {
@@ -1512,9 +1537,10 @@ impl MantraDexClient {
             sent_asset: Some(remaining_asset),
             user_swap: swap,
             min_asset,
-            timeout_timestamp: (chrono::Utc::now().timestamp() as u64 + 3600) * 1_000_000_000,
+            // Timeout: current time + 15 minutes, converted to nanoseconds (improved UX)
+            timeout_timestamp: (chrono::Utc::now().timestamp() as u64 + 900) * 1_000_000_000,
             post_swap_action: crate::skip_adapter::SkipAction::Transfer {
-                to_address: _receiver_addr,
+                to_address: receiver_addr,
             },
             affiliates: vec![],
         };
@@ -1577,7 +1603,8 @@ impl MantraDexClient {
             sent_asset: Some(remaining_asset),
             user_swap: swap,
             min_asset,
-            timeout_timestamp: (chrono::Utc::now().timestamp() as u64 + 3600) * 1_000_000_000,
+            // Timeout: current time + 15 minutes, converted to nanoseconds (improved UX)
+            timeout_timestamp: (chrono::Utc::now().timestamp() as u64 + 900) * 1_000_000_000,
             post_swap_action: action,
             affiliates: affiliates.unwrap_or_default(),
         };
