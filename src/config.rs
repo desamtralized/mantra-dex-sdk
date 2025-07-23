@@ -86,6 +86,8 @@ pub struct ContractAddresses {
     pub skip_entry_point: Option<String>,
     pub skip_ibc_hooks_adapter: Option<String>,
     pub skip_mantra_dex_adapter: Option<String>,
+    /// Claimdrop contract address
+    pub claimdrop_manager: Option<String>,
 }
 
 impl Default for ContractAddresses {
@@ -98,6 +100,7 @@ impl Default for ContractAddresses {
             skip_entry_point: None,
             skip_ibc_hooks_adapter: None,
             skip_mantra_dex_adapter: None,
+            claimdrop_manager: None,
         }
     }
 }
@@ -166,6 +169,7 @@ impl MantraNetworkConfig {
                     format!("{}.skip_ibc_hooks_adapter.address", network);
                 let skip_mantra_dex_adapter_key =
                     format!("{}.skip_mantra_dex_adapter.address", network);
+                let claimdrop_manager_key = format!("{}.claimdrop_manager.address", network);
 
                 if let Ok(pool_manager) = settings.get::<String>(&pool_manager_key) {
                     return Ok(ContractAddresses {
@@ -180,6 +184,7 @@ impl MantraNetworkConfig {
                         skip_mantra_dex_adapter: settings
                             .get::<String>(&skip_mantra_dex_adapter_key)
                             .ok(),
+                        claimdrop_manager: settings.get::<String>(&claimdrop_manager_key).ok(),
                     });
                 }
             }

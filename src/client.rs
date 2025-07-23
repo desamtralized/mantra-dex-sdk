@@ -27,6 +27,10 @@ use prost::Message;
 use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
 
+use crate::claimdrop::{
+    ClaimdropExecuteMsg, ClaimdropQueryMsg, ClaimableAmountResponse, ClaimStatusResponse,
+    ConfigResponse, IsClaimedResponse, MerkleProofResponse, TotalClaimedResponse,
+};
 use crate::config::MantraNetworkConfig;
 use crate::error::Error;
 use crate::wallet::MantraWallet;
@@ -1791,6 +1795,174 @@ impl MantraDexClient {
 
         self.query(skip_mantra_dex_adapter, &query).await
     }
+
+    // ========== Claimdrop Methods ==========
+    
+    /// Claim airdrop tokens for the current wallet address
+    ///
+    /// # Returns
+    ///
+    /// Returns the transaction response on successful claim
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if claimdrop manager contract is not configured
+    /// * Returns error if the claim transaction fails
+    /// * Returns error if the address is not eligible or has already claimed
+    pub async fn claim_airdrop(&self) -> Result<TxResponse, Error> {
+        let claimdrop_address = self.config.contracts.claimdrop_manager.as_ref()
+            .ok_or_else(|| Error::Other("Claimdrop manager contract address not configured".to_string()))?;
+
+        let msg = ClaimdropExecuteMsg::Claim {};
+        self.execute(claimdrop_address, &msg, vec![]).await
+    }
+
+    /// Query claimable amount for a specific address
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - The address to check claimable amount for
+    ///
+    /// # Returns
+    ///
+    /// Returns the claimable amount response with amount, eligibility, and proof
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if claimdrop manager contract is not configured
+    /// * Returns error if the query fails
+    pub async fn query_claimable_amount(&self, address: &str) -> Result<ClaimableAmountResponse, Error> {
+        let claimdrop_address = self.config.contracts.claimdrop_manager.as_ref()
+            .ok_or_else(|| Error::Other("Claimdrop manager contract address not configured".to_string()))?;
+
+        let query = ClaimdropQueryMsg::ClaimableAmount { 
+            address: address.to_string() 
+        };
+        
+        self.query(claimdrop_address, &query).await
+    }
+
+    /// Query claim status for a specific address
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - The address to check claim status for
+    ///
+    /// # Returns
+    ///
+    /// Returns detailed claim status including whether claimed, amounts, and timing
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if claimdrop manager contract is not configured
+    /// * Returns error if the query fails
+    pub async fn query_claim_status(&self, address: &str) -> Result<ClaimStatusResponse, Error> {
+        let claimdrop_address = self.config.contracts.claimdrop_manager.as_ref()
+            .ok_or_else(|| Error::Other("Claimdrop manager contract address not configured".to_string()))?;
+
+        let query = ClaimdropQueryMsg::ClaimStatus { 
+            address: address.to_string() 
+        };
+        
+        self.query(claimdrop_address, &query).await
+    }
+
+    /// Check if an address has already claimed their airdrop
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - The address to check
+    ///
+    /// # Returns
+    ///
+    /// Returns boolean response indicating whether the address has claimed
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if claimdrop manager contract is not configured
+    /// * Returns error if the query fails
+    pub async fn is_airdrop_claimed(&self, address: &str) -> Result<IsClaimedResponse, Error> {
+        let claimdrop_address = self.config.contracts.claimdrop_manager.as_ref()
+            .ok_or_else(|| Error::Other("Claimdrop manager contract address not configured".to_string()))?;
+
+        let query = ClaimdropQueryMsg::IsClaimed { 
+            address: address.to_string() 
+        };
+        
+        self.query(claimdrop_address, &query).await
+    }
+
+    /// Query the claimdrop contract configuration
+    ///
+    /// # Returns
+    ///
+    /// Returns the claimdrop configuration including admin, merkle root, and timing
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if claimdrop manager contract is not configured
+    /// * Returns error if the query fails
+    pub async fn query_claimdrop_config(&self) -> Result<ConfigResponse, Error> {
+        let claimdrop_address = self.config.contracts.claimdrop_manager.as_ref()
+            .ok_or_else(|| Error::Other("Claimdrop manager contract address not configured".to_string()))?;
+
+        let query = ClaimdropQueryMsg::Config {};
+        self.query(claimdrop_address, &query).await
+    }
+
+    /// Query total claimed statistics
+    ///
+    /// # Returns
+    ///
+    /// Returns statistics about total claimed amount and number of claimers
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if claimdrop manager contract is not configured
+    /// * Returns error if the query fails
+    pub async fn query_total_claimed(&self) -> Result<TotalClaimedResponse, Error> {
+        let claimdrop_address = self.config.contracts.claimdrop_manager.as_ref()
+            .ok_or_else(|| Error::Other("Claimdrop manager contract address not configured".to_string()))?;
+
+        let query = ClaimdropQueryMsg::TotalClaimed {};
+        self.query(claimdrop_address, &query).await
+    }
+
+    /// Query merkle proof for an address (if applicable)
+    ///
+    /// # Arguments
+    ///
+    /// * `address` - The address to get proof for
+    ///
+    /// # Returns
+    ///
+    /// Returns the merkle proof response with proof data and validity
+    ///
+    /// # Errors
+    ///
+    /// * Returns error if claimdrop manager contract is not configured
+    /// * Returns error if the query fails
+    pub async fn query_merkle_proof(&self, address: &str) -> Result<MerkleProofResponse, Error> {
+        let claimdrop_address = self.config.contracts.claimdrop_manager.as_ref()
+            .ok_or_else(|| Error::Other("Claimdrop manager contract address not configured".to_string()))?;
+
+        let query = ClaimdropQueryMsg::MerkleProof { 
+            address: address.to_string() 
+        };
+        
+        self.query(claimdrop_address, &query).await
+    }
+
+    /// Check if claimdrop functionality is available
+    ///
+    /// # Returns
+    ///
+    /// `true` if claimdrop manager contract is configured, `false` otherwise
+    pub fn is_claimdrop_available(&self) -> bool {
+        self.config.contracts.claimdrop_manager.is_some()
+    }
+
+    // ========== Skip Adapter Helper Methods ==========
 
     /// Check if Skip Adapter functionality is available
     ///

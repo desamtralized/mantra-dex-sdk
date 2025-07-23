@@ -1,4 +1,5 @@
 pub mod client;
+pub mod claimdrop;
 pub mod config;
 pub mod error;
 pub mod skip_adapter;
@@ -15,6 +16,10 @@ pub mod mcp;
 pub use mantra_dex_std;
 
 pub use client::MantraDexClient;
+pub use claimdrop::{
+    ClaimdropExecuteMsg, ClaimdropQueryMsg, ClaimableAmountResponse, ClaimStatusResponse,
+    ConfigResponse, IsClaimedResponse, MerkleProofResponse, TotalClaimedResponse,
+};
 pub use config::{MantraNetworkConfig, NetworkConstants};
 pub use error::Error;
 pub use skip_adapter::{

@@ -2733,6 +2733,129 @@ impl McpSdkAdapter {
         }
         Ok(())
     }
+
+    // ========== Claimdrop Methods ==========
+
+    /// Claim airdrop for the active wallet
+    pub async fn claim_airdrop(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Claiming airdrop with args: {:?}", args);
+
+        let client = self.get_client().await?;
+        let result = client.claim_airdrop().await
+            .map_err(|e| McpServerError::SdkError(e.to_string()))?;
+
+        Ok(serde_json::to_value(result)?)
+    }
+
+    /// Query claimable amount for an address
+    pub async fn query_claimable_amount(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Querying claimable amount with args: {:?}", args);
+
+        let client = self.get_client().await?;
+        
+        // Get address - use provided address or default to active wallet
+        let address = if let Some(addr) = args.get("address").and_then(|v| v.as_str()) {
+            addr.to_string()
+        } else {
+            // Get active wallet address
+            let wallet_info = client.wallet.get_wallet_info()
+                .map_err(|e| McpServerError::WalletError(e.to_string()))?;
+            wallet_info.address
+        };
+
+        let result = client.query_claimable_amount(&address).await
+            .map_err(|e| McpServerError::SdkError(e.to_string()))?;
+
+        Ok(serde_json::to_value(result)?)
+    }
+
+    /// Query claim status for an address
+    pub async fn query_claim_status(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Querying claim status with args: {:?}", args);
+
+        let client = self.get_client().await?;
+        
+        // Get address - use provided address or default to active wallet
+        let address = if let Some(addr) = args.get("address").and_then(|v| v.as_str()) {
+            addr.to_string()
+        } else {
+            // Get active wallet address
+            let wallet_info = client.wallet.get_wallet_info()
+                .map_err(|e| McpServerError::WalletError(e.to_string()))?;
+            wallet_info.address
+        };
+
+        let result = client.query_claim_status(&address).await
+            .map_err(|e| McpServerError::SdkError(e.to_string()))?;
+
+        Ok(serde_json::to_value(result)?)
+    }
+
+    /// Check if an address has claimed airdrop
+    pub async fn is_airdrop_claimed(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Checking if airdrop claimed with args: {:?}", args);
+
+        let client = self.get_client().await?;
+        
+        // Get address - use provided address or default to active wallet
+        let address = if let Some(addr) = args.get("address").and_then(|v| v.as_str()) {
+            addr.to_string()
+        } else {
+            // Get active wallet address
+            let wallet_info = client.wallet.get_wallet_info()
+                .map_err(|e| McpServerError::WalletError(e.to_string()))?;
+            wallet_info.address
+        };
+
+        let result = client.is_airdrop_claimed(&address).await
+            .map_err(|e| McpServerError::SdkError(e.to_string()))?;
+
+        Ok(serde_json::to_value(result)?)
+    }
+
+    /// Query claimdrop configuration
+    pub async fn query_claimdrop_config(&self, _args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Querying claimdrop config");
+
+        let client = self.get_client().await?;
+        let result = client.query_claimdrop_config().await
+            .map_err(|e| McpServerError::SdkError(e.to_string()))?;
+
+        Ok(serde_json::to_value(result)?)
+    }
+
+    /// Query total claimed statistics
+    pub async fn query_total_claimed(&self, _args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Querying total claimed statistics");
+
+        let client = self.get_client().await?;
+        let result = client.query_total_claimed().await
+            .map_err(|e| McpServerError::SdkError(e.to_string()))?;
+
+        Ok(serde_json::to_value(result)?)
+    }
+
+    /// Query merkle proof for an address
+    pub async fn query_merkle_proof(&self, args: Value) -> McpResult<Value> {
+        debug!("SDK Adapter: Querying merkle proof with args: {:?}", args);
+
+        let client = self.get_client().await?;
+        
+        // Get address - use provided address or default to active wallet
+        let address = if let Some(addr) = args.get("address").and_then(|v| v.as_str()) {
+            addr.to_string()
+        } else {
+            // Get active wallet address
+            let wallet_info = client.wallet.get_wallet_info()
+                .map_err(|e| McpServerError::WalletError(e.to_string()))?;
+            wallet_info.address
+        };
+
+        let result = client.query_merkle_proof(&address).await
+            .map_err(|e| McpServerError::SdkError(e.to_string()))?;
+
+        Ok(serde_json::to_value(result)?)
+    }
 }
 
 impl Default for McpSdkAdapter {

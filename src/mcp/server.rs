@@ -2641,6 +2641,84 @@ impl McpToolProvider for MantraDexMcpServer {
                     "required": ["pool_id"]
                 }
             }),
+
+            // Claimdrop Tools
+            serde_json::json!({
+                "name": "claim_airdrop",
+                "description": "Claim airdrop tokens for the active wallet address",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }),
+            serde_json::json!({
+                "name": "query_claimable_amount",
+                "description": "Query claimable airdrop amount for a specific address",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "type": "string",
+                            "description": "Address to check claimable amount for (optional, uses active wallet if not provided)"
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "name": "query_claim_status",
+                "description": "Query detailed claim status for a specific address",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "type": "string",
+                            "description": "Address to check claim status for (optional, uses active wallet if not provided)"
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "name": "is_airdrop_claimed",
+                "description": "Check if an address has already claimed their airdrop",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "type": "string",
+                            "description": "Address to check (optional, uses active wallet if not provided)"
+                        }
+                    }
+                }
+            }),
+            serde_json::json!({
+                "name": "query_claimdrop_config",
+                "description": "Query the claimdrop contract configuration",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }),
+            serde_json::json!({
+                "name": "query_total_claimed",
+                "description": "Query total claimed statistics across all users",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }),
+            serde_json::json!({
+                "name": "query_merkle_proof",
+                "description": "Query merkle proof for an address (if applicable)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "type": "string",
+                            "description": "Address to get proof for (optional, uses active wallet if not provided)"
+                        }
+                    }
+                }
+            }),
         ]
     }
 
@@ -2674,6 +2752,14 @@ impl McpToolProvider for MantraDexMcpServer {
             "estimate_lp_withdrawal_amounts" => {
                 self.handle_estimate_lp_withdrawal_amounts(arguments).await
             }
+            // Claimdrop tools
+            "claim_airdrop" => self.handle_claim_airdrop(arguments).await,
+            "query_claimable_amount" => self.handle_query_claimable_amount(arguments).await,
+            "query_claim_status" => self.handle_query_claim_status(arguments).await,
+            "is_airdrop_claimed" => self.handle_is_airdrop_claimed(arguments).await,
+            "query_claimdrop_config" => self.handle_query_claimdrop_config(arguments).await,
+            "query_total_claimed" => self.handle_query_total_claimed(arguments).await,
+            "query_merkle_proof" => self.handle_query_merkle_proof(arguments).await,
             _ => Err(McpServerError::UnknownTool(tool_name.to_string())),
         }
     }
@@ -3677,6 +3763,134 @@ impl MantraDexMcpServer {
         let result = self.state.sdk_adapter.create_pool(arguments).await?;
 
         // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    // ========== Claimdrop Tool Handlers ==========
+
+    /// Handle claim_airdrop tool
+    async fn handle_claim_airdrop(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling claim_airdrop tool call");
+        let result = self.state.sdk_adapter.claim_airdrop(arguments).await?;
+
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    /// Handle query_claimable_amount tool
+    async fn handle_query_claimable_amount(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling query_claimable_amount tool call");
+        let result = self.state.sdk_adapter.query_claimable_amount(arguments).await?;
+
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    /// Handle query_claim_status tool
+    async fn handle_query_claim_status(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling query_claim_status tool call");
+        let result = self.state.sdk_adapter.query_claim_status(arguments).await?;
+
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    /// Handle is_airdrop_claimed tool
+    async fn handle_is_airdrop_claimed(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling is_airdrop_claimed tool call");
+        let result = self.state.sdk_adapter.is_airdrop_claimed(arguments).await?;
+
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    /// Handle query_claimdrop_config tool
+    async fn handle_query_claimdrop_config(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling query_claimdrop_config tool call");
+        let result = self.state.sdk_adapter.query_claimdrop_config(arguments).await?;
+
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    /// Handle query_total_claimed tool
+    async fn handle_query_total_claimed(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling query_total_claimed tool call");
+        let result = self.state.sdk_adapter.query_total_claimed(arguments).await?;
+
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    /// Handle query_merkle_proof tool
+    async fn handle_query_merkle_proof(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling query_merkle_proof tool call");
+        let result = self.state.sdk_adapter.query_merkle_proof(arguments).await?;
+
         Ok(serde_json::json!({
             "content": [
                 {
