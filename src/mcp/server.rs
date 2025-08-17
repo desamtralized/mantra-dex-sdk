@@ -23,9 +23,9 @@ use config::{Config, ConfigError, Environment, File, FileFormat};
 // The server implements MCP protocol manually using standard HTTP/JSON-RPC
 // until the rust-mcp-sdk API stabilizes in future versions
 
-use crate::client::MantraDexClient;
 use crate::config::{MantraNetworkConfig, NetworkConstants};
 use crate::error::Error as SdkError;
+use crate::protocols::dex::MantraDexClient;
 use crate::wallet::WalletInfo;
 
 use super::client_wrapper::McpClientWrapper;
@@ -578,14 +578,6 @@ const FEE_VALIDATION_FAILED: i32 = -32110;
 const TIMEOUT_ERROR: i32 = -32111;
 const IO_ERROR: i32 = -32112;
 
-
-
-
-
-
-
-
-
 // =============================================================================
 // MCP Server Trait Definitions
 // =============================================================================
@@ -878,6 +870,9 @@ pub enum McpServerError {
 
     #[error("Configuration error: {0}")]
     Config(#[from] ConfigError),
+
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 impl McpServerError {
@@ -903,6 +898,7 @@ impl McpServerError {
             McpServerError::Validation(_) => VALIDATION_ERROR,
             McpServerError::Internal(_) => INTERNAL_ERROR,
             McpServerError::Config(_) => CONFIGURATION_ERROR,
+            McpServerError::Other(_) => INTERNAL_ERROR,
         }
     }
 
@@ -964,6 +960,11 @@ impl McpServerError {
 
             // Generic errors
             SdkError::Other(_) => INTERNAL_ERROR,
+
+            // New error types
+            SdkError::NotImplemented(_) => TOOL_EXECUTION_FAILED,
+            SdkError::WalletNotSet => WALLET_NOT_CONFIGURED,
+            SdkError::Skip(_) => BLOCKCHAIN_RPC_ERROR,
         }
     }
 
@@ -1098,6 +1099,21 @@ impl McpServerError {
                 "Retry the operation",
                 "Contact support if issue persists",
             ],
+            SdkError::NotImplemented(_) => vec![
+                "Feature not yet implemented",
+                "Check for updates to the SDK",
+                "Contact support for implementation timeline",
+            ],
+            SdkError::WalletNotSet => vec![
+                "Configure wallet before performing this operation",
+                "Use wallet_create or wallet_import tools",
+                "Verify wallet configuration",
+            ],
+            SdkError::Skip(_) => vec![
+                "Check Skip protocol configuration",
+                "Verify cross-chain route availability",
+                "Check network connectivity to Skip API",
+            ],
         }
     }
 
@@ -1115,6 +1131,9 @@ impl McpServerError {
             SdkError::Serialization(_) => "medium",
             SdkError::Io(_) => "low",
             SdkError::Other(_) => "medium",
+            SdkError::NotImplemented(_) => "low",
+            SdkError::WalletNotSet => "high",
+            SdkError::Skip(_) => "medium",
         }
     }
 
@@ -1135,6 +1154,9 @@ impl McpServerError {
             SdkError::Tx(_) => "Tx",
             SdkError::Network(_) => "Network",
             SdkError::Timeout(_) => "Timeout",
+            SdkError::NotImplemented(_) => "NotImplemented",
+            SdkError::WalletNotSet => "WalletNotSet",
+            SdkError::Skip(_) => "SkipProtocol",
         }
     }
 
@@ -1362,7 +1384,6 @@ impl McpServerConfig {
             ));
         }
 
-
         Ok(())
     }
 
@@ -1379,7 +1400,8 @@ impl McpServerConfig {
                         }
                         Err(e) => {
                             return Err(McpServerError::Network(format!(
-                                "Failed to create network config: {}", e
+                                "Failed to create network config: {}",
+                                e
                             )));
                         }
                     }
@@ -2022,7 +2044,6 @@ impl MantraDexMcpServer {
             debug!("No WALLET_MNEMONIC environment variable found, skipping auto-load");
         }
 
-
         Ok(())
     }
 
@@ -2298,7 +2319,6 @@ impl McpServerStateManager for MantraDexMcpServer {
             .await
             .len();
 
-
         serde_json::json!({
             "status": "healthy",
             "timestamp": chrono::Utc::now().to_rfc3339(),
@@ -2328,7 +2348,7 @@ impl McpToolProvider for MantraDexMcpServer {
         vec![
             // Network Tools
             serde_json::json!({
-                "name": "get_contract_addresses",
+                "name": "network_get_contract_addresses",
                 "description": "Get contract addresses for the current network",
                 "inputSchema": {
                     "type": "object",
@@ -2342,7 +2362,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "validate_network_connectivity",
+                "name": "network_validate_connectivity",
                 "description": "Validate network connectivity and blockchain access",
                 "inputSchema": {
                     "type": "object",
@@ -2379,7 +2399,7 @@ impl McpToolProvider for MantraDexMcpServer {
             }),
             // Wallet and Balance Tools
             serde_json::json!({
-                "name": "get_balances",
+                "name": "wallet_get_balances",
                 "description": "Get wallet balances for all assets",
                 "inputSchema": {
                     "type": "object",
@@ -2397,7 +2417,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "list_wallets",
+                "name": "wallet_list",
                 "description": "List all available wallets with their addresses and information",
                 "inputSchema": {
                     "type": "object",
@@ -2405,7 +2425,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "switch_wallet",
+                "name": "wallet_switch",
                 "description": "Switch to a different active wallet",
                 "inputSchema": {
                     "type": "object",
@@ -2419,7 +2439,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "get_active_wallet",
+                "name": "wallet_get_active",
                 "description": "Get current active wallet information",
                 "inputSchema": {
                     "type": "object",
@@ -2427,7 +2447,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "add_wallet_from_mnemonic",
+                "name": "wallet_add_from_mnemonic",
                 "description": "Add a new wallet from mnemonic phrase",
                 "inputSchema": {
                     "type": "object",
@@ -2447,7 +2467,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "remove_wallet",
+                "name": "wallet_remove",
                 "description": "Remove a wallet from the collection",
                 "inputSchema": {
                     "type": "object",
@@ -2462,7 +2482,7 @@ impl McpToolProvider for MantraDexMcpServer {
             }),
             // Pool Query Tools
             serde_json::json!({
-                "name": "get_pools",
+                "name": "dex_get_pools",
                 "description": "Get information about all available liquidity pools with optional filtering and pagination",
                 "inputSchema": {
                     "type": "object",
@@ -2481,7 +2501,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "execute_swap",
+                "name": "dex_execute_swap",
                 "description": "Executes a token swap in a specified pool with slippage protection.",
                 "inputSchema": {
                     "type": "object",
@@ -2503,7 +2523,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "provide_liquidity",
+                "name": "dex_provide_liquidity",
                 "description": "Provides liquidity to a specified pool.",
                 "inputSchema": {
                     "type": "object",
@@ -2528,7 +2548,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "withdraw_liquidity",
+                "name": "dex_withdraw_liquidity",
                 "description": "Withdraws liquidity from a specified pool.",
                 "inputSchema": {
                     "type": "object",
@@ -2541,7 +2561,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "create_pool",
+                "name": "dex_create_pool",
                 "description": "Creates a new liquidity pool (admin only).",
                 "inputSchema": {
                     "type": "object",
@@ -2584,7 +2604,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "get_lp_token_balance",
+                "name": "dex_get_lp_token_balance",
                 "description": "Get LP token balance for a specific pool",
                 "inputSchema": {
                     "type": "object",
@@ -2602,7 +2622,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "get_all_lp_token_balances",
+                "name": "dex_get_all_lp_token_balances",
                 "description": "Get all LP token balances for the wallet across all pools",
                 "inputSchema": {
                     "type": "object",
@@ -2620,7 +2640,7 @@ impl McpToolProvider for MantraDexMcpServer {
                 }
             }),
             serde_json::json!({
-                "name": "estimate_lp_withdrawal_amounts",
+                "name": "dex_estimate_lp_withdrawal_amounts",
                 "description": "Estimate withdrawal amounts for LP tokens",
                 "inputSchema": {
                     "type": "object",
@@ -2641,6 +2661,313 @@ impl McpToolProvider for MantraDexMcpServer {
                     "required": ["pool_id"]
                 }
             }),
+            // ClaimDrop Tools
+            serde_json::json!({
+                "name": "claimdrop_create_campaign",
+                "description": "Create a new claimdrop campaign through the factory",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "factory_address": {
+                            "type": "string",
+                            "description": "ClaimDrop factory contract address"
+                        },
+                        "owner": {
+                            "type": "string",
+                            "description": "Campaign owner address"
+                        },
+                        "start_time": {
+                            "type": "integer",
+                            "description": "Campaign start time (Unix timestamp)"
+                        },
+                        "end_time": {
+                            "type": "integer",
+                            "description": "Campaign end time (Unix timestamp)"
+                        },
+                        "reward_denom": {
+                            "type": "string",
+                            "description": "Token denomination for rewards"
+                        },
+                        "reward_per_allocation": {
+                            "type": "string",
+                            "description": "Amount of tokens per allocation unit"
+                        },
+                        "allocations": {
+                            "type": "array",
+                            "description": "List of user allocations",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "user": { "type": "string" },
+                                    "allocated_amount": { "type": "string" }
+                                },
+                                "required": ["user", "allocated_amount"]
+                            }
+                        }
+                    },
+                    "required": ["factory_address", "owner", "start_time", "end_time", "reward_denom", "reward_per_allocation", "allocations"]
+                }
+            }),
+            serde_json::json!({
+                "name": "claimdrop_claim",
+                "description": "Claim rewards from a claimdrop campaign",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "campaign_address": {
+                            "type": "string",
+                            "description": "Campaign contract address"
+                        },
+                        "amount": {
+                            "type": "string",
+                            "description": "Amount to claim (optional, claims all if not specified)"
+                        },
+                        "receiver": {
+                            "type": "string",
+                            "description": "Receiver address (optional, defaults to sender)"
+                        }
+                    },
+                    "required": ["campaign_address"]
+                }
+            }),
+            serde_json::json!({
+                "name": "claimdrop_query_rewards",
+                "description": "Query user rewards from a campaign or factory",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "address": {
+                            "type": "string",
+                            "description": "Campaign or factory contract address"
+                        },
+                        "user": {
+                            "type": "string",
+                            "description": "User address to query rewards for"
+                        },
+                        "is_factory": {
+                            "type": "boolean",
+                            "description": "Whether the address is a factory (true) or campaign (false)"
+                        }
+                    },
+                    "required": ["address", "user"]
+                }
+            }),
+            serde_json::json!({
+                "name": "claimdrop_query_campaigns",
+                "description": "Query all campaigns from the factory",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "factory_address": {
+                            "type": "string",
+                            "description": "ClaimDrop factory contract address"
+                        },
+                        "start_after": {
+                            "type": "string",
+                            "description": "Pagination start address (optional)"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of results (optional)"
+                        }
+                    },
+                    "required": ["factory_address"]
+                }
+            }),
+            serde_json::json!({
+                "name": "claimdrop_add_allocations",
+                "description": "Add allocations to a campaign (admin only, before campaign starts)",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "campaign_address": {
+                            "type": "string",
+                            "description": "Campaign contract address"
+                        },
+                        "allocations": {
+                            "type": "array",
+                            "description": "List of user allocations to add",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "user": { "type": "string" },
+                                    "allocated_amount": { "type": "string" }
+                                },
+                                "required": ["user", "allocated_amount"]
+                            }
+                        }
+                    },
+                    "required": ["campaign_address", "allocations"]
+                }
+            }),
+            // Skip Protocol Tools
+            serde_json::json!({
+                "name": "skip_get_route",
+                "description": "Find optimal cross-chain routes between assets",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "source_asset_denom": {
+                            "type": "string",
+                            "description": "Source asset denomination"
+                        },
+                        "source_asset_amount": {
+                            "type": "string",
+                            "description": "Source asset amount"
+                        },
+                        "source_chain": {
+                            "type": "string",
+                            "description": "Source chain identifier"
+                        },
+                        "target_asset_denom": {
+                            "type": "string",
+                            "description": "Target asset denomination"
+                        },
+                        "target_chain": {
+                            "type": "string",
+                            "description": "Target chain identifier"
+                        },
+                        "allow_multi_tx": {
+                            "type": "boolean",
+                            "description": "Allow multi-transaction routes (optional)"
+                        },
+                        "smart_relay": {
+                            "type": "boolean",
+                            "description": "Use smart relay optimization (optional)"
+                        }
+                    },
+                    "required": ["source_asset_denom", "source_asset_amount", "source_chain", "target_asset_denom", "target_chain"]
+                }
+            }),
+            serde_json::json!({
+                "name": "skip_execute_transfer",
+                "description": "Execute cross-chain asset transfers",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "source_asset_denom": {
+                            "type": "string",
+                            "description": "Source asset denomination"
+                        },
+                        "source_asset_amount": {
+                            "type": "string",
+                            "description": "Source asset amount"
+                        },
+                        "source_chain": {
+                            "type": "string",
+                            "description": "Source chain identifier"
+                        },
+                        "target_asset_denom": {
+                            "type": "string",
+                            "description": "Target asset denomination"
+                        },
+                        "target_chain": {
+                            "type": "string",
+                            "description": "Target chain identifier"
+                        },
+                        "recipient": {
+                            "type": "string",
+                            "description": "Recipient address on target chain"
+                        },
+                        "timeout_seconds": {
+                            "type": "integer",
+                            "description": "Transfer timeout in seconds (optional)"
+                        },
+                        "slippage_tolerance": {
+                            "type": "string",
+                            "description": "Slippage tolerance (optional)"
+                        }
+                    },
+                    "required": ["source_asset_denom", "source_asset_amount", "source_chain", "target_asset_denom", "target_chain", "recipient"]
+                }
+            }),
+            serde_json::json!({
+                "name": "skip_track_transfer",
+                "description": "Monitor transfer status and progress",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "transfer_id": {
+                            "type": "string",
+                            "description": "Transfer ID to track"
+                        }
+                    },
+                    "required": ["transfer_id"]
+                }
+            }),
+            serde_json::json!({
+                "name": "skip_get_supported_chains",
+                "description": "List available chains and their configurations",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "filter": {
+                            "type": "string",
+                            "description": "Filter chains by name or ID (optional)"
+                        }
+                    },
+                    "required": []
+                }
+            }),
+            serde_json::json!({
+                "name": "skip_verify_assets",
+                "description": "Validate assets across different chains",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "assets": {
+                            "type": "array",
+                            "description": "List of assets to verify",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "denom": { "type": "string" },
+                                    "chain": { "type": "string" },
+                                    "amount": { "type": "string" },
+                                    "decimals": { "type": "integer" },
+                                    "symbol": { "type": "string" }
+                                },
+                                "required": ["denom", "chain"]
+                            }
+                        }
+                    },
+                    "required": ["assets"]
+                }
+            }),
+            serde_json::json!({
+                "name": "skip_estimate_fees",
+                "description": "Estimate fees for cross-chain operations",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "source_asset_denom": {
+                            "type": "string",
+                            "description": "Source asset denomination"
+                        },
+                        "source_asset_amount": {
+                            "type": "string",
+                            "description": "Source asset amount"
+                        },
+                        "source_chain": {
+                            "type": "string",
+                            "description": "Source chain identifier"
+                        },
+                        "target_asset_denom": {
+                            "type": "string",
+                            "description": "Target asset denomination"
+                        },
+                        "target_chain": {
+                            "type": "string",
+                            "description": "Target chain identifier"
+                        },
+                        "recipient": {
+                            "type": "string",
+                            "description": "Recipient address on target chain"
+                        }
+                    },
+                    "required": ["source_asset_denom", "source_asset_amount", "source_chain", "target_asset_denom", "target_chain", "recipient"]
+                }
+            }),
         ]
     }
 
@@ -2650,30 +2977,53 @@ impl McpToolProvider for MantraDexMcpServer {
         arguments: serde_json::Value,
     ) -> McpResult<serde_json::Value> {
         match tool_name {
-            "get_contract_addresses" => self.handle_get_contract_addresses(arguments).await,
-            "validate_network_connectivity" => {
+            // Network tools
+            "network_get_contract_addresses" => self.handle_get_contract_addresses(arguments).await,
+            "network_validate_connectivity" => {
                 self.handle_validate_network_connectivity(arguments).await
             }
-            "get_balances" => self.handle_get_balances(arguments).await,
-            "list_wallets" => self.handle_list_wallets(arguments).await,
-            "switch_wallet" => self.handle_switch_wallet(arguments).await,
-            "get_active_wallet" => self.handle_get_active_wallet(arguments).await,
-            "add_wallet_from_mnemonic" => self.handle_add_wallet_from_mnemonic(arguments).await,
-            "remove_wallet" => self.handle_remove_wallet(arguments).await,
-            "get_pools" => self.handle_get_pools(arguments).await,
-            "execute_swap" => self.handle_execute_swap(arguments).await,
-            "provide_liquidity" => self.handle_provide_liquidity(arguments).await,
-            "provide_liquidity_unchecked" => {
+
+            // Wallet tools
+            "wallet_get_balances" => self.handle_get_balances(arguments).await,
+            "wallet_list" => self.handle_list_wallets(arguments).await,
+            "wallet_switch" => self.handle_switch_wallet(arguments).await,
+            "wallet_get_active" => self.handle_get_active_wallet(arguments).await,
+            "wallet_add_from_mnemonic" => self.handle_add_wallet_from_mnemonic(arguments).await,
+            "wallet_remove" => self.handle_remove_wallet(arguments).await,
+
+            // DEX tools
+            "dex_get_pools" => self.handle_get_pools(arguments).await,
+            "dex_execute_swap" => self.handle_execute_swap(arguments).await,
+            "dex_provide_liquidity" => self.handle_provide_liquidity(arguments).await,
+            "dex_provide_liquidity_unchecked" => {
                 self.handle_provide_liquidity_unchecked(arguments).await
             }
-            "withdraw_liquidity" => self.handle_withdraw_liquidity(arguments).await,
-            "create_pool" => self.handle_create_pool(arguments).await,
-            "monitor_swap_transaction" => self.handle_monitor_swap_transaction(arguments).await,
-            "get_lp_token_balance" => self.handle_get_lp_token_balance(arguments).await,
-            "get_all_lp_token_balances" => self.handle_get_all_lp_token_balances(arguments).await,
-            "estimate_lp_withdrawal_amounts" => {
+            "dex_withdraw_liquidity" => self.handle_withdraw_liquidity(arguments).await,
+            "dex_create_pool" => self.handle_create_pool(arguments).await,
+            "dex_monitor_swap_transaction" => self.handle_monitor_swap_transaction(arguments).await,
+            "dex_get_lp_token_balance" => self.handle_get_lp_token_balance(arguments).await,
+            "dex_get_all_lp_token_balances" => {
+                self.handle_get_all_lp_token_balances(arguments).await
+            }
+            "dex_estimate_lp_withdrawal_amounts" => {
                 self.handle_estimate_lp_withdrawal_amounts(arguments).await
             }
+
+            // ClaimDrop tools
+            "claimdrop_create_campaign" => self.handle_claimdrop_create_campaign(arguments).await,
+            "claimdrop_claim" => self.handle_claimdrop_claim(arguments).await,
+            "claimdrop_query_rewards" => self.handle_claimdrop_query_rewards(arguments).await,
+            "claimdrop_query_campaigns" => self.handle_claimdrop_query_campaigns(arguments).await,
+            "claimdrop_add_allocations" => self.handle_claimdrop_add_allocations(arguments).await,
+
+            // Skip protocol tools
+            "skip_get_route" => self.handle_skip_get_route(arguments).await,
+            "skip_execute_transfer" => self.handle_skip_execute_transfer(arguments).await,
+            "skip_track_transfer" => self.handle_skip_track_transfer(arguments).await,
+            "skip_get_supported_chains" => self.handle_skip_get_supported_chains(arguments).await,
+            "skip_verify_assets" => self.handle_skip_verify_assets(arguments).await,
+            "skip_estimate_fees" => self.handle_skip_estimate_fees(arguments).await,
+
             _ => Err(McpServerError::UnknownTool(tool_name.to_string())),
         }
     }
@@ -3069,12 +3419,12 @@ impl MantraDexMcpServer {
 
         // Create formatted response text
         let mut response_text = format!("📱 **Wallet Management**\n\n");
-        
+
         if wallets.is_empty() {
             response_text.push_str("No wallets found in collection.\n");
         } else {
             response_text.push_str(&format!("**Total Wallets:** {}\n", wallets.len()));
-            
+
             if let Some(active_addr) = &active_address {
                 response_text.push_str(&format!("**Active Wallet:** `{}`\n\n", active_addr));
             } else {
@@ -3082,13 +3432,21 @@ impl MantraDexMcpServer {
             }
 
             response_text.push_str("### 💼 Available Wallets:\n\n");
-            
+
             for (address, wallet_info) in wallets.iter() {
-                let is_active = active_address.as_ref().map_or(false, |addr| addr == address);
+                let is_active = active_address
+                    .as_ref()
+                    .map_or(false, |addr| addr == address);
                 let active_indicator = if is_active { " (ACTIVE)" } else { "" };
-                
-                response_text.push_str(&format!("- **Address:** `{}`{}\n", address, active_indicator));
-                response_text.push_str(&format!("  - **Public Key:** `{}`\n", wallet_info.public_key));
+
+                response_text.push_str(&format!(
+                    "- **Address:** `{}`{}\n",
+                    address, active_indicator
+                ));
+                response_text.push_str(&format!(
+                    "  - **Public Key:** `{}`\n",
+                    wallet_info.public_key
+                ));
                 response_text.push_str("\n");
             }
         }
@@ -3115,14 +3473,25 @@ impl MantraDexMcpServer {
         let wallet_address = arguments
             .get("wallet_address")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| McpServerError::InvalidArguments("wallet_address is required".to_string()))?;
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("wallet_address is required".to_string())
+            })?;
 
         // Switch wallet using the SDK adapter
-        self.state.sdk_adapter.switch_active_wallet(wallet_address).await?;
+        self.state
+            .sdk_adapter
+            .switch_active_wallet(wallet_address)
+            .await?;
 
         // Get updated wallet info
-        let wallet_info = self.state.sdk_adapter.get_wallet_info(wallet_address).await?
-            .ok_or_else(|| McpServerError::InvalidArguments("Wallet not found after switch".to_string()))?;
+        let wallet_info = self
+            .state
+            .sdk_adapter
+            .get_wallet_info(wallet_address)
+            .await?
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("Wallet not found after switch".to_string())
+            })?;
 
         // Create formatted response text
         let mut response_text = format!("✅ **Wallet Switched Successfully**\n\n");
@@ -3152,7 +3521,7 @@ impl MantraDexMcpServer {
 
         // Create formatted response text
         let mut response_text = format!("🔍 **Active Wallet Information**\n\n");
-        
+
         match active_wallet {
             Some(wallet_info) => {
                 response_text.push_str(&format!("**Address:** `{}`\n", wallet_info.address));
@@ -3201,17 +3570,28 @@ impl MantraDexMcpServer {
 
         // Create wallet from mnemonic
         let wallet = crate::wallet::MantraWallet::from_mnemonic(mnemonic, derivation_index)
-            .map_err(|e| McpServerError::InvalidArguments(format!("Failed to create wallet from mnemonic: {}", e)))?;
+            .map_err(|e| {
+                McpServerError::InvalidArguments(format!(
+                    "Failed to create wallet from mnemonic: {}",
+                    e
+                ))
+            })?;
 
         let wallet_info = wallet.info();
         let wallet_address = wallet_info.address.clone();
 
         // Add wallet using the SDK adapter with derivation index for caching
-        self.state.sdk_adapter.add_wallet_with_derivation_index(wallet, derivation_index).await?;
+        self.state
+            .sdk_adapter
+            .add_wallet_with_derivation_index(wallet, derivation_index)
+            .await?;
 
         // Set as active wallet if requested
         if set_as_active {
-            self.state.sdk_adapter.switch_active_wallet(&wallet_address).await?;
+            self.state
+                .sdk_adapter
+                .switch_active_wallet(&wallet_address)
+                .await?;
         }
 
         // Create formatted response text
@@ -3219,7 +3599,10 @@ impl MantraDexMcpServer {
         response_text.push_str(&format!("**Address:** `{}`\n", wallet_address));
         response_text.push_str(&format!("**Public Key:** `{}`\n", wallet_info.public_key));
         response_text.push_str(&format!("**Derivation Index:** {}\n", derivation_index));
-        response_text.push_str(&format!("**Set as Active:** {}\n", if set_as_active { "Yes" } else { "No" }));
+        response_text.push_str(&format!(
+            "**Set as Active:** {}\n",
+            if set_as_active { "Yes" } else { "No" }
+        ));
 
         // Return proper MCP response format
         Ok(serde_json::json!({
@@ -3243,10 +3626,16 @@ impl MantraDexMcpServer {
         let wallet_address = arguments
             .get("wallet_address")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| McpServerError::InvalidArguments("wallet_address is required".to_string()))?;
+            .ok_or_else(|| {
+                McpServerError::InvalidArguments("wallet_address is required".to_string())
+            })?;
 
         // Get wallet info before removal
-        let wallet_info = self.state.sdk_adapter.get_wallet_info(wallet_address).await?;
+        let wallet_info = self
+            .state
+            .sdk_adapter
+            .get_wallet_info(wallet_address)
+            .await?;
 
         // Check if this is the active wallet
         let was_active = match self.state.sdk_adapter.get_active_wallet_info().await? {
@@ -3260,7 +3649,7 @@ impl MantraDexMcpServer {
         // Create formatted response text
         let mut response_text = format!("✅ **Wallet Removed Successfully**\n\n");
         response_text.push_str(&format!("**Removed Address:** `{}`\n", wallet_address));
-        
+
         if let Some(info) = wallet_info {
             response_text.push_str(&format!("**Public Key:** `{}`\n", info.public_key));
         }
@@ -3793,7 +4182,6 @@ pub async fn create_http_server(config: McpServerConfig) -> McpResult<MantraDexM
 // =============================================================================
 
 impl MantraDexMcpServer {
-
     // Resource handler methods for MCP resources
 
     // LP Token Management Tool Handlers
@@ -3924,6 +4312,177 @@ impl MantraDexMcpServer {
         Ok(balances_result)
     }
 
+    // =============================================================================
+    // ClaimDrop Tool Handlers
+    // =============================================================================
+
+    async fn handle_claimdrop_create_campaign(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling claimdrop_create_campaign tool call");
+        let result = self
+            .state
+            .sdk_adapter
+            .claimdrop_create_campaign(arguments)
+            .await?;
+
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    async fn handle_claimdrop_claim(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling claimdrop_claim tool call");
+        let result = self.state.sdk_adapter.claimdrop_claim(arguments).await?;
+
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    async fn handle_claimdrop_query_rewards(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling claimdrop_query_rewards tool call");
+        let result = self
+            .state
+            .sdk_adapter
+            .claimdrop_query_rewards(arguments)
+            .await?;
+
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    async fn handle_claimdrop_query_campaigns(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling claimdrop_query_campaigns tool call");
+        let result = self
+            .state
+            .sdk_adapter
+            .claimdrop_query_campaigns(arguments)
+            .await?;
+
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    async fn handle_claimdrop_add_allocations(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling claimdrop_add_allocations tool call");
+        let result = self
+            .state
+            .sdk_adapter
+            .claimdrop_add_allocations(arguments)
+            .await?;
+
+        // Format as MCP response
+        Ok(serde_json::json!({
+            "content": [
+                {
+                    "type": "text",
+                    "text": serde_json::to_string_pretty(&result)?
+                }
+            ]
+        }))
+    }
+
+    // Skip Protocol Handlers
+
+    /// Handle skip_get_route tool
+    async fn handle_skip_get_route(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling skip_get_route tool call");
+        self.state.sdk_adapter.skip_get_route(arguments).await
+    }
+
+    /// Handle skip_execute_transfer tool
+    async fn handle_skip_execute_transfer(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling skip_execute_transfer tool call");
+        self.state
+            .sdk_adapter
+            .skip_execute_transfer(arguments)
+            .await
+    }
+
+    /// Handle skip_track_transfer tool
+    async fn handle_skip_track_transfer(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling skip_track_transfer tool call");
+        self.state.sdk_adapter.skip_track_transfer(arguments).await
+    }
+
+    /// Handle skip_get_supported_chains tool
+    async fn handle_skip_get_supported_chains(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling skip_get_supported_chains tool call");
+        self.state
+            .sdk_adapter
+            .skip_get_supported_chains(arguments)
+            .await
+    }
+
+    /// Handle skip_verify_assets tool
+    async fn handle_skip_verify_assets(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling skip_verify_assets tool call");
+        self.state.sdk_adapter.skip_verify_assets(arguments).await
+    }
+
+    /// Handle skip_estimate_fees tool
+    async fn handle_skip_estimate_fees(
+        &self,
+        arguments: serde_json::Value,
+    ) -> McpResult<serde_json::Value> {
+        info!(?arguments, "Handling skip_estimate_fees tool call");
+        self.state.sdk_adapter.skip_estimate_fees(arguments).await
+    }
 }
 
 /// Start the stdio transport layer for MCP communication
