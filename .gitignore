@@ -9,12 +9,16 @@ artifacts/
 .vscode/
 .idea/
 *.iml
+.claude
+PRPs/
+CLAUDE.md
 
 # macOS
 .DS_Store
 
 # Auto-gen
 .cargo-ok
+#PRPs/
 
 .env
 *.log
